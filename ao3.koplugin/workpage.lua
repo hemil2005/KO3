@@ -1,0 +1,441 @@
+--[[--
+The work details screen.
+
+One work as a page rather than a list of key/value lines: identity at the
+top, the two decisions you actually make there (read it, or refresh the
+saved copy), the numbers that tell you what you are getting into, then a
+small table for the decision metadata. The long text — summary and tags —
+is folded away behind section headers so the page stays scannable and the
+work's own words are one tap from reach.
+
+Everything is native KOReader widgets: TextWidget / TextBoxWidget /
+HorizontalGroup / VerticalGroup / LineWidget, the same building blocks the
+rest of the plugin already uses. Nothing here is drawn by hand, so it
+inherits the device's fonts, scaling and e-ink rendering.
+
+The pieces are returned as rows for the plugin's Menu, which supplies
+paging, the title bar and Back. Rows carrying `ao3_static` paint as-is;
+rows carrying `ao3_panel` are selectable (the section headers, the action
+bar) and get the menu's focus underline.
+]]
+
+local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local Font = require("ui/font")
+local FrameContainer = require("ui/widget/container/framecontainer")
+local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
+local InputContainer = require("ui/widget/container/inputcontainer")
+local LeftContainer = require("ui/widget/container/leftcontainer")
+local LineWidget = require("ui/widget/linewidget")
+local Size = require("ui/size")
+local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextWidget = require("ui/widget/textwidget")
+local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
+local _ = require("gettext")
+local T = require("ffi/util").template
+
+local WorkPage = {}
+
+local SECONDARY = Blitbuffer.COLOR_DARK_GRAY
+local RULE = Blitbuffer.COLOR_GRAY_5
+local RULE_H = rawget(Size.line, "thin") or 1
+
+local function hasText(s)
+    return s ~= nil and s ~= ""
+end
+
+local function rule(width)
+    return LineWidget:new{
+        dimen = Geom:new{ w = width, h = RULE_H },
+        background = RULE,
+    }
+end
+
+-- Full-bleed row content: the menu's own rows are inset by this padding, so
+-- static panels use the same inset to keep one left edge down the page.
+function WorkPage.padded(widget)
+    return HorizontalGroup:new{
+        HorizontalSpan:new{ width = Size.padding.fullscreen },
+        widget,
+        HorizontalSpan:new{ width = Size.padding.fullscreen },
+    }
+end
+
+-- A tap target around an already-built widget (buttons are not native
+-- Buttons: an inverted primary needs a white label, which Button does not
+-- expose).
+local function tapArea(widget, width, height, callback)
+    local area = InputContainer:new{
+        dimen = Geom:new{ x = 0, y = 0, w = width, h = height },
+    }
+    area[1] = widget
+    area.ges_events = {
+        Tap = {
+            GestureRange:new{ ges = "tap", range = area.dimen },
+        },
+    }
+    area.onTap = function()
+        callback()
+        return true
+    end
+    return area
+end
+
+-- A full-width button. Primary is a solid black bar with a white label; the
+-- secondary keeps the native outlined look.
+local function button(label, width, height, primary, callback, font_size)
+    local border = primary and 0 or Size.border.button
+    local inner_w = math.max(1, width - 2 * border)
+    local inner_h = math.max(1, height - 2 * border)
+    local label_widget = TextWidget:new{
+        text = label,
+        face = Font:getFace("cfont", font_size),
+        bold = true,
+        fgcolor = primary and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK,
+        max_width = math.max(1, inner_w - 2 * Size.padding.large),
+    }
+    local frame = FrameContainer:new{
+        background = primary and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
+        color = Blitbuffer.COLOR_BLACK,
+        bordersize = border,
+        padding = 0,
+        margin = 0,
+        CenterContainer:new{
+            dimen = Geom:new{ w = inner_w, h = inner_h },
+            label_widget,
+        },
+    }
+    return tapArea(frame, width, height, callback)
+end
+
+-- Title, author, fandoms. The title wraps: AO3 titles are long, and a
+-- truncated title on a details page is worse than no title bar at all.
+function WorkPage.hero(work, width, font_size)
+    local group = VerticalGroup:new{ align = "left" }
+
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = TextBoxWidget:new{
+        text = hasText(work.title) and work.title or _("Untitled"),
+        face = Font:getFace("smallinfofont", font_size + 6),
+        bold = true,
+        width = width,
+        height_adjust = true,
+        alignment = "left",
+    }
+    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+    group[#group + 1] = TextBoxWidget:new{
+        text = T(_("by %1"),
+            hasText(work.authors) and work.authors or _("Anonymous")),
+        face = Font:getFace("smallinfofont", font_size - 4),
+        fgcolor = SECONDARY,
+        width = width,
+        height_adjust = true,
+        alignment = "left",
+    }
+    if hasText(work.fandoms) then
+        group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_default }
+        group[#group + 1] = TextBoxWidget:new{
+            text = work.fandoms,
+            face = Font:getFace("smallinfofont", font_size - 4),
+            fgcolor = SECONDARY,
+            width = width,
+            height_adjust = true,
+            alignment = "left",
+        }
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = rule(width)
+    return group
+end
+
+-- Read is the one thing most people came for, so it gets the solid bar;
+-- Refresh stays outlined and secondary.
+function WorkPage.actions(width, font_size, primary_label, on_read, on_refresh)
+    local gap = Size.span.horizontal_default
+    local height = math.floor(font_size * 2.4 + 0.5)
+    local read_w = math.floor((width - gap) * 0.6)
+    local refresh_w = width - gap - read_w
+
+    local row = HorizontalGroup:new{ align = "center" }
+    row[#row + 1] = button(primary_label, read_w, height, true, on_read, font_size)
+    row[#row + 1] = HorizontalSpan:new{ width = gap }
+    row[#row + 1] = button(_("Refresh"), refresh_w, height, false, on_refresh,
+        font_size - 2)
+
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = row
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    return group
+end
+
+-- Words / chapters / kudos / hits, as a quiet strip. Empty values drop out
+-- instead of leaving a gap.
+function WorkPage.stats(work, width, font_size)
+    local cells = {}
+    local function add(label, value)
+        if hasText(value) then
+            cells[#cells + 1] = { label = label, value = value }
+        end
+    end
+    add(_("Words"), work.words)
+    add(_("Chapters"), work.chapters)
+    add(_("Kudos"), work.kudos)
+    add(_("Hits"), work.hits)
+    if #cells == 0 then return nil end
+
+    local gap = Size.span.horizontal_default
+    local cell_w = math.floor((width - gap * (#cells - 1)) / #cells)
+    local row = HorizontalGroup:new{ align = "top" }
+    for i, cell in ipairs(cells) do
+        if i > 1 then
+            row[#row + 1] = HorizontalSpan:new{ width = gap }
+        end
+        local column = VerticalGroup:new{ align = "left" }
+        column[#column + 1] = TextWidget:new{
+            text = cell.label,
+            face = Font:getFace("smallinfofont", font_size - 8),
+            fgcolor = SECONDARY,
+            max_width = cell_w,
+        }
+        column[#column + 1] = TextWidget:new{
+            text = cell.value,
+            face = Font:getFace("smallinfofont", font_size),
+            bold = true,
+            max_width = cell_w,
+        }
+        row[#row + 1] = LeftContainer:new{
+            dimen = Geom:new{ w = cell_w, h = column:getSize().h },
+            column,
+        }
+    end
+
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = row
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = rule(width)
+    return group
+end
+
+-- The decision metadata, two aligned columns. Values wrap; labels never
+-- push them off the edge.
+function WorkPage.facts(work, width, font_size)
+    local facts = {
+        { _("Rating"), work.rating },
+        { _("Warnings"), work.warnings },
+        { _("Category"), work.category },
+        { _("Status"), work.complete },
+        { _("Updated"), work.updated },
+    }
+    local visible = {}
+    for _, fact in ipairs(facts) do
+        if hasText(fact[2]) then
+            visible[#visible + 1] = fact
+        end
+    end
+    if #visible == 0 then return nil end
+
+    local label_w = math.floor(width * 0.23)
+    local value_w = width - label_w - Size.span.horizontal_default
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    for i, fact in ipairs(visible) do
+        if i > 1 then
+            group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+        end
+        local value = TextBoxWidget:new{
+            text = fact[2],
+            face = Font:getFace("smallinfofont", font_size - 2),
+            width = value_w,
+            height_adjust = true,
+            alignment = "left",
+        }
+        local label = TextWidget:new{
+            text = fact[1],
+            face = Font:getFace("smallinfofont", font_size - 4),
+            fgcolor = SECONDARY,
+            max_width = label_w,
+        }
+        local row = HorizontalGroup:new{ align = "top" }
+        row[#row + 1] = LeftContainer:new{
+            dimen = Geom:new{ w = label_w, h = value:getSize().h },
+            label,
+        }
+        row[#row + 1] = HorizontalSpan:new{ width = Size.span.horizontal_default }
+        row[#row + 1] = LeftContainer:new{
+            dimen = Geom:new{ w = value_w, h = value:getSize().h },
+            value,
+        }
+        group[#group + 1] = row
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    return group
+end
+
+-- Section header for the folded content. The menu's focus underline sits
+-- under it, so it also acts as the rule between sections.
+function WorkPage.section(title, width, font_size, expanded)
+    local label = TextWidget:new{
+        text = title,
+        face = Font:getFace("smallinfofont", font_size),
+        bold = true,
+        max_width = width - 2 * Size.padding.large,
+    }
+    local glyph = TextWidget:new{
+        text = expanded and "-" or "+",
+        face = Font:getFace("cfont", font_size + 2),
+        bold = true,
+        fgcolor = SECONDARY,
+    }
+    local row = HorizontalGroup:new{ align = "center" }
+    row[#row + 1] = label
+    row[#row + 1] = HorizontalSpan:new{
+        width = math.max(0, width - label:getWidth() - glyph:getWidth()),
+    }
+    row[#row + 1] = glyph
+
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.small }
+    group[#group + 1] = row
+    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+    return group
+end
+
+-- Text body for the folded sections. Bounded: a Menu row taller than a page
+-- is clipped (the menu pages by item, it does not scroll inside one), so a
+-- long body is elided and the caller offers the full text in TextViewer.
+-- Returns the widget and whether anything was cut off.
+function WorkPage.body(text, width, font_size, max_height)
+    local box = TextBoxWidget:new{
+        text = text,
+        face = Font:getFace("smallinfofont", font_size - 2),
+        width = width,
+        height = max_height,
+        height_adjust = true,
+        height_overflow_show_ellipsis = true,
+        alignment = "left",
+        line_height = 0.15,
+    }
+    local clamped = box.lines_per_page
+        and #box.vertical_string_list > box.lines_per_page
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = box
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    return group, clamped
+end
+
+-- Build the rows the menu will page through. `state` holds which sections
+-- are open, so the caller can rebuild after a toggle without losing it.
+function WorkPage.build(o)
+    local work = o.work
+    local width = o.width
+    local font_size = o.font_size
+    local rows = {}
+
+    rows[#rows + 1] = {
+        ao3_static = WorkPage.padded(WorkPage.hero(work, width, font_size)),
+        role = "hero",
+    }
+
+    local primary_label = o.cached and _("Open saved copy") or _("Read")
+    rows[#rows + 1] = {
+        ao3_panel = WorkPage.actions(width, font_size, primary_label,
+            o.on_read, o.on_refresh),
+        action = o.on_read,
+        refresh = o.on_refresh,
+        read_label = primary_label,
+        role = "actions",
+        -- No resting underline between the hero and the numbers; the line
+        -- only appears when this row has focus.
+        line_color = Blitbuffer.COLOR_WHITE,
+    }
+
+    local stats = WorkPage.stats(work, width, font_size)
+    if stats then
+        rows[#rows + 1] = { ao3_static = WorkPage.padded(stats), role = "stats" }
+    end
+
+    local facts = WorkPage.facts(work, width, font_size)
+    if facts then
+        rows[#rows + 1] = { ao3_static = WorkPage.padded(facts), role = "facts" }
+    end
+
+    if hasText(work.summary) then
+        rows[#rows + 1] = {
+            ao3_panel = WorkPage.section(_("Summary"), width, font_size,
+                o.state.summary),
+            action = function() o.on_toggle("summary") end,
+            label = _("Summary"),
+            role = "summary",
+        }
+        if o.state.summary then
+            local body, clamped = WorkPage.body(
+                work.summary, width, font_size, o.body_max_height)
+            rows[#rows + 1] = {
+                ao3_static = WorkPage.padded(body),
+                role = "summary_body",
+            }
+            if clamped then
+                rows[#rows + 1] = {
+                    text = _("Read full summary"),
+                    mandatory = _("Opens the full text"),
+                    action = function() o.on_full_text(_("Summary"), work.summary) end,
+                    role = "summary_more",
+                }
+            end
+        end
+    end
+
+    if hasText(work.tags) then
+        local tag_count = select(2, work.tags:gsub(",", "")) + 1
+        local tags_label = T(_("Tags · %1"), tag_count)
+        rows[#rows + 1] = {
+            ao3_panel = WorkPage.section(
+                tags_label, width, font_size, o.state.tags),
+            action = function() o.on_toggle("tags") end,
+            label = tags_label,
+            role = "tags",
+        }
+        if o.state.tags then
+            local body, clamped = WorkPage.body(
+                (work.tags:gsub(",%s*", "  ·  ")), width, font_size,
+                o.body_max_height)
+            rows[#rows + 1] = {
+                ao3_static = WorkPage.padded(body),
+                role = "tags_body",
+            }
+            if clamped then
+                rows[#rows + 1] = {
+                    text = _("Read all tags"),
+                    mandatory = _("Opens the full list"),
+                    action = function() o.on_full_text(_("Tags"), work.tags) end,
+                    role = "tags_more",
+                }
+            end
+        end
+    end
+
+    -- Authors are the only navigation off this page, so they stay as native
+    -- menu rows at the bottom, after the content they describe.
+    local names, urls = work.author_names or {}, work.author_urls or {}
+    if #names > 0 and #names == #urls then
+        for i = 1, #names do
+            local name, url = names[i], urls[i]
+            rows[#rows + 1] = {
+                text = name,
+                mandatory = _("Author page"),
+                action = function() o.on_author(name, url) end,
+                role = "author",
+            }
+        end
+    end
+
+    return rows
+end
+
+return WorkPage

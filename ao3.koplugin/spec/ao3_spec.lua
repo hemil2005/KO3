@@ -768,11 +768,11 @@ describe("AO3 browser", function()
         end)
 
         it("puts Read on the first page of a work", function()
-            local UIManager = require("ui/uimanager")
-            local old_show = UIManager.show
-            local shown
-            UIManager.show = function(_, widget) shown = widget end
-
+            local menu = open_home()
+            local calls = {}
+            plugin.readWork = function(_, id, title, refresh)
+                calls[#calls + 1] = { id = id, title = title, refresh = refresh }
+            end
             local ok, err = pcall(function()
                 plugin:showWork({
                     id = "1",
@@ -781,20 +781,20 @@ describe("AO3 browser", function()
                     summary = "A summary.",
                 })
             end)
-
-            UIManager.show = old_show
             assert.is_true(ok, err)
-            assert.is_truthy(shown)
-            assert.are.equal("Read", shown.kv_pairs[1][1])
-            assert.are.equal("Refresh", shown.kv_pairs[2][1])
-            assert.are.equal("Summary", shown.kv_pairs[4][1])
+            assert.is_truthy(menu.item_table[1].ao3_static)
+            local actions = menu.item_table[2]
+            assert.are.equal("actions", actions.role)
+            assert.is_truthy(actions.ao3_panel)
+            actions.action()
+            plugin.readWork = nil
+            assert.are.equal(1, #calls)
+            assert.are.equal("1", calls[1].id)
+            assert.are.equal("Test Work", calls[1].title)
         end)
 
-        it("keeps the decision fields up front and omits empty metadata", function()
-            local UIManager = require("ui/uimanager")
-            local old_show = UIManager.show
-            local shown
-            UIManager.show = function(_, widget) shown = widget end
+        it("keeps the decision fields above the fold and omits empty ones", function()
+            local menu = open_home()
             local ok, err = pcall(function()
                 plugin:showWork({
                     id = "9920", title = "A work", authors = "A writer",
@@ -802,14 +802,105 @@ describe("AO3 browser", function()
                     complete = "Complete", tags = "friendship", words = "1200",
                 })
             end)
-            UIManager.show = old_show
             assert.is_true(ok, err)
-            local names = {}
-            for _, row in ipairs(shown.kv_pairs) do
-                if type(row) == "table" then names[#names + 1] = row[1] end
+            local roles = {}
+            for _, row in ipairs(menu.item_table) do
+                roles[#roles + 1] = row.role
             end
-            assert.are.same({ "Read", "Refresh", "Summary", "Rating", "Warnings",
-                "Status", "Author", "Tags", "Words" }, names)
+            assert.are.same({ "hero", "actions", "stats", "facts",
+                "summary", "tags" }, roles)
+
+            -- A work with nothing but a title still gets the hero and the
+            -- actions; empty metadata rows are not invented.
+            plugin:showWork({ id = "9922", title = "Bare", authors = "A" })
+            local bare = {}
+            for _, row in ipairs(menu.item_table) do
+                bare[#bare + 1] = row.role
+            end
+            assert.are.same({ "hero", "actions" }, bare)
+        end)
+
+        it("folds summary and tags away, and expands in place", function()
+            local menu = open_home()
+            plugin:showWork({
+                id = "7000", title = "Folded", authors = "A",
+                summary = "The long summary.",
+                tags = "friendship, fix-it, slow burn",
+            })
+            local function roles()
+                local out = {}
+                for _, row in ipairs(menu.item_table) do
+                    out[#out + 1] = row.role
+                end
+                return out
+            end
+            local function row_with(role)
+                for _, row in ipairs(menu.item_table) do
+                    if row.role == role then return row end
+                end
+            end
+
+            assert.are.same({ "hero", "actions", "summary", "tags" }, roles())
+
+            -- Expanding replaces the current page instead of pushing a new
+            -- one, so Back still returns to the listing that opened the work.
+            local depth = #menu.item_table_stack
+            row_with("summary").action()
+            assert.are.equal(depth, #menu.item_table_stack)
+            assert.are.same({ "hero", "actions", "summary", "summary_body",
+                "tags" }, roles())
+
+            row_with("summary").action()
+            assert.are.same({ "hero", "actions", "summary", "tags" }, roles())
+
+            row_with("tags").action()
+            assert.are.same({ "hero", "actions", "summary", "tags",
+                "tags_body" }, roles())
+        end)
+
+        it("counts the tags in the folded section header", function()
+            local menu = open_home()
+            plugin:showWork({
+                id = "7001", title = "Tagged", authors = "A",
+                tags = "friendship, fix-it, slow burn",
+            })
+            local tags_row
+            for _, row in ipairs(menu.item_table) do
+                if row.role == "tags" then tags_row = row end
+            end
+            assert.is_truthy(tags_row)
+            assert.are.equal("Tags · 3", tags_row.label)
+        end)
+
+        it("bounds a long summary and offers the full text", function()
+            local menu = open_home()
+            local function expand(work)
+                plugin:showWork(work)
+                for _, row in ipairs(menu.item_table) do
+                    if row.role == "summary" then row.action() break end
+                end
+                local more
+                for _, row in ipairs(menu.item_table) do
+                    if row.role == "summary_more" then more = row end
+                end
+                return more
+            end
+
+            local paragraphs = {}
+            for i = 1, 60 do
+                paragraphs[#paragraphs + 1] = "Paragraph " .. i
+                    .. " with enough words in it to wrap across the page width."
+            end
+            assert.is_truthy(expand({
+                id = "7002", title = "Long", authors = "A",
+                summary = table.concat(paragraphs, " "),
+            }))
+
+            -- A short summary displays in full, with no extra control.
+            assert.is_nil(expand({
+                id = "7003", title = "Short", authors = "A",
+                summary = "One short paragraph.",
+            }))
         end)
 
         it("opens an author page on the dashboard tab", function()
@@ -882,11 +973,7 @@ describe("AO3 browser", function()
         end)
 
         it("opens an author page from the work screen", function()
-            local UIManager = require("ui/uimanager")
-            local old_show, old_close = UIManager.show, UIManager.close
-            local shown
-            UIManager.show = function(_, widget) shown = widget end
-            UIManager.close = function() end
+            local menu = open_home()
             local opened_name, opened_profile
             plugin.showAuthor = function(_, name, profile)
                 opened_name, opened_profile = name, profile
@@ -899,17 +986,17 @@ describe("AO3 browser", function()
                     author_urls = { "/users/a/pseuds/A_Writer", "/users/b/pseuds/B_Writer" },
                 })
                 local author_rows = {}
-                for _, row in ipairs(shown.kv_pairs) do
-                    if type(row) == "table" and row[1] == "Author" then
+                for _, row in ipairs(menu.item_table) do
+                    if row.role == "author" then
                         author_rows[#author_rows + 1] = row
                     end
                 end
                 assert.are.equal(2, #author_rows)
-                assert.are.equal("A Writer", author_rows[1][2])
-                assert.are.equal("B Writer", author_rows[2][2])
-                author_rows[1].callback({})
+                assert.are.equal("A Writer", author_rows[1].text)
+                assert.are.equal("B Writer", author_rows[2].text)
+                assert.are.equal("Author page", author_rows[1].mandatory)
+                author_rows[1].action()
             end)
-            UIManager.show, UIManager.close = old_show, old_close
             plugin.showAuthor = nil
             assert.is_true(ok, err)
             assert.are.equal("A Writer", opened_name)
@@ -917,24 +1004,14 @@ describe("AO3 browser", function()
         end)
 
         it("keeps an anonymous author as plain text", function()
-            local UIManager = require("ui/uimanager")
-            local old_show = UIManager.show
-            local shown
-            UIManager.show = function(_, widget) shown = widget end
+            local menu = open_home()
             local ok, err = pcall(function()
                 plugin:showWork({ id = "9931", title = "A work", authors = "Anonymous" })
             end)
-            UIManager.show = old_show
             assert.is_true(ok, err)
-            local author_row
-            for _, row in ipairs(shown.kv_pairs) do
-                if type(row) == "table" and row[1] == "Author" then
-                    author_row = row
-                    break
-                end
+            for _, row in ipairs(menu.item_table) do
+                assert.are_not.equal("author", row.role)
             end
-            assert.are.equal("Anonymous", author_row[2])
-            assert.is_nil(author_row.callback)
         end)
 
         it("browses works by a typed author from home", function()
@@ -974,16 +1051,12 @@ describe("AO3 browser", function()
             local file = assert(io.open(dir .. "/Available [9921].html", "wb"))
             file:write("offline")
             file:close()
-            local UIManager = require("ui/uimanager")
-            local old_show = UIManager.show
-            local shown
-            UIManager.show = function(_, widget) shown = widget end
+            local menu = open_home()
             local ok, err = pcall(function()
                 plugin:showWork({ id = "9921", title = "Available" })
             end)
-            UIManager.show = old_show
             assert.is_true(ok, err)
-            assert.are.equal("Open saved copy", shown.kv_pairs[1][2])
+            assert.are.equal("Open saved copy", menu.item_table[2].read_label)
         end)
 
         it("does not delete the offline copy before Refresh downloads", function()
@@ -993,12 +1066,9 @@ describe("AO3 browser", function()
             file:write("offline")
             file:close()
 
-            local UIManager = require("ui/uimanager")
-            local old_show, old_close = UIManager.show, UIManager.close
+            local menu = open_home()
             local old_read = plugin.readWork
-            local shown, present_during_download
-            UIManager.show = function(_, widget) shown = widget end
-            UIManager.close = function() end
+            local present_during_download
             plugin.readWork = function(_, id, title, refresh)
                 local existing = io.open(cached, "rb")
                 present_during_download = existing ~= nil
@@ -1008,10 +1078,9 @@ describe("AO3 browser", function()
             end
             local ok, err = pcall(function()
                 plugin:showWork({ id = "9903", title = "Keep me" })
-                shown.kv_pairs[2].callback(shown)
+                menu.item_table[2].refresh()
             end)
             plugin.readWork = old_read
-            UIManager.show, UIManager.close = old_show, old_close
             assert.is_true(ok, err)
             assert.is_true(present_during_download)
         end)

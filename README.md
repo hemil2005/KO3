@@ -30,7 +30,8 @@ details captured from a live work.
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
 | ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
 | ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/14-update-home.png) |
-| ![Update prompt](screenshots/15-update-dialog.png) | |
+| ![Update prompt](screenshots/15-update-dialog.png) | ![Work summary expanded](screenshots/18-work-summary.png) |
+| ![Work tags expanded](screenshots/19-work-tags.png) | |
 
 ## Install
 
@@ -53,6 +54,7 @@ koreader/
       main.lua
       updater.lua
       authorpage.lua
+      workpage.lua
       fandompages.lua
       data/fandoms/index.lua
       data/fandoms/<category>/<letter>.tsv.z
@@ -84,10 +86,14 @@ selectable card with title, author and up to three lines of summary. On the
 AO3 screens, the letter shortcut boxes are hidden so the text gets the full
 touchscreen width.
 
-Tap a result to drill in; tap a work for its tags, summary and stats; tap
-**Read** to fetch it and open it in the KOReader reader. On the work
-screen each author's name opens the author page (co-authors each get a
-row; Anonymous stays plain text).
+Tap a result to drill in; tap a work for its details. The work screen leads
+with the title, author and fandom, then **Read** (the solid bar, which
+fetches the work and opens it in the KOReader reader) and **Refresh** (the
+outlined one), a four-number strip (words, chapters, kudos, hits) and a small
+table for rating, warnings, category, status and date. **Summary** and
+**Tags** stay folded until tapped; a summary too long for one page is elided
+and opens in full from **Read full summary**. Each author's name opens the
+author page (co-authors each get a row; Anonymous stays plain text).
 
 The author page has four tabs in a horizontal strip:
 
@@ -183,6 +189,11 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   page with the count and working page navigation.
 - Work lists render a single selectable title/author/three-line summary card
   per work, without separate shortcut or description rows.
+- The work screen is one page, not a key/value list: title/author/fandom,
+  Read and Refresh, a four-number strip, an aligned metadata table, and
+  folded Summary and Tags sections. A summary longer than a page is elided
+  and opens in full; expanding lands on the text it revealed. Captured in
+  `screenshots/07` and `18`–`19`.
 - The author page (Dashboard / Works / Series / Bookmarks) is built from the
   exact live AO3 markup captured on 2026-11-23, including author-scoped
   fandom links, series stats, work bookmarks and series bookmarks; the four
@@ -193,9 +204,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row and prompt render in the emulator
   (`screenshots/14`–`15`).
-- The offline `busted` suite: 124 tests passing across parser, navigation,
+- The offline `busted` suite: 127 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
-  author-page and updater tests.
+  author-page, work-page and updater tests.
 
 **Current connectivity:** AO3 refused the emulator's listing request with
 `403`; independent Windows and WSL `curl` requests received `429` on this

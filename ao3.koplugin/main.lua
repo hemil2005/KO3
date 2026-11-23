@@ -11,6 +11,7 @@ No login, no kudos/comments, no images, no WebView.
 local Blitbuffer = require("ffi/blitbuffer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
+local Screen = require("device").screen
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -20,12 +21,12 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
-local KeyValuePage = require("ui/widget/keyvaluepage")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Menu = require("ui/widget/menu")
 local NetworkMgr = require("ui/network/manager")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextViewer = require("ui/widget/textviewer")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local UnderlineContainer = require("ui/widget/container/underlinecontainer")
@@ -237,6 +238,7 @@ end
 
 local MAIN_SOURCE = debug.getinfo(1, "S").source:sub(2)
 local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
+local WorkPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "workpage.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
 
 -- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
@@ -532,7 +534,11 @@ function Ao3MenuItem:init()
     self.ao3_metrics = metrics
 
     local content
-    if self.entry.ao3_work then
+    if self.entry.ao3_panel then
+        -- A built panel (work page sections and actions). It carries its own
+        -- spacing; the menu only supplies the focus underline.
+        content = self.entry.ao3_panel
+    elseif self.entry.ao3_work then
         content = self:buildCard(metrics)
     else
         content = self:buildCompact(metrics)
@@ -544,7 +550,7 @@ function Ao3MenuItem:init()
     -- Cards keep the title at a consistent top edge. Compact rows stay
     -- left-aligned like native menu rows and centre vertically.
     local content_holder
-    if self.entry.ao3_work then
+    if self.entry.ao3_work or self.entry.ao3_panel then
         content_holder = WidgetContainer:new{
             dimen = content_dimen:copy(),
             content,
@@ -556,7 +562,7 @@ function Ao3MenuItem:init()
         }
     end
     self._underline_container = UnderlineContainer:new{
-        color = self.line_color,
+        color = self.entry.line_color or self.line_color,
         linesize = self.linesize,
         -- Older releases have no Size.line.focus_row, and debug builds raise
         -- on unknown Size.line keys; rawget keeps both cases safe.
@@ -636,7 +642,7 @@ function Ao3MenuItem:onFocus()
 end
 
 function Ao3MenuItem:onUnfocus()
-    self._underline_container.color = self.line_color
+    self._underline_container.color = self.entry.line_color or self.line_color
     self._underline_container.focused = false
     return true
 end
@@ -674,6 +680,13 @@ function Ao3WorkMenu:setupItemHeights()
         if item.ao3_tabs then
             -- The author tab strip is a row of its own above the content.
             item.height = item.ao3_tabs:getSize().h + Size.span.vertical_default
+        elseif item.ao3_static then
+            -- A prebuilt, non-selectable block (hero, stats, folded text).
+            item.height = item.ao3_static:getSize().h
+        elseif item.ao3_panel then
+            -- A selectable block (action bar, section header); the extra
+            -- line is the focus underline.
+            item.height = item.ao3_panel:getSize().h + self.linesize
         elseif item.ao3_work then
             item.height = item.summary and metrics.card_h or metrics.card_no_summary_h
         else
@@ -741,6 +754,10 @@ function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
                     h = item.height or strip:getSize().h,
                 }
                 table.insert(self.item_group, strip)
+            elseif item.ao3_static then
+                -- Static page content (hero, stats, folded text): painted,
+                -- never focused.
+                table.insert(self.item_group, item.ao3_static)
             else
                 local item_tmp = Ao3MenuItem:new{
                     idx = index,
@@ -981,77 +998,77 @@ function Ao3:showAuthorRows(tab_id, data, replace)
 end
 
 function Ao3:showWork(work)
-    local cached = findCachedWork(getDownloadDir(), work.id)
-    local rows = {
-        {
-            _("Read"),
-            cached and _("Open saved copy") or _("Fetch and open"),
-            callback = function(kv_page)
-                UIManager:close(kv_page)
-                self:readWork(work.id, work.title)
-            end,
-        },
-        {
-            _("Refresh"),
-            _("Download the latest version"),
-            callback = function(kv_page)
-                UIManager:close(kv_page)
-                self:readWork(work.id, work.title, true)
-            end,
-        },
-        "----------------------------",
+    self:showWorkPage(work, false)
+end
+
+-- Folded sections are rebuilt in place: the page keeps its position on the
+-- navigation stack, so Back still returns to the listing that opened it.
+-- `focus` names the section that was just toggled, so the page lands on the
+-- text that appeared (or on the header that hid it).
+function Ao3:showWorkPage(work, replace, focus)
+    local state = self.work_state
+    if not state or state.id ~= work.id then
+        state = { id = work.id, summary = false, tags = false }
+        self.work_state = state
+    end
+
+    local font_size = (self.menu and self.menu.font_size) or 20
+    local width = Screen:getWidth() - 2 * Size.padding.fullscreen
+    local rows = WorkPage.build{
+        work = work,
+        width = width,
+        font_size = font_size,
+        -- A menu row taller than a page is clipped, so the folded text is
+        -- bounded and the remainder opens in a scrollable TextViewer.
+        body_max_height = math.floor(Screen:getHeight() * 0.44),
+        cached = findCachedWork(getDownloadDir(), work.id),
+        state = state,
+        on_read = function() self:readWork(work.id, work.title) end,
+        on_refresh = function() self:readWork(work.id, work.title, true) end,
+        on_toggle = function(section)
+            state[section] = not state[section]
+            self:showWorkPage(work, true, section)
+        end,
+        on_full_text = function(title, text)
+            UIManager:show(TextViewer:new{ title = title, text = text })
+        end,
+        on_author = function(name, url) self:showAuthor(name, url) end,
     }
-    local details_top = {
-        { _("Summary"), work.summary },
-        { _("Rating"), work.rating },
-        { _("Warnings"), work.warnings },
-        { _("Status"), work.complete },
-    }
-    local details_rest = {
-        { _("Fandom"), work.fandoms },
-        { _("Category"), work.category },
-        { _("Tags"), work.tags },
-        { _("Words"), work.words },
-        { _("Chapters"), work.chapters },
-        { _("Updated"), work.updated },
-        { _("Kudos"), work.kudos },
-        { _("Hits"), work.hits },
-    }
-    local function add_details(list)
-        for _, detail in ipairs(list) do
-            if detail[2] and detail[2] ~= "" then
-                rows[#rows + 1] = detail
+
+    local title = _("Work details")
+    if replace then
+        -- Prefer the body that just appeared; fall back to its header.
+        local anchor = 1
+        if focus then
+            for i, row in ipairs(rows) do
+                if row.role == focus then anchor = i end
+                if row.role == focus .. "_body" then anchor = i end
             end
         end
-    end
-    add_details(details_top)
-
-    -- Author rows are tappable when the listing carried the author's own
-    -- page; Anonymous works, or a name/URL mismatch, stay plain text.
-    local names, urls = work.author_names or {}, work.author_urls or {}
-    if #names > 0 and #names == #urls then
-        for i = 1, #names do
-            local name, url = names[i], urls[i]
-            rows[#rows + 1] = {
-                _("Author"), name,
-                callback = function(kv_page)
-                    UIManager:close(kv_page)
-                    self:showAuthor(name, url)
-                end,
-            }
+        self:replaceRows(title, rows, anchor)
+        -- switchItemTable picks the page from the previous table's layout;
+        -- with the new layout in place, follow the anchor to its real page.
+        local menu = self.menu
+        if menu and menu.page_items then
+            for page, items in ipairs(menu.page_items) do
+                local found = false
+                for _, index in ipairs(items) do
+                    if index == anchor then
+                        found = true
+                        break
+                    end
+                end
+                if found then
+                    if menu.page ~= page then
+                        menu:onGotoPage(page)
+                    end
+                    break
+                end
+            end
         end
-    elseif work.authors and work.authors ~= "" then
-        rows[#rows + 1] = { _("Author"), work.authors }
+    else
+        self:pushRows(title, rows)
     end
-
-    add_details(details_rest)
-
-    -- Sits on top of the list; closing it drops the reader back on the
-    -- results instead of the file manager.
-    UIManager:show(KeyValuePage:new{
-        title = work.title,
-        kv_pairs = rows,
-    })
 end
 
 -- ---------------------------------------------------------------------------
@@ -1284,10 +1301,10 @@ end
 
 -- Paging inside a listing or a long letter must not retain each previous
 -- window's item table on Menu's navigation stack.
-function Ao3:replaceRows(title, rows)
+function Ao3:replaceRows(title, rows, itemnumber)
     local menu = self.menu
     if not menu then return end
-    menu:switchItemTable(title, rows, 1)
+    menu:switchItemTable(title, rows, itemnumber or 1)
     menu.ao3_title = title
 end
 
