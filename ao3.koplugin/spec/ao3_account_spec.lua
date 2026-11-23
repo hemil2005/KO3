@@ -49,9 +49,25 @@ local function remove_tree(path)
     end
 end
 
+local function text_in(widget, needle)
+    if type(widget) == "string" then return widget:find(needle, 1, true) ~= nil end
+    if type(widget) ~= "table" then return false end
+    if type(widget.text) == "string" and widget.text:find(needle, 1, true) then
+        return true
+    end
+    for _, child in ipairs(widget) do
+        if text_in(child, needle) then return true end
+    end
+    return false
+end
+
 local function has_row(rows, needle)
     for _, row in ipairs(rows) do
         if (row.text or ""):find(needle, 1, true) then return true end
+        for _, tile in ipairs(row.tiles or {}) do
+            if (tile.text or ""):find(needle, 1, true) then return true end
+        end
+        if row.ao3_static and text_in(row.ao3_static, needle) then return true end
     end
     return false
 end
@@ -503,7 +519,8 @@ describe("AO3 account", function()
         it("shows the account name when signed in", function()
             plugin.session = { username = "testuser", cookies = { _otwarchive_session = "x" } }
             local rows = plugin:homeRows()
-            assert.is_true(has_row(rows, "Signed in as testuser"))
+            assert.is_true(has_row(rows, "testuser"))
+            assert.is_true(has_row(rows, "Bookmarks, marked for later, history, subscriptions"))
             assert.is_false(has_row(rows, "Sign in"))
             plugin.session = nil
         end)

@@ -1,0 +1,92 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, e.g. v1.0.1 (must match _meta.lua)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    name: Build plugin zip and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version and tag
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.version }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          case "$tag" in
+            v*) ;;
+            *) tag="v$tag" ;;
+          esac
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Publishing $tag (version $version)"
+
+      - name: _meta.lua version must match the tag
+        run: |
+          meta=$(sed -n 's/.*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' ao3.koplugin/_meta.lua)
+          if [ "$meta" != "${{ steps.v.outputs.version }}" ]; then
+            echo "::error::_meta.lua says '$meta' but the tag says '${{ steps.v.outputs.version }}'"
+            exit 1
+          fi
+
+      - name: Build plugin zip and manifest.json
+        run: |
+          set -eu
+          version="${{ steps.v.outputs.version }}"
+          zip_name="ao3.koplugin-${version}.zip"
+          mkdir -p dist
+          # Zip the folder itself so the archive contains ao3.koplugin/...;
+          # the updater and a manual `unzip` into plugins/ both rely on it.
+          # The version in the asset name keeps a cached old manifest pointing
+          # at an immutable old zip instead of a replaced one.
+          zip -q -r "dist/${zip_name}" ao3.koplugin \
+            -x 'ao3.koplugin/spec/*' \
+            -x '*/.DS_Store' \
+            -x '*.zip'
+          unzip -l "dist/${zip_name}" | grep -q 'ao3.koplugin/main.lua'
+          unzip -l "dist/${zip_name}" | grep -q 'ao3.koplugin/updater.lua'
+          if unzip -l "dist/${zip_name}" | grep -q 'ao3.koplugin/spec/'; then
+            echo "::error::release zip contains tests"
+            exit 1
+          fi
+          sha=$(sha256sum "dist/${zip_name}" | awk '{print $1}')
+          notes=$(git log -1 --pretty=%s | sed 's/\\/\\\\/g; s/"/\\"/g')
+          cat > dist/manifest.json <<EOF
+          {
+            "version": "$version",
+            "zip_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.v.outputs.tag }}/${zip_name}",
+            "sha256": "$sha",
+            "notes": "$notes",
+            "published_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          test -s "dist/${zip_name}"
+          test -s dist/manifest.json
+          echo "zip: $(stat -c%s "dist/${zip_name}") bytes, sha256: $sha"
+          cat dist/manifest.json
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          name: ${{ steps.v.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/ao3.koplugin-${{ steps.v.outputs.version }}.zip
+            dist/manifest.json

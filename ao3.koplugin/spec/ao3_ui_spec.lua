@@ -287,12 +287,31 @@ describe("AO3 work-list cards", function()
         local old_show = UIManager.show
         UIManager.show = function() end
         plugin:showHome()
+        plugin:showWork({
+            id = "1", title = "Work", authors = "A Writer",
+            author_names = { "A Writer" }, author_urls = { "/users/a" },
+        })
         UIManager.show = old_show
 
         local menu = plugin.menu
-        local row = menu.item_group[2] -- "Latest works" + "Newest on AO3"
-        assert.are.equal("Latest works", row.entry.text)
-        assert.are.equal("Newest on AO3", row.mandatory_widget.text)
+        local item
+        for _, row in ipairs(menu.item_table) do
+            if row.role == "author" then
+                item = row
+                break
+            end
+        end
+        assert.is_truthy(item)
+        local row
+        for _, widget in ipairs(menu.item_group) do
+            if widget.entry == item then
+                row = widget
+                break
+            end
+        end
+        assert.is_truthy(row)
+        assert.are.equal("A Writer", row.entry.text)
+        assert.are.equal("Author page", row.mandatory_widget.text)
         assert.are.equal(row.content_width, row.content_group:getSize().w)
     end)
 
@@ -344,5 +363,267 @@ describe("AO3 work-list cards", function()
         for _, child in ipairs(card.content_group) do
             assert.is_nil(child.is_line_widget)
         end
+    end)
+end)
+
+describe("AO3 fandom index", function()
+    local plugin
+
+    -- The shipped letter files are not needed to test the presentation: the
+    -- paging source is stubbed, so only the index and its rows are built.
+    local function open_letter(names, letter)
+        plugin.loadFandomLetter = function(_, _, _, offset)
+            local rows = {}
+            for i, name in ipairs(names) do
+                rows[i] = { text = name, mandatory = tostring(i), ao3_fandom = true }
+            end
+            return rows, {
+                entries = rows,
+                total = #names,
+                offset = offset or 0,
+                page_size = 100,
+            }
+        end
+        plugin.menu = nil
+        local old_show = UIManager.show
+        UIManager.show = function() end
+        local menu = plugin:ensureMenu()
+        plugin.menu = menu
+        plugin:showFandomLetterPage({
+            index = 1,
+            name = "Test Media",
+            letters = { "A", "B", "#" },
+        }, letter or "A", 0, false)
+        UIManager.show = old_show
+        return menu
+    end
+
+    before_each(function()
+        plugin = setmetatable({}, { __index = Ao3 })
+    end)
+
+    after_each(function()
+        plugin.menu = nil
+    end)
+
+    it("opens a category straight into its letter index, not a page of letters", function()
+        local opened
+        plugin.showFandomLetterPage = function(_, category, letter, offset, replace)
+            opened = { category = category, letter = letter, offset = offset, replace = replace }
+        end
+        local rows = plugin:fandomRows({
+            { index = 1, name = "Test Media", count = 5, letters = { "C", "D" } },
+        })
+        rows[2].action()
+        assert.are.equal("Test Media", opened.category.name)
+        assert.are.equal("C", opened.letter)
+        assert.are.equal(0, opened.offset)
+        assert.is_false(opened.replace)
+    end)
+
+    it("lays the whole alphabet out as one index with the open letter inverted", function()
+        local letters = {}
+        for i = string.byte("A"), string.byte("Z") do
+            letters[#letters + 1] = string.char(i)
+        end
+        letters[#letters + 1] = "#"
+
+        local picked
+        local strip = plugin:fandomLetterIndex({ letters = letters }, "C", 600,
+            function(letter) picked = letter end)
+        assert.is_truthy(strip)
+        -- Air above and below, and three shelves of nine.
+        assert.are.equal(5, #strip)
+        for shelf = 2, 4 do
+            assert.are.equal(11, #strip[shelf])
+        end
+
+        local open_cell = strip[2][4]
+        assert.are.equal("C", open_cell[1][1][1].text)
+        assert.are.same(Blitbuffer.COLOR_BLACK, open_cell[1].background)
+        assert.are.same(Blitbuffer.COLOR_WHITE, strip[2][2][1].background)
+        assert.are.same(Blitbuffer.COLOR_WHITE, strip[3][2][1].background)
+
+        strip[3][4].onTap()
+        assert.are.equal("L", picked)
+    end)
+
+    it("pins the letter index above every page of a letter", function()
+        local names = {}
+        for i = 1, 40 do
+            names[i] = "Fandom " .. i
+        end
+        local menu = open_letter(names, "B")
+        local strip = menu.item_table[1].ao3_tabs
+        assert.is_truthy(strip)
+        assert.is_true(menu.item_table[1].ao3_sticky)
+        assert.are.equal(strip, menu.item_group[1])
+        -- The strip is the open letter's marker, not a paged row.
+        assert.are.equal("Find in this letter…", menu.item_table[2].text)
+        for _, indices in ipairs(menu.page_items) do
+            for _, index in ipairs(indices) do
+                assert.are_not.equal(1, index)
+            end
+        end
+
+        assert.is_true(#menu.page_items > 1)
+        menu:onNextPage()
+        assert.are.equal(strip, menu.item_group[1])
+        -- Page two starts on a record, not on the search row.
+        local first_row = menu.item_group[2]
+        assert.is_truthy(first_row.entry)
+        assert.is_truthy(first_row.entry.text:match("^Fandom %d+$"))
+    end)
+
+    it("gives a long fandom name two lines and then an ellipsis", function()
+        local menu = open_letter({
+            "Short Fandom",
+            string.rep("word ", 80),
+        }, "A")
+
+        -- Strip, search row, then the two records.
+        local single = menu.item_table[3]
+        local double = menu.item_table[4]
+        assert.are.equal("Short Fandom", single.text)
+        assert.is_true(double.height > single.height)
+
+        local row = menu.item_group[4]
+        assert.is_truthy(row.fandom_name_widget)
+        assert.is_true(row.fandom_name_widget.height <= 2 * row.fandom_name_widget.line_height_px)
+        assert.is_truthy(row.fandom_name_widget.line_with_ellipsis)
+        assert.are.equal("2", row.fandom_count_widget.text)
+    end)
+end)
+
+
+-- Work actions and the account screen are built by their own modules, so they
+-- are exercised as widgets: labels, tap targets and the marks that say a
+-- state is already on.
+local WorkPage = dofile("plugins/ao3.koplugin/workpage.lua")
+local AccountPage = dofile("plugins/ao3.koplugin/accountpage.lua")
+
+local function walk(widget, visit)
+    visit(widget)
+    for _, child in ipairs(widget) do
+        walk(child, visit)
+    end
+end
+
+local function tappables(widget)
+    local out = {}
+    walk(widget, function(node)
+        if node.onTap then out[#out + 1] = node end
+    end)
+    return out
+end
+
+describe("AO3 work actions", function()
+    it("lays kudos, bookmark, subscribe and mark for later out in one grid", function()
+        local panel = WorkPage.social(570, 19, {}, true, function() end)
+        local labels = {}
+        for _, area in ipairs(tappables(panel)) do
+            local label
+            walk(area, function(node)
+                if not label and node.text then label = node.text end
+            end)
+            labels[#labels + 1] = label
+        end
+        assert.are.same({ "Kudos", "Bookmark", "Subscribe", "Mark for later" },
+            labels)
+    end)
+
+    it("reports the action id when a button is tapped", function()
+        local tapped = {}
+        local panel = WorkPage.social(570, 19, {}, true, function(id)
+            tapped[#tapped + 1] = id
+        end)
+        for _, area in ipairs(tappables(panel)) do
+            area.onTap()
+        end
+        assert.are.same({ "kudos", "bookmark", "subscribe", "later" }, tapped)
+    end)
+
+    it("marks an action that is already on with KOReader's checkmark", function()
+        local panel = WorkPage.social(570, 19, { kudos = true }, true,
+            function() end)
+        local marked
+        walk(panel, function(node)
+            if node.text and node.text:find("✓", 1, true) then
+                marked = node.text
+            end
+        end)
+        assert.are.equal("Kudos  ✓", marked)
+    end)
+
+    it("keeps the buttons in full contrast for a signed-out reader", function()
+        local panel = WorkPage.social(570, 19, {}, false, function() end)
+        assert.are.equal(4, #tappables(panel))
+        local hint
+        walk(panel, function(node)
+            if node.text and node.text:find("Sign in", 1, true) then
+                hint = node.text
+            end
+        end)
+        assert.are.equal("Sign in to your AO3 account to use these.", hint)
+    end)
+end)
+
+describe("AO3 account screen", function()
+    local function build(callbacks)
+        callbacks = callbacks or {}
+        return AccountPage.build{
+            name = "demo_reader",
+            width = 570,
+            font_size = 19,
+            on_list = callbacks.on_list or function() end,
+            on_works = callbacks.on_works or function() end,
+            on_logout = callbacks.on_logout or function() end,
+        }
+    end
+
+    it("lists AO3's four account lists, the author page and the way out", function()
+        local rows = build()
+        local roles = {}
+        for _, row in ipairs(rows) do
+            roles[#roles + 1] = row.role
+        end
+        assert.are.same({ "account_hero", "lists_label", "list_bookmarks",
+            "list_marked", "list_history", "list_subscriptions",
+            "author_label", "works", "session" }, roles)
+        assert.are.equal("Works by demo_reader", rows[8].text)
+    end)
+
+    it("keeps the name as the headline and names the session", function()
+        local hero = build()[1].ao3_static
+        local texts = {}
+        walk(hero, function(node)
+            if node.text and node.text ~= "" then
+                texts[#texts + 1] = node.text
+            end
+        end)
+        assert.are.same({ "demo_reader", "Signed in to AO3" }, texts)
+    end)
+
+    it("routes each list row to its own AO3 list", function()
+        local opened = {}
+        local rows = build{ on_list = function(kind)
+            opened[#opened + 1] = kind
+        end }
+        for i = 3, 6 do rows[i].action() end
+        assert.are.same({ "bookmarks", "marked", "history", "subscriptions" },
+            opened)
+    end)
+
+    it("puts one outlined Log out under the lists, not a second primary", function()
+        local logged_out = 0
+        local rows = build{ on_logout = function() logged_out = logged_out + 1 end }
+        local panel = rows[#rows].ao3_static
+        local buttons = tappables(panel)
+        assert.are.equal(1, #buttons)
+        local frame = buttons[1][1]
+        assert.is_true(frame.bordersize > 0)
+        assert.are.same(Blitbuffer.COLOR_WHITE, frame.background)
+        buttons[1].onTap()
+        assert.are.equal(1, logged_out)
     end)
 end)

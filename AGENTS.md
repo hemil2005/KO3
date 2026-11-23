@@ -53,6 +53,21 @@ Working rules for agents changing this plugin.
   work page's embedded token is form-scoped and was rejected for kudos in a
   live test. Never retry a form post: a retried 403 would leave duplicate
   kudos or bookmarks.
+- Opening a signed-in work page reads its action state once, silently, so the
+  four buttons start with accurate checkmarks. Failures are not shown; a tap
+  reports its own error.
+
+## Updates
+
+- Releases come from `.github/workflows/release.yml`: a versioned zip plus a
+  manifest with the version and SHA-256. `_meta.lua` must match the tag.
+- `updater.lua` only swaps a new tree in after the checksum and the archive's
+  own `_meta.lua` version both pass; the running code is never modified.
+  Keep the previous tree as `ao3.koplugin.bak` for **Restore previous
+  version**.
+- `Updater.currentVersion` reads `_meta.lua`; do not execute plugin code to
+  find the version. Keep the manifest URLs on HTTPS and reject path traversal
+  and absolute paths in archive entries.
 
 ## Network
 
