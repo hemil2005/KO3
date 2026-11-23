@@ -1,0 +1,7 @@
+# Release artifacts are rebuilt from source; do not version them.
+*.zip
+*.new.zip
+
+# Local build/test scratch
+*.log
+*.part
