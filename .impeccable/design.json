@@ -1,0 +1,284 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-23T20:22:28+05:30",
+  "title": "Design System: AO3 browser",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "primary",
+        "displayName": "Ink Black",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#000000",
+          "#1a1a1a",
+          "#333333",
+          "#595959",
+          "#808080",
+          "#a6a6a6",
+          "#cccccc",
+          "#f2f2f2"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper White",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "#0d0d0d",
+          "#262626",
+          "#404040",
+          "#595959",
+          "#737373",
+          "#8c8c8c",
+          "#d9d9d9",
+          "#ffffff"
+        ]
+      },
+      "slate": {
+        "role": "neutral",
+        "displayName": "Slate Grey",
+        "canonical": "#888888",
+        "tonalRamp": [
+          "#1a1a1a",
+          "#333333",
+          "#4d4d4d",
+          "#666666",
+          "#808080",
+          "#888888",
+          "#b3b3b3",
+          "#e6e6e6"
+        ]
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite Grey",
+        "canonical": "#666666",
+        "tonalRamp": [
+          "#141414",
+          "#2b2b2b",
+          "#404040",
+          "#525252",
+          "#666666",
+          "#858585",
+          "#adadad",
+          "#e0e0e0"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline Grey",
+        "canonical": "#555555",
+        "tonalRamp": [
+          "#101010",
+          "#242424",
+          "#383838",
+          "#4a4a4a",
+          "#555555",
+          "#7a7a7a",
+          "#a3a3a3",
+          "#dcdcdc"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Work title on the details page; the only size that is allowed to wrap at +6."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "AO3 name in the landing-page lockup and the native menu title bar."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card titles, section headers, tile names, primary button labels, stat values."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Facts-table values, folded Summary/Tags text, secondary button labels."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Work-card author and blurb, facts labels, section labels, right-aligned row counts."
+      },
+      "hint": {
+        "displayName": "Hint",
+        "purpose": "The single grey hint under a tile name; one step below the tile name, never a footnote."
+      },
+      "action": {
+        "displayName": "Action",
+        "purpose": "Primary bar label, in KOReader's cfont face; the inverted bar is the only place it appears."
+      },
+      "action-small": {
+        "displayName": "Action Small",
+        "purpose": "Secondary button label, one step below the primary, so the pair reads primary/secondary without a grey fill."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "The four stat captions (Words, Chapters, Kudos, Hits)."
+      }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": [
+      {
+        "name": "reference",
+        "value": "600x800 (3:4 e-ink), 570px content column"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Action Bar",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one solid ink bar per screen: Search works, Read, Open saved copy.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">Search works</button>",
+      "css": ".ds-btn-primary { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; height: 46px; padding: 0 15px; background: #000000; color: #ffffff; border: 0; border-radius: 0; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; font-size: 19px; font-weight: 700; line-height: 1.2; cursor: pointer; transition: background 0.12s ease; } .ds-btn-primary:active { background: #1a1a1a; } .ds-btn-primary:focus-visible { outline: 5px solid #000000; outline-offset: -5px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Outlined companion action (Refresh); same height as the primary, never greyed out.",
+      "html": "<button class=\"ds-btn-secondary\" type=\"button\">Refresh</button>",
+      "css": ".ds-btn-secondary { display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: 46px; padding: 0 12px; background: #ffffff; color: #000000; border: 1.5px solid #000000; border-radius: 0; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; font-size: 17px; font-weight: 700; line-height: 1.15; cursor: pointer; transition: background 0.12s ease, color 0.12s ease; } .ds-btn-secondary:active { background: #000000; color: #ffffff; } .ds-btn-secondary:focus-visible { outline: 5px solid #000000; outline-offset: -5px; }"
+    },
+    {
+      "name": "Tile Card",
+      "kind": "card",
+      "refersTo": "tile-card",
+      "description": "Landing-page catalogue card: stroke icon, bold name, one grey hint line.",
+      "html": "<div class=\"ds-tile\" role=\"button\" tabindex=\"0\"><div class=\"ds-tile-head\"><svg class=\"ds-tile-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8.5\"></circle><path d=\"M12 7.5V12l3 1.8\"></path></svg><span class=\"ds-tile-name\">Latest works</span></div><div class=\"ds-tile-hint\">Newest on AO3</div></div>",
+      "css": ".ds-tile { box-sizing: border-box; width: 280px; min-height: 81px; padding: 10px; background: #ffffff; color: #000000; border: 1px solid #000000; border-radius: 7px; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; cursor: pointer; } .ds-tile-head { display: flex; align-items: center; gap: 10px; } .ds-tile-icon { width: 26px; height: 26px; flex: 0 0 26px; } .ds-tile-name { font-size: 19px; font-weight: 700; line-height: 1.2; } .ds-tile-hint { margin-top: 5px; font-size: 14px; line-height: 1.2; color: #666666; } .ds-tile:hover { border-color: #000000; } .ds-tile:focus-visible { outline: 5px solid #000000; outline-offset: 2px; }"
+    },
+    {
+      "name": "Work Card",
+      "kind": "card",
+      "refersTo": "work-card",
+      "description": "The signature record: bold title, grey byline, three-line blurb, one hairline underneath.",
+      "html": "<div class=\"ds-work-card\" role=\"button\" tabindex=\"0\"><div class=\"ds-work-title\">Porcelain Scales</div><div class=\"ds-work-author\">Kingsaxcul</div><p class=\"ds-work-blurb\">When Athelas finds a baby dragon, she wants to adopt it. Cassandra thinks this is a terrible idea. This is a gift for the lovely reader who asked for something softer.</p></div>",
+      "css": ".ds-work-card { padding: 5px 15px 10px; background: #ffffff; color: #000000; border-bottom: 1px solid #888888; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; cursor: pointer; } .ds-work-title { font-size: 19px; font-weight: 700; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-work-author { margin-top: 2px; font-size: 15px; line-height: 1.2; color: #666666; } .ds-work-blurb { margin: 5px 0 0; font-size: 15px; line-height: 1.3; color: #666666; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; } .ds-work-card:focus-visible { outline: none; border-bottom: 5px solid #000000; }"
+    },
+    {
+      "name": "Section Header",
+      "kind": "custom",
+      "refersTo": "section-header",
+      "description": "Folded Summary/Tags header: bold label, grey +/− glyph, underline doubles as rule.",
+      "html": "<div class=\"ds-section\" role=\"button\" tabindex=\"0\"><span class=\"ds-section-title\">Summary</span><span class=\"ds-section-glyph\">+</span></div>",
+      "css": ".ds-section { display: flex; align-items: center; justify-content: space-between; box-sizing: border-box; padding: 2px 15px 5px; background: #ffffff; color: #000000; border-bottom: 1px solid #888888; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; cursor: pointer; } .ds-section-title { font-size: 19px; font-weight: 700; line-height: 1.2; } .ds-section-glyph { font-size: 21px; font-weight: 700; line-height: 1.2; color: #888888; } .ds-section:focus-visible { outline: none; border-bottom: 5px solid #000000; }"
+    },
+    {
+      "name": "Stats Strip",
+      "kind": "custom",
+      "refersTo": "stat-cell",
+      "description": "Words / Chapters / Kudos / Hits: small slate captions over bold values, closed by a hairline.",
+      "html": "<div class=\"ds-stats\"><div class=\"ds-stat\"><div class=\"ds-stat-label\">Words</div><div class=\"ds-stat-value\">25,359</div></div><div class=\"ds-stat\"><div class=\"ds-stat-label\">Chapters</div><div class=\"ds-stat-value\">2/2</div></div><div class=\"ds-stat\"><div class=\"ds-stat-label\">Kudos</div><div class=\"ds-stat-value\">89</div></div><div class=\"ds-stat\"><div class=\"ds-stat-label\">Hits</div><div class=\"ds-stat-value\">1,204</div></div></div>",
+      "css": ".ds-stats { display: flex; gap: 10px; padding: 5px 15px; background: #ffffff; border-bottom: 1px solid #555555; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; } .ds-stat { flex: 1 1 0; min-width: 0; } .ds-stat-label { font-size: 11px; line-height: 1.2; color: #888888; } .ds-stat-value { margin-top: 2px; font-size: 19px; font-weight: 700; line-height: 1.2; color: #000000; }"
+    },
+    {
+      "name": "Fact Row",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Decision metadata: a slate label in a 23% column, a wrapping ink value.",
+      "html": "<div class=\"ds-fact\"><div class=\"ds-fact-label\">Warnings</div><div class=\"ds-fact-value\">Graphic Depictions Of Violence, Major Character Death</div></div>",
+      "css": ".ds-fact { display: flex; gap: 10px; padding: 5px 15px 0; background: #ffffff; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; } .ds-fact-label { flex: 0 0 23%; font-size: 15px; line-height: 1.2; color: #888888; } .ds-fact-value { flex: 1 1 auto; min-width: 0; font-size: 17px; line-height: 1.15; color: #000000; }"
+    },
+    {
+      "name": "Tab Strip",
+      "kind": "nav",
+      "refersTo": "tab",
+      "description": "Author-page tabs: four equal bordered segments, checked with a tick instead of a fill.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab\" role=\"tab\" aria-selected=\"true\">Dashboard</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Works</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Series</button><button class=\"ds-tab\" role=\"tab\" aria-selected=\"false\">Bookmarks</button></div>",
+      "css": ".ds-tabs { display: flex; width: 100%; background: #ffffff; } .ds-tab { flex: 1 1 0; box-sizing: border-box; padding: 2px 0; margin-left: -0.5px; background: #ffffff; color: #000000; border: 0.5px solid #000000; border-radius: 0; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; font-size: 19px; font-weight: 700; line-height: 1.2; text-align: center; cursor: pointer; } .ds-tab:first-child { margin-left: 0; } .ds-tab[aria-selected=\"true\"]::after { content: \" \\2713\"; } .ds-tab:active { background: #000000; color: #ffffff; } .ds-tab:focus-visible { outline: 5px solid #000000; outline-offset: -5px; }"
+    },
+    {
+      "name": "Menu Row",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Native-density row: 19px title, right-aligned 15px slate value, hairline underneath.",
+      "html": "<div class=\"ds-row\" role=\"button\" tabindex=\"0\"><span class=\"ds-row-title\">Anime &amp; Manga</span><span class=\"ds-row-value\">5,036 fandoms</span></div>",
+      "css": ".ds-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 15px; background: #ffffff; color: #000000; border-bottom: 1px solid #888888; font-family: \"Noto Sans\", \"Helvetica Neue\", Arial, sans-serif; cursor: pointer; } .ds-row-title { font-size: 19px; line-height: 1.2; } .ds-row-value { font-size: 15px; line-height: 1.2; color: #888888; white-space: nowrap; } .ds-row:focus-visible { outline: none; border-bottom: 5px solid #000000; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Printed Catalogue",
+    "overview": "This is a catalogue you enjoy opening, not a database you endure. Each screen reads like a page from a well-set library catalogue: a masthead (the AO3 mark and name), one decisive action, then entries — a bold title, a quiet byline, a blurb, a hairline between records. The interface is friendly because the hierarchy is obvious, and good-looking because the few elements it has are set with care: a solid ink bar is the only block of black, the logo is the only picture, and every grey is doing a specific job.\n\nThe system has no hue and no ornament. Its expressiveness comes from typographic contrast (bold nouns against small grey qualifiers), from rhythm (one gutter, one left edge, open between groups and tight inside them), and from the single inverted bar that tells you what the screen is for. Nothing is minimal by subtraction; the cards, the icon tiles, the stats strip and the tab strip all carry real information and real drawing. The result should feel considered and warm at arm's length on e-ink, never bare.\n\nIt is a native surface: stock KOReader widgets, KOReader's own fonts and scaling, no images beyond the AO3 trademark, no web rendering. The world lives inside the reader, so it borrows the reader's paper (white), ink (black), and patience (no motion).",
+    "keyCharacteristics": [
+      "Ink on paper only — no hue, no tinted fills, no colour accent.",
+      "One solid black action bar per screen; everything else is outline, rule or text.",
+      "A bold noun and a grey qualifier define every entry.",
+      "One 15px gutter and one left edge across every screen.",
+      "Flat: depth from hairlines, 1px borders and inverted bars, never from shadow.",
+      "Square controls, gently rounded cards.",
+      "Icon tiles and a logo lockup carry the warmth; grey rules carry the calm."
+    ],
+    "rules": [
+      {
+        "name": "The Ink-and-Paper Rule",
+        "body": "No hue, ever. Every surface is black, white, or a value of grey, so the system renders identically on grayscale and colour e-ink. A change that needs colour to be understood is the wrong change.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Inverted Bar Rule",
+        "body": "Exactly one solid ink bar per screen, for the action the screen exists for: \"Search works\" on the landing page, \"Read\" (or \"Open saved copy\") on a work. Everything else is outlined or plain text. Two black bars on one screen is a bug.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Greys Rule",
+        "body": "Slate is for the frame and Graphite is for the record. A work card's author and blurb are Graphite; a section label, stat caption or row separator is Slate. Never swap them, and never lighten text past Graphite.",
+        "section": "colors"
+      },
+      {
+        "name": "The Bold Noun Rule",
+        "body": "Every entry's name and every number is bold ink; everything that qualifies them — byline, blurb, caption, hint — is regular grey. If a line needs to be noticed, bold it; if it needs to be read once, grey it.",
+        "section": "typography"
+      },
+      {
+        "name": "The Measure Rule",
+        "body": "A work card's blurb stops at three lines (320 characters, 1.3 line spacing). Anything longer belongs behind a section header or in the dedicated full-text viewer, never in the list.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Left Edge Rule",
+        "body": "Titles, bylines, labels, rules and separators all start at the 15px gutter. Nothing floats or centres except the title bar and the paging footer.",
+        "section": "layout"
+      },
+      {
+        "name": "The Open-Between Rule",
+        "body": "Groups are separated by air (20px + a quiet label); entries inside a group are separated by tightness first and a hairline second.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Page Rule",
+        "body": "If a surface needs to stand out, it earns it with a border, a rule, or inversion — never with a shadow or a tinted fill.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Square Control, Rounded Card Rule",
+        "body": "A thing you press is square; a thing you read is a card. Never round an action bar, never square an icon tile.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do keep exactly one solid Ink bar per screen and let it name the screen's purpose.",
+      "Do align everything to the 15px gutter; the left edge is the system's spine.",
+      "Do bold the noun and grey the qualifier: title/number bold, byline/blurb/caption regular.",
+      "Do use Graphite for sentences inside a record and Slate for chrome; keep contrast survivable in grayscale.",
+      "Do build tiles and actions from their content (icon + name + hint; 2.4× font height) so nothing clips.",
+      "Do close each work record with a single hairline and keep the blurb to three lines.",
+      "Do keep the AO3 mark and name as the only masthead identity, and leave the native title bar empty on the landing page.",
+      "Do verify every screen in the 600×800 emulator and save the capture under screenshots/."
+    ],
+    "donts": [
+      "Don't introduce hue, tinted backgrounds, gradients, or a second accent — Refresh stays black-and-white too.",
+      "Don't add shadows or lift anything off the page; borders, rules and inversion are the only depth cues.",
+      "Don't round buttons, bars or the tab strip; 7px belongs to tiles only.",
+      "Don't wrap a work card in an outline box or add a cover thumbnail; cards are paper records.",
+      "Don't centre body text, float section labels, or let a label drift away from the gutter.",
+      "Don't use more than three blurb lines, a \"show more\" ellipsis inside a row, or any infinite scroll.",
+      "Don't put two primaries on one screen, grey out a secondary action, or make a disabled state by lowering contrast below Graphite.",
+      "Don't display the keyboard-shortcut column, breadcrumbs, chips or pagination dots; the catalogue voice has no web furniture."
+    ]
+  }
+}
