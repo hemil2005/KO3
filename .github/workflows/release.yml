@@ -58,18 +58,21 @@ jobs:
             head_ref="HEAD"
           fi
           prev=$(git tag --sort=-creatordate | grep -vx "$tag" | head -1 || true)
+          if [ -n "$prev" ]; then
+            changes=$(git log --pretty=format:'- %s' "$prev..$head_ref")
+          else
+            changes=$(git log --pretty=format:'- %s' "$head_ref")
+          fi
+          # Plain text: the same file is the release body and the updater's
+          # notes, and the dialog renders it without Markdown. Bullets and the
+          # URL still render correctly on GitHub.
           {
-            echo "## Changes"
+            echo "Changes in ${tag}:"
+            echo
+            printf '%s\n' "$changes"
             echo
             if [ -n "$prev" ]; then
-              git log --pretty=format:'- %s' "$prev..$head_ref"
-            else
-              git log --pretty=format:'- %s' "$head_ref"
-            fi
-            echo
-            if [ -n "$prev" ]; then
-              echo
-              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag}"
+              echo "Full changelog: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag}"
             fi
           } > dist/RELEASE_NOTES.md
           cat dist/RELEASE_NOTES.md
