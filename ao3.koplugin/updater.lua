@@ -40,6 +40,7 @@ local Updater = {}
 Updater.REPO = "hemil2005/KO3"
 Updater.RELEASES_URL = "https://github.com/" .. Updater.REPO .. "/releases"
 Updater.MANIFEST_URL = Updater.RELEASES_URL .. "/latest/download/manifest.json"
+Updater.API_URL = "https://api.github.com/repos/" .. Updater.REPO .. "/releases/latest"
 Updater.ARCHIVE_ROOT = "ao3.koplugin/"
 Updater.UA = "KO3-updater/1.0 (+https://github.com/" .. Updater.REPO .. ")"
 
@@ -121,6 +122,49 @@ function Updater.parseManifest(body)
         zip_url = zip_url,
         sha256 = data.sha256 and data.sha256:lower() or nil,
         notes = type(data.notes) == "string" and data.notes or "",
+        published_at = type(data.published_at) == "string" and data.published_at or nil,
+    }
+end
+
+-- Map a GitHub API `releases/latest` response to the same manifest shape.
+-- Used when the convenience asset URL is stale or missing in the CDN.
+function Updater.manifestFromRelease(data)
+    if type(data) ~= "table" or type(data.tag_name) ~= "string" then
+        return nil, _("The update server sent a malformed release.")
+    end
+    local version = data.tag_name:gsub("^[vV]", "")
+    if not Updater.parseVersion(version) then
+        return nil, _("The release has no valid version tag.")
+    end
+    local asset
+    for _, item in ipairs(data.assets or {}) do
+        local name = item.name or ""
+        if asset == nil and name:match("^ao3%.koplugin%-.*%.zip$") then
+            asset = item
+        end
+    end
+    if not asset then
+        for _, item in ipairs(data.assets or {}) do
+            if (item.name or ""):match("%.zip$") then
+                asset = item
+                break
+            end
+        end
+    end
+    if not asset or type(asset.browser_download_url) ~= "string" then
+        return nil, _("The latest release has no plugin zip.")
+    end
+    local sha
+    if type(asset.digest) == "string" then
+        sha = asset.digest:match("^sha256:(%x+)$")
+    end
+    local notes = type(data.body) == "string" and data.body:gsub("%s+$", "") or ""
+    if #notes > 500 then notes = notes:sub(1, 500) .. "…" end
+    return {
+        version = version,
+        zip_url = asset.browser_download_url,
+        sha256 = sha,
+        notes = notes,
         published_at = type(data.published_at) == "string" and data.published_at or nil,
     }
 end
@@ -237,13 +281,12 @@ local function uaHeaders()
     }
 end
 
--- GET a small text resource. Returns body or nil, error.
-function Updater.fetchManifest(timeout)
+local function getJson(url, timeout)
     local chunks = {}
     socketutil:set_timeout(timeout or 20, (timeout or 20) * 2)
     local ok, code, status = pcall(function()
         return socket.skip(1, http.request{
-            url = Updater.MANIFEST_URL,
+            url = url,
             method = "GET",
             headers = uaHeaders(),
             sink = ltn12.sink.table(chunks),
@@ -257,7 +300,31 @@ function Updater.fetchManifest(timeout)
     if code ~= 200 then
         return nil, T(_("The update server answered HTTP %1."), tostring(code or status))
     end
-    return Updater.parseManifest(table.concat(chunks))
+    return table.concat(chunks)
+end
+
+-- Read the published manifest. The convenience asset URL is cached by
+-- GitHub's CDN for a few minutes after a release, so fall back to the API
+-- (no token: one small request, well inside the anonymous rate limit).
+function Updater.fetchManifest(timeout)
+    local body, fetch_err = getJson(Updater.MANIFEST_URL, timeout)
+    local parse_err
+    if body then
+        local manifest
+        manifest, parse_err = Updater.parseManifest(body)
+        if manifest then return manifest end
+    end
+
+    local api_body, api_err = getJson(Updater.API_URL, timeout)
+    if api_body then
+        local ok, data = pcall(JSON.decode, api_body)
+        if ok then
+            local manifest, api_parse_err = Updater.manifestFromRelease(data)
+            if manifest then return manifest end
+            parse_err = api_parse_err or parse_err
+        end
+    end
+    return nil, api_err or parse_err or fetch_err
 end
 
 -- Download an asset to `dest`. Verifies SHA-256 when the manifest has one.

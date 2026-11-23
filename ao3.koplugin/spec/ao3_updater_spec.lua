@@ -123,6 +123,52 @@ describe("AO3 updater manifest", function()
         assert.is_nil(Updater.parseManifest(
             '{"version":"soon","zip_url":"https://x/y.zip"}'))
     end)
+
+    it("maps a GitHub release to the same manifest shape", function()
+        local manifest = assert(Updater.manifestFromRelease({
+            tag_name = "v1.0.1",
+            body = "Release notes\n",
+            published_at = "2026-11-23T12:32:19Z",
+            assets = {
+                { name = "notes.txt", browser_download_url = "https://x/n.txt" },
+                { name = "ao3.koplugin-1.0.1.zip",
+                  browser_download_url = "https://x/ao3.zip",
+                  digest = "sha256:" .. sha },
+            },
+        }))
+        assert.are.equal("1.0.1", manifest.version)
+        assert.are.equal("https://x/ao3.zip", manifest.zip_url)
+        assert.are.equal(sha, manifest.sha256)
+        assert.are.equal("Release notes", manifest.notes)
+        assert.is_nil(Updater.manifestFromRelease({ tag_name = "soon" }))
+        assert.is_nil(Updater.manifestFromRelease({
+            tag_name = "v2.0.0", assets = {},
+        }))
+    end)
+
+    it("falls back to the API when the asset URL is stale", function()
+        local old_request = http.request
+        local old_manifest, old_api = Updater.MANIFEST_URL, Updater.API_URL
+        Updater.MANIFEST_URL = "https://example.test/manifest.json"
+        Updater.API_URL = "https://example.test/api/latest"
+        http.request = function(request)
+            if request.url == Updater.MANIFEST_URL then
+                return 1, 404, {}, "HTTP/1.1 404 Not Found"
+            end
+            request.sink('{"tag_name":"v2.0.0","body":"From API",'
+                .. '"assets":[{"name":"ao3.koplugin-2.0.0.zip",'
+                .. '"browser_download_url":"https://example.test/ao3.zip",'
+                .. '"digest":"sha256:' .. sha .. '"}]}')
+            return 1, 200, {}, "HTTP/1.1 200 OK"
+        end
+        local manifest, err = Updater.fetchManifest()
+        http.request = old_request
+        Updater.MANIFEST_URL, Updater.API_URL = old_manifest, old_api
+        assert.is_truthy(manifest, err)
+        assert.are.equal("2.0.0", manifest.version)
+        assert.are.equal("https://example.test/ao3.zip", manifest.zip_url)
+        assert.are.equal(sha, manifest.sha256)
+    end)
 end)
 
 describe("AO3 updater archive planning", function()
