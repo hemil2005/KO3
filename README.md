@@ -1,4 +1,4 @@
-# AO3 browser for KOReader
+# KO3 — an AO3 browser for KOReader
 
 A deliberately small browser for [Archive of Our Own](https://archiveofourown.org)
 that runs inside KOReader on Kindle (and other e-readers).
@@ -24,7 +24,7 @@ details captured from a live work.
 
 | | |
 |---|---|
-| ![AO3 in the menu](screenshots/01-menu.png) | ![Home](screenshots/02-home.png) |
+| ![KO3 in the Tools menu](screenshots/01-menu.png) | ![Home](screenshots/02-home.png) |
 | ![Fandoms by media](screenshots/03-fandoms.png) | ![Fandom index](screenshots/04-letters.png) |
 | ![A letter's fandoms](screenshots/05-fandom-list.png) | ![Works with summaries](screenshots/06-works.png) |
 | ![Work details](screenshots/07-work-details.png) | ![Reading a work](screenshots/08-reading.png) |
@@ -38,7 +38,7 @@ details captured from a live work.
 | ![Work account actions](screenshots/26-work-account-actions.png) | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) |
 | ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
 | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
-| ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![AO3 at the bottom of Tools](screenshots/34-tools-menu.png) |
+| ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![KO3 at the bottom of Tools](screenshots/34-tools-menu.png) |
 
 ## Install
 
@@ -49,7 +49,7 @@ The quickest way is the release zip:
 2. Unzip it into `koreader/plugins/` on the device (the archive already
    contains the `ao3.koplugin` folder).
 3. Restart KOReader.
-4. Open **Tools → AO3**.
+4. Open **Tools → KO3**.
 
 Or copy the `ao3.koplugin` folder yourself. Either way, the layout should be:
 
@@ -75,7 +75,7 @@ koreader/
       data/fandoms/<category>/<letter>.tsv.z
 ```
 
-Once installed, later versions arrive through **Update plugin** (below), so
+Once installed, later versions arrive through **Update KO3** (below), so
 the zip only has to be copied once.
 
 ## Use
@@ -96,7 +96,7 @@ name beside the icon, with a one-line hint underneath:
 | **Account** | Sign in to AO3, then your bookmarks, marked-for-later, history and subscriptions |
 | **Downloads** | Works already saved on this device |
 | **Open work** | Paste `https://archiveofourown.org/works/1234567` or just `1234567` |
-| **Update plugin** | Check GitHub Releases for a newer version |
+| **Update KO3** | Check GitHub Releases for a newer version |
 | **Report a bug** | Write what happened; optionally attach a diagnostic log |
 
 Fandoms are browsed media category → letter → fandom, the same way AO3's
@@ -198,10 +198,10 @@ two collapsed top-level entries. Those are filtered out and the chapter list
 is flattened, so the index opens fully expanded and contains no metadata
 heading.
 
-### Updating the plugin
+### Updating KO3
 
 **No computer is needed after the first install.** Open
-**Tools → AO3 → Update plugin**:
+**Tools → KO3 → Update KO3**:
 
 1. It asks GitHub for the latest release and shows the current version, the
    new version and the release notes (`manifest.json` is the fallback).
@@ -218,7 +218,7 @@ or other plugin is required.
 
 ### Reporting a bug
 
-**Tools → AO3 → Report a bug** opens a text field. After you
+**Tools → KO3 → Report a bug** opens a text field. After you
 describe what happened, a consent dialog asks whether to attach the
 diagnostic log and states that it is used only to find the cause of the
 issue. Choosing **Without log** sends the description alone.
@@ -382,7 +382,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
 - Bug reports: query stripping, consent-gated log inclusion, report bundle
   writing, token handling and the three screens render in the emulator
   (`screenshots/31`–`33`).
-- The AO3 entry is directly on the Tools tab, at the bottom of its first page
+- The KO3 entry is directly on the Tools tab, at the bottom of its first page
   (`screenshots/34`), not nested under More tools.
 - The offline `busted` suite: 225 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,

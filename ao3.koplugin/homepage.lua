@@ -331,7 +331,7 @@ function HomePage.build(o)
         keep_with_next = true,
     }
     rows[#rows + 1] = HomePage.wide_tile({
-        text = _("Update plugin"),
+        text = _("Update KO3"),
         hint = o.version and T(_("Installed v%1"), o.version) or nil,
         icon = "refresh", role = "update", action = o.on_update,
     }, o, "update", GUTTER)

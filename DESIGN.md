@@ -1,6 +1,6 @@
 ---
-name: AO3 browser
-description: AO3's works and fandoms, rebuilt as a printed catalogue in KOReader's native e-ink widgets.
+name: KO3
+description: KO3 — AO3's works and fandoms, rebuilt as a printed catalogue in KOReader's native e-ink widgets.
 colors:
   ink: "#000000"
   paper: "#ffffff"
@@ -110,7 +110,7 @@ components:
     padding: "2px 0"
 ---
 
-# Design System: AO3 browser
+# Design System: KO3
 
 ## Overview
 

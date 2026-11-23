@@ -1,5 +1,5 @@
 --[[--
-AO3 account sign-in, personal lists and work actions for the AO3 browser.
+AO3 account sign-in, personal lists and work actions for KO3.
 
 Signing in is three requests: GET a JSON CSRF token, POST the credential
 fields, then load one page to confirm the logged-in greeting. Nothing here

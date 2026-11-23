@@ -1,5 +1,5 @@
 --[[
-AO3 browser for KOReader.
+KO3 for KOReader.
 
 A deliberately small browser for archiveofourown.org:
 search and tag listings are fetched as HTML, parsed into native
@@ -3170,7 +3170,7 @@ function Ao3:checkForUpdates()
         end
         local notes = manifest.notes ~= "" and ("\n\n" .. manifest.notes) or ""
         UIManager:show(ConfirmBox:new{
-            text = T(_("Update AO3 browser from v%1 to v%2?%3"), current, manifest.version, notes),
+            text = T(_("Update KO3 from v%1 to v%2?%3"), current, manifest.version, notes),
             ok_text = _("Update"),
             cancel_text = _("Later"),
             ok_callback = function()
@@ -3424,7 +3424,7 @@ function Ao3:addToMainMenu(menu_items)
     placeOnToolsTab()
     -- One entry, one app. Everything else lives inside the AO3 screen.
     menu_items.ao3_browser = {
-        text = _("AO3"),
+        text = _("KO3"),
         -- Directly on the Tools tab, below the built-in rows. `more_tools`
         -- would hide the only entry of the app one level down.
         sorting_hint = "tools",

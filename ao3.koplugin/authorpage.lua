@@ -1,5 +1,5 @@
 --[[--
-Author page tabs and parsers for the AO3 browser.
+Author page tabs and parsers for KO3.
 
 The real author page has Dashboard / Works / Series / Bookmarks tabs (this
 plugin skips Profile, which has no reader value). The Dashboard tab groups

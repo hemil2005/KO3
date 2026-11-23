@@ -1,6 +1,6 @@
 # Project conventions
 
-Working rules for agents changing this plugin.
+Working rules for agents changing KO3 (an AO3 browser for KOReader).
 
 ## UI
 
@@ -13,7 +13,7 @@ Working rules for agents changing this plugin.
   Q/W/E shortcut column even though the target device is a touchscreen.
 - Work cards: bold title, author, up to three summary lines, one separator per
   card, no per-row shortcut boxes.
-- The AO3 entry sits directly on the Tools tab, at the bottom
+- The KO3 entry sits directly on the Tools tab, at the bottom
   (`sorting_hint = "tools"`), not nested under More tools.
 - After any user-visible change, demonstrate it in the local Kindle emulator
   and save a capture under `screenshots/`. Tests alone are not enough.

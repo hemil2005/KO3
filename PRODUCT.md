@@ -44,7 +44,7 @@ works when AO3 refuses the device.
 - E-ink and touch: slow refresh, no keyboard, no hover, one hand. KOReader's
   own font scaling, DPI and page-turn gestures apply.
 - Installation: unzip `ao3.koplugin` into `koreader/plugins/`, then update in
-  place from the plugin's own **Update plugin** screen (GitHub Releases,
+  place from KO3's own **Update KO3** screen (GitHub Releases,
   SHA-256 verified, previous version kept as `ao3.koplugin.bak`).
 - Network: indirect HTTPS through KOReader's LuaSocket/LuaSec client. AO3 can
   refuse the device with 403/429 from Cloudflare; the offline index and saved
@@ -89,7 +89,7 @@ Do not widen scope as a side effect of a design task; confirm it first.
 
 ## Brand Commitments
 
-- Name: **AO3 browser**, full name "AO3 browser", description "Browse, search
+- Name: **KO3**, full name "KO3", description "Browse, search
   and read works from Archive of Our Own."
 - Unofficial. AO3's name and logo are OTW trademarks; `assets/ao3-logo.png` is
   copied byte-for-byte from OTW's repository, `assets/ao3-logo.svg` is a trace

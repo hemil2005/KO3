@@ -1,4 +1,4 @@
--- KOReader busted spec for the AO3 browser plugin.
+-- KOReader busted spec for the KO3 plugin.
 --
 -- From a KOReader checkout with this plugin symlinked into plugins/:
 --   ln -s ../../plugins/ao3.koplugin/spec/ao3_spec.lua spec/unit/ao3_spec.lua
@@ -512,7 +512,7 @@ describe("AO3 browser", function()
             end
 
             assert.is_truthy(loaded)
-            assert.are.equal("AO3 browser", loaded.fullname)
+            assert.are.equal("KO3", loaded.fullname)
             assert.is_truthy(loaded.addToMainMenu)
             disable_plugins()
         end)
@@ -1433,7 +1433,7 @@ describe("AO3 browser", function()
             local menu = {}
             self:addToMainMenu(menu)
             assert.is_truthy(menu.ao3_browser)
-            assert.are.equal("AO3", menu.ao3_browser.text)
+            assert.are.equal("KO3", menu.ao3_browser.text)
             assert.are.equal("tools", menu.ao3_browser.sorting_hint)
             assert.is_truthy(menu.ao3_browser.callback)
             assert.is_nil(menu.ao3_browser.sub_item_table)
