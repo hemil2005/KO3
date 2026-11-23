@@ -134,9 +134,13 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
 
 **Current connectivity:** AO3 refused the emulator's listing request with
 `403`; independent Windows and WSL `curl` requests received `429` on this
-connection. These are server-side blocks, not an offline-index or UI failure.
-Online search, listings and new downloads may remain unavailable until AO3
-lifts the limit. The plugin spaces requests one second apart, respects a
+connection. Captured once on 2026-11-23, the `429` came from
+`Server: cloudflare` with a `CF-Ray` header and the body “The bot servers are
+currently overloaded… our systems think you may be a robot… could be due to
+using a VPN”. That is Cloudflare's bot-management layer, not AO3's content
+rules, and a VPN exit can worsen it. Online search, listings and new
+downloads may remain unavailable until AO3 lifts the limit. The plugin spaces
+requests one second apart, respects a
 numeric `Retry-After` on `429` without immediately retrying, and does not
 retry a recognizable browser challenge. Other `403` responses get one retry
 before a five-minute cooldown. Offline fandom search and saved
@@ -190,7 +194,7 @@ See `ao3.koplugin/spec/README.md` for details.
 
 | Symptom | Likely cause |
 |---|---|
-| `429` or a wait message | AO3 is rate-limiting. Wait at least the time shown; do not repeatedly tap or reinstall to bypass it. If AO3 sends `Retry-After`, the plugin honors it. |
+| `429` or a wait message | Cloudflare's bot layer (or AO3) is refusing the client. A **VPN or privacy browser can trigger this**; wait the time shown, or turn the VPN off and retry. Do not repeatedly tap or reinstall to bypass it. If AO3 sends `Retry-After`, the plugin honors it. |
 | `403` or a wait message | AO3 or its edge refused this client. A recognized browser check is not retried; other 403s get one retry, then a five-minute cooldown. |
 | `404` | Work deleted, restricted, or downloads disabled |
 | “did not return a work file” | Restricted/adult/login page instead of the work |

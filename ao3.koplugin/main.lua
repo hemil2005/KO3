@@ -152,7 +152,7 @@ local function blockedMessage(code, seconds)
     if code == "challenge" then
         return _("AO3 requires a browser check that KOReader cannot complete. Open AO3 in a browser, or use saved works and try again later.")
     end
-    return T(_("AO3 is limiting this connection (%1). Please wait about %2 minute(s) before retrying. Offline fandoms and saved works still work."),
+    return T(_("AO3's edge is refusing this client (%1). A VPN or privacy browser can trigger this; wait about %2 minute(s), or download the work in a normal browser."),
         code, math.max(1, math.ceil(seconds / 60)))
 end
 
