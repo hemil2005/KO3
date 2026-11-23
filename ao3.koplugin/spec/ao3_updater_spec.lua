@@ -105,10 +105,10 @@ describe("AO3 updater manifest", function()
         assert.are.equal("N", manifest.notes)
     end)
 
-    it("defaults a missing asset to the latest release zip", function()
+    it("defaults a missing asset to the versioned tag asset", function()
         local manifest = assert(Updater.parseManifest('{"version":"1.0.0"}'))
         assert.are.equal(
-            "https://github.com/hemil2005/KO3/releases/latest/download/ao3.koplugin.zip",
+            "https://github.com/hemil2005/KO3/releases/download/v1.0.0/ao3.koplugin-1.0.0.zip",
             manifest.zip_url)
     end)
 

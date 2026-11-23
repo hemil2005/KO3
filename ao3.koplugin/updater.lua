@@ -3,8 +3,8 @@ Inline plugin updater for KOReader.
 
 The plugin is distributed through GitHub Releases. A release carries:
 
-    ao3.koplugin.zip     the plugin tree, rooted at ao3.koplugin/
-    manifest.json        version, asset URL, SHA-256, notes
+    ao3.koplugin-<version>.zip   the plugin tree, rooted at ao3.koplugin/
+    manifest.json                version, asset URL, SHA-256, notes
 
 Checking is one small JSON GET from `releases/latest/download/manifest.json`
 (no GitHub API token, no rate-limit surprises). Updating downloads the zip,
@@ -40,7 +40,6 @@ local Updater = {}
 Updater.REPO = "hemil2005/KO3"
 Updater.RELEASES_URL = "https://github.com/" .. Updater.REPO .. "/releases"
 Updater.MANIFEST_URL = Updater.RELEASES_URL .. "/latest/download/manifest.json"
-Updater.ZIP_NAME = "ao3.koplugin.zip"
 Updater.ARCHIVE_ROOT = "ao3.koplugin/"
 Updater.UA = "KO3-updater/1.0 (+https://github.com/" .. Updater.REPO .. ")"
 
@@ -100,9 +99,14 @@ function Updater.parseManifest(body)
     end
     local zip_url = data.zip_url
     if type(zip_url) ~= "string" or zip_url == "" then
-        zip_url = Updater.RELEASES_URL .. "/latest/download/" .. Updater.ZIP_NAME
+        -- Assets are versioned so a cached old manifest can never point at a
+        -- replaced zip. Fall back to the conventional tag/asset names.
+        local version = data.version:gsub("^[vV]", "")
+        zip_url = Updater.RELEASES_URL .. "/download/v" .. version
+            .. "/ao3.koplugin-" .. version .. ".zip"
     elseif not zip_url:match("^https?://") then
-        zip_url = Updater.RELEASES_URL .. "/latest/download/" .. zip_url
+        local version = data.version:gsub("^[vV]", "")
+        zip_url = Updater.RELEASES_URL .. "/download/v" .. version .. "/" .. zip_url
     end
     if not zip_url:match("^https://") then
         return nil, _("The update manifest points at a non-HTTPS download.")

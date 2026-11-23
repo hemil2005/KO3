@@ -36,7 +36,7 @@ details captured from a live work.
 
 The quickest way is the release zip:
 
-1. Download `ao3.koplugin.zip` from
+1. Download the `ao3.koplugin-<version>.zip` asset from
    [the latest release](https://github.com/hemil2005/KO3/releases/latest).
 2. Unzip it into `koreader/plugins/` on the device (the archive already
    contains the `ao3.koplugin` folder).
@@ -116,7 +116,7 @@ the offline book available.
 1. It reads `manifest.json` from the latest
    [GitHub Release](https://github.com/hemil2005/KO3/releases/latest), and
    shows the current version, the new version and the release notes.
-2. **Update** downloads `ao3.koplugin.zip`, verifies its SHA-256, unpacks it
+2. **Update** downloads the versioned zip, verifies its SHA-256, unpacks it
    next to the installed copy, and checks that the archive really contains
    the plugin and the version it claims.
 3. It swaps the new tree in only after all of that passes, then offers to
