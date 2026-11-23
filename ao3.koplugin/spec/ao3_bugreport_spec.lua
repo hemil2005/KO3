@@ -4,6 +4,7 @@ require("commonrequire")
 
 local DataStorage = require("datastorage")
 local lfs = require("libs/libkoreader-lfs")
+local http = require("socket.http")
 local BugReport = dofile("plugins/ao3.koplugin/bugreport.lua")
 
 local tmp_root
@@ -138,5 +139,62 @@ describe("AO3 bug report delivery", function()
         empty:write("\n")
         empty:close()
         assert.is_nil(BugReport.token())
+    end)
+
+    it("posts a report through the relay", function()
+        local old_request = http.request
+        local old_url = BugReport.RELAY_URL
+        BugReport.RELAY_URL = "https://relay.test/report"
+        local seen
+        http.request = function(request)
+            seen = request
+            request.sink('{"url":"https://github.com/hemil2005/KO3/issues/7"}')
+            return 1, 200, {}, "HTTP/1.1 200 OK"
+        end
+        local url, err = BugReport.submitRelay("A title", "A body")
+        http.request = old_request
+        BugReport.RELAY_URL = old_url
+        assert.is_truthy(url, err)
+        assert.are.equal("https://github.com/hemil2005/KO3/issues/7", url)
+        assert.are.equal("POST", seen.method)
+        assert.are.equal("https://relay.test/report", seen.url)
+        assert.are.equal("application/json", seen.headers["Content-Type"])
+    end)
+
+    it("reports relay limits and missing configuration", function()
+        local old_request = http.request
+        local old_url = BugReport.RELAY_URL
+        http.request = function(request)
+            request.sink('{"error":"too many reports"}')
+            return 1, 429, {}, "HTTP/1.1 429 Too Many Requests"
+        end
+        BugReport.RELAY_URL = "https://relay.test/report"
+        local url, err = BugReport.submitRelay("T", "B")
+        assert.is_nil(url)
+        assert.is_truthy(err:find("Too many reports", 1, true))
+
+        BugReport.RELAY_URL = nil
+        url, err = BugReport.submitRelay("T", "B")
+        assert.is_nil(url)
+        assert.is_truthy(err:find("relay", 1, true))
+
+        http.request = old_request
+        BugReport.RELAY_URL = old_url
+    end)
+
+    it("delivers through the relay when no token is configured", function()
+        os.remove(tmp_root .. "/settings/ao3_report_token")
+        local old_request = http.request
+        local old_url = BugReport.RELAY_URL
+        BugReport.RELAY_URL = "https://relay.test/report"
+        http.request = function(request)
+            request.sink('{"url":"https://github.com/hemil2005/KO3/issues/8"}')
+            return 1, 200, {}, "HTTP/1.1 200 OK"
+        end
+        local url, err = BugReport.deliver("T", "B")
+        http.request = old_request
+        BugReport.RELAY_URL = old_url
+        assert.is_truthy(url, err)
+        assert.are.equal("https://github.com/hemil2005/KO3/issues/8", url)
     end)
 end)

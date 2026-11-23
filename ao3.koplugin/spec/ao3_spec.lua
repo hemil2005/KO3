@@ -817,6 +817,8 @@ describe("AO3 browser", function()
             local old_show, old_close = UIManager.show, UIManager.close
             local old_settings = DataStorage.getSettingsDir
             DataStorage.getSettingsDir = function() return tmp_root .. "/settings" end
+            local old_relay = plugin.BugReport.RELAY_URL
+            plugin.BugReport.RELAY_URL = nil -- exercise the saved-bundle path
             local shown = {}
             UIManager.show = function(_, widget)
                 shown[#shown + 1] = widget
@@ -839,6 +841,7 @@ describe("AO3 browser", function()
             end)
             UIManager.show, UIManager.close = old_show, old_close
             DataStorage.getSettingsDir = old_settings
+            plugin.BugReport.RELAY_URL = old_relay
             assert.is_true(ok, err)
 
             local reports = tmp_root .. "/ao3/reports"

@@ -12,12 +12,13 @@ work text. Query strings and fragments are stripped before logging.
 
 Delivery:
 
-  * With a token file (`settings/ao3_report_token`, a fine-grained GitHub
-    token with Issues: write), the report is filed directly through the API
-    and the log is embedded in the issue body.
-  * Without one, the report is saved under `ao3/reports/` as `report.md`
-    plus `log.txt`, ready to attach to a new issue. This is the only
-    credential-free option: GitHub does not allow anonymous issue creation.
+  * Normally the report is POSTed to the KO3 relay (`relay/worker.js`, a
+    Cloudflare Worker) which holds a fine-grained GitHub token and files the
+    issue, so "Attach log" is the last step for the user.
+  * A token file (`settings/ao3_report_token`, a fine-grained GitHub token
+    with Issues: write) bypasses the relay for the maintainer's device.
+  * If neither is reachable, the report is saved under `ao3/reports/` as
+    `report.md` plus `log.txt`, ready to attach to a new issue.
 ]]
 
 local DataStorage = require("datastorage")
@@ -42,6 +43,9 @@ local TAIL_CHARS = 20000
 
 BugReport.REPO = "hemil2005/KO3"
 BugReport.ISSUE_URL = "https://github.com/" .. BugReport.REPO .. "/issues/new"
+-- Set after deploying relay/worker.js. When set, "Attach log" is the last
+-- step: the report is filed through the relay, which holds the GitHub token.
+BugReport.RELAY_URL = "https://ko3-reports.ko3-reports.workers.dev/report"
 BugReport.MAX_LOG_BYTES = MAX_LOG_BYTES
 
 -- ---------------------------------------------------------------------------
@@ -313,6 +317,64 @@ function BugReport.submit(token, title, body)
         return nil, _("GitHub rejected the report as invalid (422).")
     end
     return nil, T(_("GitHub answered HTTP %1."), tostring(code or status))
+end
+
+-- File the report through the relay. The relay holds the GitHub token, so
+-- this works for every user without a device token. Returns the issue URL.
+function BugReport.submitRelay(title, body)
+    local url = BugReport.RELAY_URL
+    if not url then
+        return nil, _("No report relay is configured.")
+    end
+    local payload = JSON.encode({
+        title = title,
+        body = body,
+        version = BugReport.pluginVersion(),
+    })
+    local chunks = {}
+    socketutil:set_timeout(30, 60)
+    local ok, code, status = pcall(function()
+        return socket.skip(1, http.request{
+            url = url,
+            method = "POST",
+            headers = {
+                ["User-Agent"] = "KO3-bugreport/1.0",
+                ["Accept"] = "application/json",
+                ["Content-Type"] = "application/json",
+                ["Content-Length"] = tostring(#payload),
+            },
+            source = ltn12.source.string(payload),
+            sink = ltn12.sink.table(chunks),
+        })
+    end)
+    socketutil:reset_timeout()
+    if not ok then
+        return nil, tostring(code)
+    end
+    local response = table.concat(chunks)
+    if code == 200 or code == 201 then
+        local decoded_ok, data = pcall(JSON.decode, response)
+        if decoded_ok and type(data) == "table" and type(data.url) == "string" then
+            return data.url
+        end
+        return nil, _("The report was filed, but its URL could not be read.")
+    elseif code == 429 then
+        return nil, _("Too many reports were sent from this connection today.")
+    elseif code == 413 then
+        return nil, _("The report is too large for the relay.")
+    elseif code == 502 then
+        return nil, _("The relay could not file the report on GitHub.")
+    end
+    return nil, T(_("The report relay answered HTTP %1."), tostring(code or status))
+end
+
+-- Token first (the maintainer's device can bypass the relay), relay second.
+function BugReport.deliver(title, body)
+    local token = BugReport.token()
+    if token then
+        return BugReport.submit(token, title, body)
+    end
+    return BugReport.submitRelay(title, body)
 end
 
 return BugReport

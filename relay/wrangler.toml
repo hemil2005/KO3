@@ -1,0 +1,12 @@
+name = "ko3-reports"
+main = "worker.js"
+compatibility_date = "2026-11-23"
+workers_dev = true
+preview_urls = false
+
+[vars]
+REPO = "hemil2005/KO3"
+
+[[kv_namespaces]]
+binding = "RATE"
+id = "cb63f8472f5142b6b3c97ee1ef2d9f85"

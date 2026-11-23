@@ -34,7 +34,8 @@ The tests are offline:
   traversal-safe entry planning, staged install, failed-rename rollback,
   restore-previous and checksum verification, with no network or real zip.
 - `ao3_bugreport_spec.lua` covers URL sanitising, log tails, consent-gated
-  report bodies, bundle writing and token handling.
+  report bodies, bundle writing, token handling and relay submission
+  (success, rate limit, missing configuration).
 - The report flow is also exercised through the UI: the home row, the
   editor, the log-consent dialog and the saved bundle.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and

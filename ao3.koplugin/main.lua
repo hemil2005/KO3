@@ -402,6 +402,8 @@ local AccountPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "accountpage.lua")))
 local Uikit = dofile((MAIN_SOURCE:gsub("main%.lua$", "uikit.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
 BugReport = dofile((MAIN_SOURCE:gsub("main%.lua$", "bugreport.lua")))
+Ao3.BugReport = BugReport
+Ao3.Updater = Updater
 
 -- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
 -- same parser; listings, search results and bookmark pages share the markup.
@@ -3321,7 +3323,7 @@ end
 
 function Ao3:askAttachLog(description)
     UIManager:show(ConfirmBox:new{
-        text = _("Attach a diagnostic log?\n\nThe log is used only to find the cause of this issue. It contains the plugin version, KOReader and device details, and recent request results. It does not contain your AO3 password, cookies, search text, or work text."),
+        text = _("Attach a diagnostic log?\n\nThe report and log are sent to the project's issue tracker. The log is used only to find the cause of this issue. It contains the plugin version, KOReader and device details, and recent request results. It does not contain your AO3 password, cookies, search text, or work text."),
         ok_text = _("Attach log"),
         ok_callback = function()
             self:finishReport(description, true)
@@ -3339,7 +3341,7 @@ function Ao3:askAttachLog(description)
 end
 
 function Ao3:finishReport(description, include_log)
-    local dir, _, _, err = BugReport.save(description, include_log)
+    local dir, report_path, log_path, err = BugReport.save(description, include_log)
     if not dir then
         UIManager:show(InfoMessage:new{
             text = T(_("Could not save the report:\n%1"), err or _("unknown error")),
@@ -3349,7 +3351,7 @@ function Ao3:finishReport(description, include_log)
     BugReport.log("report", "saved (log=" .. tostring(include_log) .. ")")
 
     local token = BugReport.token()
-    if not token then
+    if not token and not BugReport.RELAY_URL then
         self:showSavedReport(dir, include_log, description)
         return
     end
@@ -3361,7 +3363,7 @@ function Ao3:finishReport(description, include_log)
         local url, submit_err
         Trapper:wrap(function()
             Trapper:info(_("Sending the report…"), true)
-            local ok, result, result_err = pcall(BugReport.submit, token, title, body)
+            local ok, result, result_err = pcall(BugReport.deliver, title, body)
             if ok then
                 url, submit_err = result, result_err
             else

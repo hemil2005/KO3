@@ -33,12 +33,13 @@ details captured from a live work.
 | ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/29-update-home.png) |
 | ![Update prompt](screenshots/30-update-dialog.png) | ![Report row](screenshots/31-report-home.png) |
 | ![Report editor](screenshots/32-report-editor.png) | ![Log consent](screenshots/33-report-consent.png) |
-| ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
-| ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
-| ![Work account actions](screenshots/26-work-account-actions.png) | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) |
-| ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
-| ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
-| ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![KO3 at the bottom of Tools](screenshots/34-tools-menu.png) |
+| ![Report sent](screenshots/36-report-sent.png) | ![Work summary expanded](screenshots/18-work-summary.png) |
+| ![Work tags expanded](screenshots/19-work-tags.png) | ![Sign in on the landing page](screenshots/24-home-signed-out.png) |
+| ![Account on the landing page](screenshots/25-home-signed-in.png) | ![Work account actions](screenshots/26-work-account-actions.png) |
+| ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) | ![Account page](screenshots/28-account.png) |
+| ![Chapter-only TOC](screenshots/14-reader-toc.png) | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) |
+| ![Back to AO3 at end](screenshots/16-end-dialog-back.png) | ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) |
+| ![KO3 at the bottom of Tools](screenshots/34-tools-menu.png) | |
 
 ## Install
 
@@ -231,10 +232,20 @@ the release page is on `github.com`). Later updates then work in place.
 
 ### Reporting a bug
 
-**Tools → KO3 → Report a bug** opens a text field. After you
-describe what happened, a consent dialog asks whether to attach the
-diagnostic log and states that it is used only to find the cause of the
-issue. Choosing **Without log** sends the description alone.
+**Tools → KO3 → Report a bug** opens a text field. After you describe what
+happened, a consent dialog asks whether to attach the diagnostic log and
+states that the report and log are sent to the project's issue tracker, and
+that the log is used only to find the cause. Choosing **Without log** sends
+the description alone.
+
+**Attach log is the last step.** The report is POSTed to the KO3 relay
+(`relay/worker.js`, a small Cloudflare Worker), which files the issue with a
+fine-grained GitHub token that never ships in the plugin. The relay accepts
+10 reports per IP per day. No GitHub account is needed.
+
+If the relay cannot be reached, the report is still saved on the device as
+`koreader/ao3/reports/bug-<timestamp>/report.md` plus `log.txt`, ready to
+attach to [a new issue](https://github.com/hemil2005/KO3/issues/new).
 
 What the log contains:
 
@@ -246,19 +257,12 @@ What it never contains: your AO3 password (the plugin stores none), cookies,
 search text, work titles or work text. Query strings and fragments are
 stripped before anything is written.
 
-Delivery:
-
-- With `settings/ao3_report_token` present (a fine-grained GitHub token with
-  **Issues: write**), the report is filed automatically and the log is
-  embedded in the issue body.
-- Without it, the report is saved on the device as
-  `koreader/ao3/reports/bug-<timestamp>/report.md` plus `log.txt`, ready to
-  attach to [a new issue](https://github.com/hemil2005/KO3/issues/new).
-  GitHub does not allow anonymous issue creation, so this is the
-  credential-free path.
-
 The log itself lives at `koreader/ao3/logs/ao3.log`, is capped at 256 KB
 (one rotation to `ao3.log.1`) and is only read when you create a report.
+
+`settings/ao3_report_token` (a fine-grained token with **Issues: write**)
+bypasses the relay for the maintainer's device. The relay's deployment and
+token rotation are documented in `relay/README.md`.
 
 ## How it works
 
@@ -303,6 +307,10 @@ Work actions (only after Sign in; one form post per tap):
 Reading:
   GET https://download.archiveofourown.org/downloads/<work_id>/work.html
     -> AO3's own HTML download, saved and opened by crengine
+
+Bug reports (only on tap, after consent):
+  POST https://ko3-reports.ko3-reports.workers.dev/report
+    -> relay files a GitHub issue with a fine-grained token
 ```
 
 The fandom snapshot is generated from AO3 with `tools/build_fandoms.py`:
@@ -393,8 +401,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   restore-previous; the update row and prompt render in the emulator
   (`screenshots/29`–`30`).
 - Bug reports: query stripping, consent-gated log inclusion, report bundle
-  writing, token handling and the three screens render in the emulator
-  (`screenshots/31`–`33`).
+  writing, relay submission and token handling; the four screens render in
+  the emulator (`screenshots/31`–`33`, `36`). The relay was tested live end
+  to end from `bugreport.lua` (issues #1 and #2, then closed).
 - The KO3 entry is directly on the Tools tab, at the bottom of its first page
   (`screenshots/34`), not nested under More tools.
 - The author tabs: tapping **Bookmarks** opens the author's bookmarked works
@@ -404,7 +413,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 235 tests passing across parser, navigation,
+- The offline `busted` suite: 238 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and
   bug-report tests, including 51 account tests across token parsing, the
@@ -532,7 +541,7 @@ Tests prove behaviour; the emulator capture shows the actual result.
 | “failed its checksum” | The download was truncated or altered; nothing was installed. Try again |
 | “does not contain the plugin” | The release asset is wrong or incomplete; the installed copy was left untouched |
 | Update installed but nothing changed | KOReader is still running the old code — use **Restart** in the prompt, or restart it yourself |
-| “Report saved” but no issue was created | No `settings/ao3_report_token`; attach `report.md` (and `log.txt`) to a new issue |
+| “Report saved” but no issue was created | The relay was unreachable; attach `report.md` (and `log.txt`) to a new issue |
 | “Could not send the report” | Token rejected or no network; the report is still saved in `ao3/reports/` |
 
 If a work opens as a login page or an adult warning, the file is rejected
