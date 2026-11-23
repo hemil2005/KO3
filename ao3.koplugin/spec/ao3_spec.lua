@@ -183,6 +183,19 @@ describe("AO3 browser", function()
             assert.are.equal("317,737", listing.count)
         end)
 
+        it("reads the works count from an author works page", function()
+            local listing = plugin:parseListing(read_fixture("author/works_fandom.html"))
+            assert.are.equal("12", listing.count)
+            assert.are.equal(1, #listing.items)
+            assert.are.equal("Porcelain Scales", listing.items[1].title)
+        end)
+
+        it("reads the count from a paginated author works page", function()
+            local listing = plugin:parseListing(read_fixture("author/works.html"))
+            assert.are.equal("535", listing.count)
+            assert.are.equal(2, #listing.items)
+        end)
+
         it("captures each author's page link", function()
             local listing = plugin:parseListing(read_fixture("search.html"))
             assert.are.same({ "/users/myreia/pseuds/myreia" },
@@ -799,15 +812,84 @@ describe("AO3 browser", function()
                 "Status", "Author", "Tags", "Words" }, names)
         end)
 
-        it("opens an author's works from the work screen", function()
+        it("opens an author page on the dashboard tab", function()
+            local menu = open_home()
+            local fetched = {}
+            plugin.fetchPage = function(_, url, parse, label, on_success)
+                fetched[#fetched + 1] = url
+                on_success(parse(read_fixture("author/dashboard.html")))
+            end
+            local ok, err = pcall(function()
+                plugin:showAuthor("Kingsaxcul", "/users/Kingsaxcul/works")
+            end)
+            plugin.fetchPage = nil
+            assert.is_true(ok, err)
+            assert.is_truthy(fetched[1]:find("?expand_fandoms=true", 1, true))
+            -- The tab strip is the first row, then the fandom list.
+            assert.is_truthy(menu.item_table[1].ao3_tabs)
+            assert.are.equal("Harry Potter - J. K. Rowling", menu.item_table[2].text)
+            assert.are.equal("12 works", menu.item_table[2].mandatory)
+        end)
+
+        it("switches author tabs in place and caches each page", function()
+            local menu = open_home()
+            local calls = 0
+            plugin.fetchPage = function(_, url, parse, label, on_success)
+                calls = calls + 1
+                if url:find("/series", 1, true) then
+                    on_success(parse(read_fixture("author/series.html")))
+                else
+                    on_success(parse(read_fixture("author/dashboard.html")))
+                end
+            end
+            local ok, err = pcall(function()
+                plugin:showAuthor("Kingsaxcul", "https://archiveofourown.org/users/Kingsaxcul")
+                assert.are.equal(1, calls)
+                menu.item_table[1].ao3_tabs[3].callback()
+                assert.are.equal(2, calls)
+                assert.are.equal("Coils AU", menu.item_table[2].text)
+                assert.are.equal("2 works", menu.item_table[2].mandatory)
+                assert.is_truthy(menu.ao3_title:find("2 series", 1, true))
+                -- Re-visiting a tab uses its cached page, no extra request.
+                menu.item_table[1].ao3_tabs[3].callback()
+                menu.item_table[1].ao3_tabs[1].callback()
+                assert.are.equal(2, calls)
+            end)
+            plugin.fetchPage = nil
+            assert.is_true(ok, err)
+        end)
+
+        it("opens one fandom's works for the author from the dashboard", function()
+            local menu = open_home()
+            plugin.fetchPage = function(_, url, parse, label, on_success)
+                on_success(parse(read_fixture("author/dashboard.html")))
+            end
+            local opened_url, opened_title
+            plugin.loadListing = function(_, url, title)
+                opened_url, opened_title = url, title
+            end
+            local ok, err = pcall(function()
+                plugin:showAuthor("Kingsaxcul", "https://archiveofourown.org/users/Kingsaxcul")
+                menu.item_table[2].action()
+            end)
+            plugin.fetchPage = nil
+            plugin.loadListing = nil
+            assert.is_true(ok, err)
+            assert.are.equal(
+                "https://archiveofourown.org/users/Kingsaxcul/works?fandom_id=136512",
+                opened_url)
+            assert.are.equal("Harry Potter - J. K. Rowling", opened_title)
+        end)
+
+        it("opens an author page from the work screen", function()
             local UIManager = require("ui/uimanager")
             local old_show, old_close = UIManager.show, UIManager.close
             local shown
             UIManager.show = function(_, widget) shown = widget end
             UIManager.close = function() end
-            local opened_url, opened_title
-            plugin.loadListing = function(_, url, title)
-                opened_url, opened_title = url, title
+            local opened_name, opened_profile
+            plugin.showAuthor = function(_, name, profile)
+                opened_name, opened_profile = name, profile
             end
             local ok, err = pcall(function()
                 plugin:showWork({
@@ -828,12 +910,10 @@ describe("AO3 browser", function()
                 author_rows[1].callback({})
             end)
             UIManager.show, UIManager.close = old_show, old_close
-            plugin.loadListing = nil
+            plugin.showAuthor = nil
             assert.is_true(ok, err)
-            assert.are.equal(
-                "https://archiveofourown.org/users/a/pseuds/A_Writer/works",
-                opened_url)
-            assert.is_truthy(opened_title:find("A Writer", 1, true))
+            assert.are.equal("A Writer", opened_name)
+            assert.are.equal("/users/a/pseuds/A_Writer", opened_profile)
         end)
 
         it("keeps an anonymous author as plain text", function()
@@ -863,8 +943,10 @@ describe("AO3 browser", function()
             local shown
             UIManager.show = function(_, widget) shown = widget end
             UIManager.close = function() end
-            local opened_url
-            plugin.loadListing = function(_, url) opened_url = url end
+            local opened_url, opened_title
+            plugin.showAuthor = function(_, name, profile)
+                opened_url, opened_title = name, profile
+            end
             local ok, err = pcall(function()
                 local author_row
                 for _, row in ipairs(plugin:homeRows()) do
@@ -880,10 +962,11 @@ describe("AO3 browser", function()
                 shown.buttons[1][2].callback()
             end)
             UIManager.show, UIManager.close = old_show, old_close
-            plugin.loadListing = nil
+            plugin.showAuthor = nil
             assert.is_true(ok, err)
+            assert.are.equal("An Author", opened_url)
             assert.are.equal(
-                "https://archiveofourown.org/users/An%20Author/works", opened_url)
+                "https://archiveofourown.org/users/An%20Author/works", opened_title)
         end)
 
         it("labels Read as an offline action for a cached work", function()

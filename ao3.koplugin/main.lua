@@ -234,78 +234,12 @@ end
 -- Listing parser
 -- ---------------------------------------------------------------------------
 
-local function parseWork(node)
-    local title_link
-    for _, a in ipairs(node:select("h4.heading a")) do
-        local href = a.attributes.href or ""
-        local is_work_link = href:match("^/works/%d+")
-            or href:match("^https?://[^/]+/works/%d+")
-        if is_work_link and a.attributes.rel ~= "author" then
-            title_link = a
-            break
-        end
-    end
+local MAIN_SOURCE = debug.getinfo(1, "S").source:sub(2)
+local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
 
-    local id = node.id and node.id:match("work_(%d+)")
-    if not id and title_link then
-        id = (title_link.attributes.href or ""):match("/works/(%d+)")
-    end
-    if not id then return nil end
-
-    local authors, author_urls = {}, {}
-    for _, a in ipairs(node:select("h4.heading a[rel='author']")) do
-        local name = plain(a)
-        if name ~= "" then
-            table.insert(authors, name)
-            local href = a.attributes.href or ""
-            if href ~= "" then table.insert(author_urls, href) end
-        end
-    end
-
-    local fandoms = {}
-    for _, a in ipairs(node:select("h5.fandoms a.tag")) do
-        local name = plain(a)
-        if name ~= "" then table.insert(fandoms, name) end
-    end
-
-    local tags = {}
-    for _, a in ipairs(node:select("ul.tags.commas a.tag")) do
-        local name = plain(a)
-        if name ~= "" then table.insert(tags, name) end
-    end
-
-    local function stat(class_name)
-        return plain(first(node:select("dd." .. class_name)))
-    end
-
-    local rating = plain(first(node:select("ul.required-tags span.rating")))
-    local warnings = plain(first(node:select("ul.required-tags span.warnings")))
-    local category = plain(first(node:select("ul.required-tags span.category")))
-    local complete = first(node:select("ul.required-tags span.complete-yes")) and _("Complete")
-        or (first(node:select("ul.required-tags span.complete-no")) and _("In progress") or "")
-
-    return {
-        id = id,
-        title = title_link and plain(title_link) or T(_("Work %1"), id),
-        authors = #authors > 0 and table.concat(authors, ", ") or _("Anonymous"),
-        author_names = #authors > 0 and authors or nil,
-        author_urls = #author_urls > 0 and author_urls or nil,
-        fandoms = table.concat(fandoms, ", "),
-        tags = table.concat(tags, ", "),
-        summary = plain(first(node:select("blockquote.summary"))),
-        rating = rating,
-        warnings = warnings,
-        category = category,
-        complete = complete,
-        updated = plain(first(node:select("p.datetime"))),
-        words = stat("words"),
-        chapters = stat("chapters"),
-        comments = stat("comments"),
-        kudos = stat("kudos"),
-        bookmarks = stat("bookmarks"),
-        hits = stat("hits"),
-    }
-end
+-- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
+-- same parser; listings, search results and bookmark pages share the markup.
+local parseWork = AuthorPage.parseWorkNode
 
 function Ao3:parseListing(html)
     local ok, root = pcall(htmlparser.parse, html, 5000)
@@ -349,7 +283,10 @@ function Ao3:parseListing(html)
     if not count then
         for _, h in ipairs(root:select("h2.heading")) do
             local text = plain(h)
+            -- Search/tag pages say "1 - 20 of N Works"; author pages say
+            -- "N Works by <name>" (single page) or the same "of" form.
             count = text:match("of ([%d,]+) Works")
+                or text:match("^([%d,]+) Works by")
             if count then break end
         end
     end
@@ -371,7 +308,6 @@ end
 -- a tiny index. Only the letter the user opens is read and decompressed.
 
 local FANDOM_DATA_DIR = "data/fandoms"
-local MAIN_SOURCE = debug.getinfo(1, "S").source:sub(2)
 local FandomPages = dofile((MAIN_SOURCE:gsub("main%.lua$", "fandompages.lua")))
 
 function Ao3:fandomDataDir()
@@ -733,7 +669,10 @@ function Ao3WorkMenu:setupItemHeights()
         or ((self.item_dimen and self.item_dimen.h or 0) * (self.perpage or 1))
     local items, used = {}, 0
     for index, item in ipairs(self.item_table) do
-        if item.ao3_work then
+        if item.ao3_tabs then
+            -- The author tab strip is a row of its own above the content.
+            item.height = item.ao3_tabs:getSize().h + Size.span.vertical_default
+        elseif item.ao3_work then
             item.height = item.summary and metrics.card_h or metrics.card_no_summary_h
         else
             item.height = compact_h
@@ -790,23 +729,35 @@ function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
             if index == self.itemnumber then
                 select_number = idx
             end
-            local item_tmp = Ao3MenuItem:new{
-                idx = index,
-                entry = item,
-                menu = self,
-                show_parent = self.show_parent,
-                dimen = Geom:new{
+            if item.ao3_tabs then
+                -- The tab strip paints itself; it is not a focusable row, so
+                -- DPad navigation stays on the content below it.
+                local strip = item.ao3_tabs
+                strip.dimen = Geom:new{
                     x = 0, y = 0,
                     w = self.item_dimen.w,
-                    h = item.height or self.item_dimen.h,
-                },
-                font_size = self.font_size,
-                infont_size = self.items_mandatory_font_size or (self.font_size - 4),
-                linesize = self.linesize,
-                line_color = self.line_color,
-            }
-            table.insert(self.item_group, item_tmp)
-            table.insert(self.layout, { item_tmp })
+                    h = item.height or strip:getSize().h,
+                }
+                table.insert(self.item_group, strip)
+            else
+                local item_tmp = Ao3MenuItem:new{
+                    idx = index,
+                    entry = item,
+                    menu = self,
+                    show_parent = self.show_parent,
+                    dimen = Geom:new{
+                        x = 0, y = 0,
+                        w = self.item_dimen.w,
+                        h = item.height or self.item_dimen.h,
+                    },
+                    font_size = self.font_size,
+                    infont_size = self.items_mandatory_font_size or (self.font_size - 4),
+                    linesize = self.linesize,
+                    line_color = self.line_color,
+                }
+                table.insert(self.item_group, item_tmp)
+                table.insert(self.layout, { item_tmp })
+            end
         end
     end
 
@@ -824,22 +775,25 @@ function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
     end)
 end
 
-function Ao3:showListing(listing, fallback_title, replace)
+-- One selectable card per work: title, author, bounded summary. Shared by
+-- plain listings and the author screen's Works/Bookmarks tabs.
+function Ao3:workRow(work)
+    local summary = trim(work.summary or "")
+    return {
+        text = work.title,
+        mandatory = work.authors,
+        ao3_work = work,
+        summary = summary ~= "" and shorten(summary, AO3_CARD_SUMMARY_CHARS) or nil,
+        action = function()
+            self:showWork(work)
+        end,
+    }
+end
+
+function Ao3:listingRows(listing, fallback_title)
     local rows = {}
     for _, work in ipairs(listing.items) do
-        local summary = trim(work.summary or "")
-        local current = work
-        rows[#rows + 1] = {
-            text = work.title,
-            mandatory = work.authors,
-            -- One selectable card carries everything visible for the work.
-            -- The raw work is kept for the action and for future fields.
-            ao3_work = work,
-            summary = summary ~= "" and shorten(summary, AO3_CARD_SUMMARY_CHARS) or nil,
-            action = function()
-                self:showWork(current)
-            end,
-        }
+        rows[#rows + 1] = self:workRow(work)
     end
     if #rows == 0 then
         rows[1] = { text = _("No works found.") }
@@ -869,6 +823,154 @@ function Ao3:showListing(listing, fallback_title, replace)
     if listing.count then
         title = T(_("%1 · %2 works"), title, listing.count)
     end
+    return rows, title
+end
+
+function Ao3:showListing(listing, fallback_title, replace)
+    local rows, title = self:listingRows(listing, fallback_title)
+    if replace then
+        self:replaceRows(title, rows)
+    else
+        self:pushRows(title, rows)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Author screen
+-- ---------------------------------------------------------------------------
+--
+-- Four tabs: Dashboard (default), Works, Series, Bookmarks. The tab strip is
+-- the first row of the menu, so Back and paging behave like every other
+-- screen, and each tab's page is fetched at most once per author visit.
+
+function Ao3:authorTabRow(tab_id)
+    local strip = AuthorPage.tabStrip(tab_id, function(selected)
+        self:renderAuthorTab(selected, true)
+    end)
+    return { ao3_tabs = strip }
+end
+
+function Ao3:showAuthor(name, profile)
+    local base = AuthorPage.profileUrl(profile or "")
+    if not base then return end
+    if not base:match("^https?://") then
+        base = BASE_URL .. base
+    end
+    self.author = {
+        name = (name and name ~= "") and name or base,
+        profile = base,
+        tab = "dashboard",
+        cache = {},
+    }
+    self:renderAuthorTab("dashboard", false)
+end
+
+function Ao3:renderAuthorTab(tab_id, replace)
+    local author = self.author
+    if not author then return end
+    author.tab = tab_id
+    local cached = author.cache[tab_id]
+    if cached then
+        self:showAuthorRows(tab_id, cached, replace)
+        return
+    end
+
+    local url, parse, label
+    if tab_id == "dashboard" then
+        url = author.profile .. "?expand_fandoms=true"
+        parse = function(html) return AuthorPage.parseFandoms(html) end
+        label = _("Loading fandoms…")
+    elseif tab_id == "works" then
+        url = AuthorPage.tabUrl(author.profile, "works")
+        parse = function(html) return self:parseListing(html) end
+        label = _("Loading works…")
+    elseif tab_id == "series" then
+        url = AuthorPage.tabUrl(author.profile, "series")
+        parse = function(html) return AuthorPage.parseSeries(html) end
+        label = _("Loading series…")
+    elseif tab_id == "bookmarks" then
+        url = AuthorPage.tabUrl(author.profile, "bookmarks")
+        parse = function(html) return AuthorPage.parseBookmarks(html) end
+        label = _("Loading bookmarks…")
+    end
+    if not url then return end
+
+    self:fetchPage(url, parse, label, function(data)
+        author.cache[tab_id] = data
+        self:showAuthorRows(tab_id, data, replace)
+    end)
+end
+
+function Ao3:showAuthorRows(tab_id, data, replace)
+    local author = self.author
+    local rows = { self:authorTabRow(tab_id) }
+    local title = author.name
+
+    if tab_id == "dashboard" then
+        -- Translate outside the loop: `for _, item` shadows `_`.
+        local works_label = _("%1 works")
+        for _, item in ipairs(data.items) do
+            rows[#rows + 1] = {
+                text = item.name,
+                mandatory = item.count and T(works_label, item.count) or nil,
+                action = function()
+                    self:loadListing(BASE_URL .. item.url, item.name)
+                end,
+            }
+        end
+        if #data.items == 0 then
+            rows[#rows + 1] = { text = _("No fandoms listed.") }
+        end
+        title = T(_("%1 · Fandoms"), author.name)
+    elseif tab_id == "works" then
+        local listing_rows, listing_title = self:listingRows(
+            data, T(_("Works by %1"), author.name))
+        for _, row in ipairs(listing_rows) do
+            rows[#rows + 1] = row
+        end
+        title = listing_title
+    elseif tab_id == "series" then
+        local works_label = _("%1 works")
+        for _, item in ipairs(data.items) do
+            rows[#rows + 1] = {
+                text = item.title,
+                mandatory = item.works and T(works_label, item.works) or nil,
+                action = function()
+                    self:loadListing(BASE_URL .. item.url, item.title)
+                end,
+            }
+        end
+        if #data.items == 0 then
+            rows[#rows + 1] = { text = _("No series.") }
+        end
+        title = T(_("Series by %1"), author.name)
+        if data.count then
+            title = T(_("%1 · %2 series"), title, data.count)
+        end
+    elseif tab_id == "bookmarks" then
+        local works_label = _("%1 works")
+        for _, item in ipairs(data.items) do
+            if item.kind == "series" then
+                rows[#rows + 1] = {
+                    text = item.title,
+                    mandatory = item.works and T(works_label, item.works) or nil,
+                    action = function()
+                        self:loadListing(BASE_URL .. item.url, item.title)
+                    end,
+                }
+            else
+                rows[#rows + 1] = self:workRow(item)
+            end
+        end
+        if #data.items == 0 then
+            rows[#rows + 1] = { text = _("No bookmarks.") }
+        end
+        title = T(_("Bookmarks by %1"), author.name)
+        if data.count then
+            title = T(_("%1 · %2 bookmarks"), title, data.count)
+        end
+    end
+
     if replace then
         self:replaceRows(title, rows)
     else
@@ -932,8 +1034,7 @@ function Ao3:showWork(work)
                 _("Author"), name,
                 callback = function(kv_page)
                     UIManager:close(kv_page)
-                    self:loadListing(self:authorWorksUrl(url),
-                        T(_("Works by %1"), name))
+                    self:showAuthor(name, url)
                 end,
             }
         end
@@ -1538,7 +1639,7 @@ function Ao3:authorDialog()
                     if input ~= "" then
                         local url = self:authorWorksUrl(input)
                         if url then
-                            self:loadListing(url, T(_("Works by %1"), input))
+                            self:showAuthor(input, url)
                         end
                     end
                 end,

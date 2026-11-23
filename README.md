@@ -15,9 +15,10 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
 
 ## Screenshots
 
-Taken from the KOReader emulator (600×800, grayscale). The work-list shot
-uses an offline AO3 search fixture; the other browse/detail shots use the
-plugin and embedded fandom data, with the details captured from a live work.
+Taken from the KOReader emulator (600×800, grayscale). The work-list and
+author-tab shots render real AO3 markup captured offline; the other
+browse/detail shots use the plugin and embedded fandom data, with the
+details captured from a live work.
 
 | | |
 |---|---|
@@ -25,6 +26,9 @@ plugin and embedded fandom data, with the details captured from a live work.
 | ![Fandoms by media](screenshots/03-fandoms.png) | ![Letters](screenshots/04-letters.png) |
 | ![Fandom list](screenshots/05-fandom-list.png) | ![Works with summaries](screenshots/06-works.png) |
 | ![Work details](screenshots/07-work-details.png) | ![Reading a work](screenshots/08-reading.png) |
+| ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
+| ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
+| ![Author works](screenshots/13-author-works.png) | |
 
 ## Install
 
@@ -41,6 +45,7 @@ koreader/
     ao3.koplugin/
       _meta.lua
       main.lua
+      authorpage.lua
       fandompages.lua
       data/fandoms/index.lua
       data/fandoms/<category>/<letter>.tsv.z
@@ -70,9 +75,20 @@ touchscreen width.
 
 Tap a result to drill in; tap a work for its tags, summary and stats; tap
 **Read** to fetch it and open it in the KOReader reader. On the work
-screen each author's name opens that author's works as the same kind of
-card listing (co-authors each get a row; Anonymous stays plain text).
-Back (the footer
+screen each author's name opens the author page (co-authors each get a
+row; Anonymous stays plain text).
+
+The author page has four tabs in a horizontal strip:
+
+| Tab | What it shows |
+|---|---|
+| **Dashboard** (default) | The fandoms the author has written in, with work counts. Tapping one opens that author's works in that fandom (AO3's own author-scoped fandom links). |
+| **Works** | All of the author's works as the same card listing. |
+| **Series** | The author's series, with work counts; tapping one opens the series' works. |
+| **Bookmarks** | Works (and series) the author has bookmarked, as cards. |
+
+Each tab is fetched at most once per author visit, so switching back and
+forth does not re-request AO3. Back (the footer
 arrow, the hardware Back key, the X, or a downward swipe) goes one level up
 instead of dropping you into the file manager.
 
@@ -95,6 +111,13 @@ Listing:
   GET https://archiveofourown.org/works/search?work_search[query]=...
   GET https://archiveofourown.org/tags/<tag>/works?page=N
     -> parse <li class="work blurb group"> into 20 selectable work cards
+
+Author page (four tabs):
+  GET /users/<name>?expand_fandoms=true       Dashboard: fandoms + counts
+  GET /users/<name>/works                     Works
+  GET /users/<name>/series                    Series
+  GET /users/<name>/bookmarks                 Bookmarks
+  GET /users/<name>/works?fandom_id=<id>      one fandom, author-scoped
 
 Reading:
   GET https://download.archiveofourown.org/downloads/<work_id>/work.html
@@ -131,10 +154,15 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   page with the count and working page navigation.
 - Work lists render a single selectable title/author/three-line summary card
   per work, without separate shortcut or description rows.
+- The author page (Dashboard / Works / Series / Bookmarks) is built from the
+  exact live AO3 markup captured on 2026-11-23, including author-scoped
+  fandom links, series stats, work bookmarks and series bookmarks; the four
+  tabs render in the emulator (`screenshots/10`–`13`).
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
-- The offline `busted` suite: 90 tests passing across parser, navigation,
-  bounded-index, rendered-card interaction and old-build compatibility tests.
+- The offline `busted` suite: 106 tests passing across parser, navigation,
+  bounded-index, rendered-card interaction, old-build compatibility and
+  author-page tests.
 
 **Current connectivity:** AO3 refused the emulator's listing request with
 `403`; independent Windows and WSL `curl` requests received `429` on this
@@ -193,6 +221,20 @@ done
 ```
 
 See `ao3.koplugin/spec/README.md` for details.
+
+### Demonstrating a change in the emulator
+
+Every user-visible change is also shown in the local Kindle emulator
+(600×800), not only tested. After the suite is green:
+
+1. Launch the emulator (`kodev run` or the `wl_launch.sh` helper used here).
+2. Exercise the real screen with taps/keys, or, when live AO3 is gated,
+   render the screen offscreen from the real markup fixtures and write it
+   with `Screen.bb:writePNG(...)` from a throwaway busted spec.
+3. Save the captures to `screenshots/` and add or update them in the table
+   at the top of this README.
+
+Tests prove behaviour; the emulator capture shows the actual result.
 
 ## Troubleshooting
 
