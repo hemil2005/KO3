@@ -712,6 +712,36 @@ describe("AO3 browser", function()
             assert.is_true(close.dimen.h <= bar.dimen.h)
         end)
 
+        it("brings the network up before downloading an update", function()
+            local NetworkMgr = require("ui/network/manager")
+            local http = require("socket.http")
+            local UIManager = require("ui/uimanager")
+            local old_run, old_after = NetworkMgr.runWhenOnline, NetworkMgr.afterWifiAction
+            local old_request, old_show = http.request, UIManager.show
+            local online, offline, shown = 0, 0, {}
+            NetworkMgr.runWhenOnline = function(_, callback)
+                online = online + 1
+                callback()
+            end
+            NetworkMgr.afterWifiAction = function() offline = offline + 1 end
+            UIManager.show = function(_, widget) shown[#shown + 1] = widget end
+            http.request = function() return nil, "timeout" end
+            local ok, err = pcall(function()
+                plugin:installUpdate(plugin:pluginDir(), {
+                    version = "9.9.9",
+                    zip_url = "https://example.test/ao3.zip",
+                })
+            end)
+            NetworkMgr.runWhenOnline, NetworkMgr.afterWifiAction = old_run, old_after
+            http.request, UIManager.show = old_request, old_show
+            assert.is_true(ok, err)
+            -- The manifest check may have left Wi-Fi off; the download has to
+            -- ask for it itself or it sits on a dead socket until it times out.
+            assert.are.equal(1, online)
+            assert.are.equal(1, offline)
+            assert.is_truthy(shown[#shown].text:find("Update failed", 1, true))
+        end)
+
         it("leads with the logo lockup and one primary search bar", function()
             local menu = open_home()
             assert.are.equal("hero", menu.item_table[1].role)

@@ -29,6 +29,7 @@ local lfs = require("libs/libkoreader-lfs")
 local ltn12 = require("ltn12")
 local socket = require("socket")
 local socketutil = require("socketutil")
+local socketurl = require("socket.url")
 local http = require("socket.http")
 local JSON = require("json")
 local ffiutil = require("ffi/util")
@@ -270,6 +271,29 @@ function Updater.backupDir(plugin_dir)
     return plugin_dir .. Updater.BACKUP_SUFFIX
 end
 
+-- GitHub serves release assets from a CDN host that some Kindle networks
+-- cannot reach even though api.github.com works. The tag's source archive is
+-- on codeload.github.com and contains the same ao3.koplugin tree.
+function Updater.sourceUrl(version)
+    local v = tostring(version or ""):gsub("^[vV]", "")
+    if not Updater.parseVersion(v) then return nil end
+    return "https://codeload.github.com/" .. Updater.REPO .. "/zip/refs/tags/v" .. v
+end
+
+-- The release zip roots entries at "ao3.koplugin/"; the source archive adds
+-- the repository folder in front ("KO3-1.2.1/ao3.koplugin/").
+function Updater.pluginRoot(entries)
+    for _, entry in ipairs(entries or {}) do
+        local path = entry.path or ""
+        if path:sub(1, #Updater.ARCHIVE_ROOT) == Updater.ARCHIVE_ROOT then
+            return Updater.ARCHIVE_ROOT
+        end
+        local root = path:match("^([^/]+/ao3%.koplugin/)")
+        if root then return root end
+    end
+    return Updater.ARCHIVE_ROOT
+end
+
 -- ---------------------------------------------------------------------------
 -- Network
 -- ---------------------------------------------------------------------------
@@ -281,24 +305,66 @@ local function uaHeaders()
     }
 end
 
+local MAX_REDIRECTS = 5
+local REDIRECT_CODES = {
+    [301] = true, [302] = true, [303] = true, [307] = true, [308] = true,
+}
+
+-- GET with manual redirects. LuaSocket's automatic redirect reuses the
+-- original request for the new host; on the Kindle's LuaSec it can sit on the
+-- redirect to GitHub's asset CDN until the socket times out, even though the
+-- API request that produced the changelog went through. Rebuilding each hop
+-- keeps the request (and a resume Range) valid for the host that answers.
+local function get(url, sink, timeout, headers, on_redirect)
+    local current = url
+    local hops = 0
+    local block, total = socketutil:set_timeout(timeout or 20, (timeout or 20) * 3)
+    while true do
+        local ok, code, response_headers, status = pcall(function()
+            return socket.skip(1, http.request{
+                url = current,
+                method = "GET",
+                headers = headers or uaHeaders(),
+                sink = sink,
+                redirect = false,
+            })
+        end)
+        if not ok or type(code) ~= "number" then
+            socketutil:reset_timeout()
+            return nil, "network", tostring(code or status), block, total
+        end
+        local location = response_headers and response_headers["location"]
+        if REDIRECT_CODES[code] and location then
+            hops = hops + 1
+            if hops > MAX_REDIRECTS then
+                socketutil:reset_timeout()
+                return nil, "redirect", _("The update server redirected too many times.")
+            end
+            local next_url = socketurl.absolute(current, location)
+            if not next_url
+                    or (current:match("^https:") and next_url:match("^http:")) then
+                socketutil:reset_timeout()
+                return nil, "redirect", _("The update server redirected to an unsafe address.")
+            end
+            if on_redirect then on_redirect() end
+            current = next_url
+        else
+            socketutil:reset_timeout()
+            return code
+        end
+    end
+end
+
 local function getJson(url, timeout)
     local chunks = {}
-    socketutil:set_timeout(timeout or 20, (timeout or 20) * 2)
-    local ok, code, status = pcall(function()
-        return socket.skip(1, http.request{
-            url = url,
-            method = "GET",
-            headers = uaHeaders(),
-            sink = ltn12.sink.table(chunks),
-            redirect = true,
-        })
+    local code, err = get(url, ltn12.sink.table(chunks), timeout, nil, function()
+        for i = #chunks, 1, -1 do chunks[i] = nil end
     end)
-    socketutil:reset_timeout()
-    if not ok then
-        return nil, tostring(code)
+    if not code then
+        return nil, err
     end
     if code ~= 200 then
-        return nil, T(_("The update server answered HTTP %1."), tostring(code or status))
+        return nil, T(_("The update server answered HTTP %1."), tostring(code))
     end
     return table.concat(chunks)
 end
@@ -330,44 +396,96 @@ end
 
 -- Download an asset to `dest`. Verifies SHA-256 when the manifest has one.
 -- The caller owns `dest` on success; it is removed on failure.
-function Updater.download(manifest, dest, timeout)
-    local file, err = io.open(dest, "wb")
+--
+-- A stalled connection is retried, resuming from the bytes already on disk
+-- with an HTTP Range request. Kindle Wi-Fi drops long transfers often enough
+-- that starting a 2.7 MB zip over from zero would usually fail again.
+Updater.DOWNLOAD_ATTEMPTS = 3
+
+local function downloadOnce(url, dest, offset, timeout)
+    local mode = offset > 0 and "r+b" or "wb"
+    local file, err = io.open(dest, mode)
     if not file then
-        return nil, T(_("Cannot write %1: %2"), dest, tostring(err))
+        return nil, "write", err
     end
-    socketutil:set_timeout(timeout or 120, (timeout or 120) * 3)
-    local ok, code, status = pcall(function()
-        return socket.skip(1, http.request{
-            url = manifest.zip_url,
-            method = "GET",
-            headers = uaHeaders(),
-            sink = ltn12.sink.file(file),
-            redirect = true,
-        })
-    end)
-    socketutil:reset_timeout()
-    if not ok or code ~= 200 then
-        pcall(function() file:close() end)
-        os.remove(dest)
-        return nil, T(_("Download failed (HTTP %1)."), tostring(code or status or "network error"))
+    if offset > 0 then
+        file:seek("set", offset)
     end
+    local headers = uaHeaders()
+    if offset > 0 then
+        headers["Range"] = "bytes=" .. offset .. "-"
+    end
+    local code, kind, detail, block, total = get(url, ltn12.sink.file(file),
+        timeout, headers, function()
+            -- Drop a redirect body written at the resume point; the next hop
+            -- overwrites it with the real bytes.
+            file:seek("set", offset)
+        end)
     pcall(function() file:close() end)
+
+    if not code then
+        return nil, kind, detail, block, total
+    end
+    if offset > 0 and code == 200 then
+        -- The server ignored Range and sent the whole file, so the appended
+        -- copy is corrupt. Start over from zero.
+        return nil, "restart", "range ignored"
+    end
+    if code ~= 200 and code ~= 206 then
+        return nil, "http", code
+    end
+    return true
+end
+
+function Updater.download(manifest, dest, timeout)
+    local last_err
+    for attempt = 1, Updater.DOWNLOAD_ATTEMPTS do
+        local offset = lfs.attributes(dest, "size") or 0
+        local ok, kind, detail, block, total = downloadOnce(
+            manifest.zip_url, dest, offset, timeout)
+        if ok then
+            break
+        end
+        if kind == "write" then
+            os.remove(dest)
+            return nil, T(_("Cannot write %1: %2"), dest, tostring(detail)), "write"
+        end
+        if kind == "http" then
+            os.remove(dest)
+            return nil, T(_("Download failed (HTTP %1)."), tostring(detail)), "http"
+        end
+        if kind == "redirect" then
+            os.remove(dest)
+            return nil, detail, "redirect"
+        end
+        if kind == "restart" then
+            os.remove(dest)
+            last_err = _("The update server restarted the download.")
+        else
+            last_err = socketutil.describe_error(detail, block, total)
+                or T(_("Download failed (%1)."), tostring(detail))
+        end
+        if attempt == Updater.DOWNLOAD_ATTEMPTS then
+            os.remove(dest)
+            return nil, last_err, kind
+        end
+    end
 
     if manifest.sha256 then
         local has_sha2, sha2 = pcall(require, "ffi/sha2")
         if not has_sha2 or not sha2 then
             os.remove(dest)
-            return nil, _("This KOReader build cannot verify downloads. Install this update from the release zip instead.")
+            return nil, _("This KOReader build cannot verify downloads. Install this update from the release zip instead."), "verify"
         end
         local data = readAll(dest)
         if not data then
             os.remove(dest)
-            return nil, T(_("Could not read the downloaded file."))
+            return nil, T(_("Could not read the downloaded file.")), "read"
         end
         local actual = sha2.sha256(data)
         if actual:lower() ~= manifest.sha256 then
             os.remove(dest)
-            return nil, _("The downloaded update failed its checksum and was discarded.")
+            return nil, _("The downloaded update failed its checksum and was discarded."), "checksum"
         end
     end
     return true
@@ -416,7 +534,8 @@ function Updater.install(plugin_dir, zip_path, manifest, options)
     if not archive then
         return nil, list_err
     end
-    local plan = Updater.planEntries(archive.entries)
+    local root = options.root or Updater.pluginRoot(archive.entries)
+    local plan = Updater.planEntries(archive.entries, root)
     if #plan == 0 then
         return nil, _("The update archive does not contain the plugin.")
     end
@@ -508,7 +627,25 @@ end
 function Updater.update(plugin_dir, manifest, options)
     options = options or {}
     local zip_path = options.zip_path or Updater.downloadPath(manifest.version)
-    local ok, err = Updater.download(manifest, zip_path, options.timeout)
+    local ok, err, kind = Updater.download(manifest, zip_path, options.timeout)
+    if not ok and kind ~= "checksum" and kind ~= "write"
+            and kind ~= "verify" and kind ~= "read" then
+        -- The release asset lives on GitHub's asset CDN, which some Kindle
+        -- networks cannot reach even when the API request for the changelog
+        -- works. The tag's source archive is on codeload.github.com and
+        -- carries the same plugin tree; it has no manifest checksum, so the
+        -- staged _meta.lua version is the version check.
+        local source = Updater.sourceUrl(manifest.version)
+        if source and source ~= manifest.zip_url then
+            local fallback_ok, fallback_err = Updater.download(
+                { zip_url = source }, zip_path, options.timeout)
+            if fallback_ok then
+                ok, err = true, nil
+            else
+                err = fallback_err or err
+            end
+        end
+    end
     if not ok then
         return nil, err
     end

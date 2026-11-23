@@ -3200,36 +3200,44 @@ function Ao3:checkForUpdates()
 end
 
 function Ao3:installUpdate(dir, manifest)
-    local Trapper = require("ui/trapper")
-    local installed, err
-    Trapper:wrap(function()
-        Trapper:info(T(_("Downloading v%1…"), manifest.version), true)
-        local ok, result, result_err = pcall(Updater.update, dir, manifest)
-        if not ok then
-            err = tostring(result)
-        elseif result then
-            installed = true
-        else
-            err = result_err
+    -- The check brackets its request with runWhenOnline/afterWifiAction, which
+    -- may leave Wi-Fi off when the user then taps Update in the prompt. The
+    -- download must bring the network back up itself, or it waits until the
+    -- socket times out.
+    NetworkMgr:runWhenOnline(function()
+        local Trapper = require("ui/trapper")
+        local installed, err
+        Trapper:wrap(function()
+            Trapper:info(T(_("Downloading v%1…"), manifest.version), true)
+            local ok, result, result_err = pcall(Updater.update, dir, manifest)
+            if not ok then
+                err = tostring(result)
+            elseif result then
+                installed = true
+            else
+                err = result_err
+            end
+            Trapper:reset()
+        end)
+        NetworkMgr:afterWifiAction()
+
+        if not installed then
+            BugReport.log("update", "install failed: " .. tostring(err))
+            UIManager:show(InfoMessage:new{
+                text = T(_("Update failed:\n%1"), err or _("unknown error")),
+            })
+            return
         end
-        Trapper:reset()
-    end)
-    if not installed then
-        BugReport.log("update", "install failed: " .. tostring(err))
-        UIManager:show(InfoMessage:new{
-            text = T(_("Update failed:\n%1"), err or _("unknown error")),
+        BugReport.log("update", "installed " .. tostring(manifest.version))
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Updated to v%1.\nRestart KOReader to use it."), manifest.version),
+            ok_text = _("Restart"),
+            cancel_text = _("Later"),
+            ok_callback = function()
+                UIManager:restartKOReader()
+            end,
         })
-        return
-    end
-    BugReport.log("update", "installed " .. tostring(manifest.version))
-    UIManager:show(ConfirmBox:new{
-        text = T(_("Updated to v%1.\nRestart KOReader to use it."), manifest.version),
-        ok_text = _("Restart"),
-        cancel_text = _("Later"),
-        ok_callback = function()
-            UIManager:restartKOReader()
-        end,
-    })
+    end)
 end
 
 function Ao3:rollbackUpdate()

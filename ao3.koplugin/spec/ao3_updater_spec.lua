@@ -346,4 +346,164 @@ describe("AO3 updater download", function()
         assert.is_true(ok)
         assert.are.equal("payload", Updater.readAll(dest))
     end)
+
+    it("resumes a timed-out download from the bytes already saved", function()
+        local ranges, calls = {}, 0
+        http.request = function(request)
+            calls = calls + 1
+            ranges[calls] = request.headers and request.headers.Range
+            if calls == 1 then
+                request.sink("pay")
+                return nil, "timeout"
+            end
+            request.sink("load")
+            return 1, 206, {}, "HTTP/1.1 206 Partial Content"
+        end
+        local dest = tmp_root .. "/resume.zip"
+        local ok, err = Updater.download(
+            { zip_url = "https://example.test/x.zip" }, dest)
+        assert.is_true(ok, err)
+        assert.are.equal(2, calls)
+        assert.is_nil(ranges[1])
+        assert.are.equal("bytes=3-", ranges[2])
+        assert.are.equal("payload", Updater.readAll(dest))
+    end)
+
+    it("starts over when the server ignores the resume range", function()
+        local calls = 0
+        http.request = function(request)
+            calls = calls + 1
+            if calls == 1 then
+                request.sink("junk")
+                return nil, "timeout"
+            end
+            -- A Range request answered with 200 means the whole file arrived;
+            -- appending it to the partial copy would corrupt the archive.
+            request.sink("payload")
+            return 1, 200, {}, "HTTP/1.1 200 OK"
+        end
+        local dest = tmp_root .. "/restart.zip"
+        local ok, err = Updater.download(
+            { zip_url = "https://example.test/x.zip" }, dest)
+        assert.is_true(ok, err)
+        assert.are.equal(3, calls)
+        assert.are.equal("payload", Updater.readAll(dest))
+    end)
+
+    it("follows the asset redirect itself", function()
+        local urls = {}
+        http.request = function(request)
+            urls[#urls + 1] = request.url
+            if #urls == 1 then
+                return 1, 302, { location = "https://cdn.example.test/asset.zip" },
+                    "HTTP/1.1 302 Found"
+            end
+            request.sink("payload")
+            return 1, 200, {}, "HTTP/1.1 200 OK"
+        end
+        local dest = tmp_root .. "/redirect.zip"
+        local ok, err = Updater.download(
+            { zip_url = "https://github.com/x/y.zip" }, dest)
+        assert.is_true(ok, err)
+        assert.are.equal(2, #urls)
+        assert.are.equal("https://cdn.example.test/asset.zip", urls[2])
+        assert.are.equal("payload", Updater.readAll(dest))
+    end)
+
+    it("refuses a redirect that downgrades to HTTP", function()
+        http.request = function()
+            return 1, 302, { location = "http://cdn.example.test/asset.zip" },
+                "HTTP/1.1 302 Found"
+        end
+        local dest = tmp_root .. "/downgrade.zip"
+        local ok, err = Updater.download(
+            { zip_url = "https://github.com/x/y.zip" }, dest)
+        assert.is_nil(ok)
+        assert.is_truthy(err:find("unsafe", 1, true))
+        assert.is_nil(lfs.attributes(dest, "mode"))
+    end)
+
+    it("gives up after the retry budget and removes the partial file", function()
+        local calls = 0
+        http.request = function(request)
+            calls = calls + 1
+            request.sink("pay")
+            return nil, "timeout"
+        end
+        local dest = tmp_root .. "/stall.zip"
+        local ok, err = Updater.download(
+            { zip_url = "https://example.test/x.zip" }, dest)
+        assert.is_nil(ok)
+        assert.are.equal(Updater.DOWNLOAD_ATTEMPTS, calls)
+        assert.is_truthy(err:find("timed out", 1, true))
+        assert.is_nil(lfs.attributes(dest, "mode"))
+    end)
+end)
+
+describe("AO3 updater source fallback", function()
+    local old_request
+
+    before_each(function()
+        old_request = http.request
+    end)
+
+    after_each(function()
+        http.request = old_request
+    end)
+
+    it("names the tag's source archive on codeload", function()
+        assert.are.equal(
+            "https://codeload.github.com/hemil2005/KO3/zip/refs/tags/v1.2.1",
+            Updater.sourceUrl("1.2.1"))
+        assert.are.equal(
+            "https://codeload.github.com/hemil2005/KO3/zip/refs/tags/v1.2.1",
+            Updater.sourceUrl("v1.2.1"))
+        assert.is_nil(Updater.sourceUrl("nightly"))
+    end)
+
+    it("finds the plugin root in both archive layouts", function()
+        assert.are.equal("ao3.koplugin/", Updater.pluginRoot({
+            entry("ao3.koplugin/main.lua"),
+        }))
+        assert.are.equal("KO3-1.2.1/ao3.koplugin/", Updater.pluginRoot({
+            entry("KO3-1.2.1/.github/workflows/release.yml"),
+            entry("KO3-1.2.1/ao3.koplugin/main.lua"),
+        }))
+        assert.are.equal("ao3.koplugin/", Updater.pluginRoot({}))
+    end)
+
+    it("installs the source archive when the asset CDN is unreachable", function()
+        local plugin_dir = make_install(tmp_root .. "/fallback/ao3.koplugin", "1.0.0")
+        local requested = {}
+        http.request = function(request)
+            requested[#requested + 1] = request.url
+            if request.url:find("codeload.github.com", 1, true) then
+                request.sink("source")
+                return 1, 200, {}, "HTTP/1.1 200 OK"
+            end
+            return nil, "timeout"
+        end
+        local entries = {
+            entry("KO3-9.9.9/ao3.koplugin/main.lua", "file", 4),
+            entry("KO3-9.9.9/ao3.koplugin/_meta.lua", "file", 4),
+        }
+        local ok, backup = Updater.update(plugin_dir, {
+            version = "9.9.9",
+            zip_url = "https://github.com/hemil2005/KO3/releases/download/v9.9.9/ao3.koplugin-9.9.9.zip",
+        }, {
+            zip_path = tmp_root .. "/fallback.zip",
+            entries = entries,
+            extract = fake_extract({
+                ["_meta.lua"] = 'return { version = "9.9.9" }\n',
+            }),
+        })
+        assert.is_true(ok)
+        assert.are.equal(Updater.backupDir(plugin_dir), backup)
+        assert.are.equal("9.9.9", Updater.currentVersion(plugin_dir))
+        local saw_source = false
+        for _, url in ipairs(requested) do
+            if url:find("codeload.github.com", 1, true) then saw_source = true end
+        end
+        assert.is_true(saw_source)
+    end)
 end)

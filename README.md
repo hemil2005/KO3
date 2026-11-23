@@ -216,6 +216,19 @@ version** appears on the home screen after an update and swaps it back.
 Updates are ~2.7 MB and come straight from `github.com`, so no Storefront
 or other plugin is required.
 
+GitHub serves release assets from its asset CDN
+(`release-assets.githubusercontent.com`), a different host from the one that
+answers the update check. Some Kindle networks reach the API but not that
+host; the download then stalls until it times out. KO3 follows the redirect
+itself and retries a stalled transfer from the bytes already saved. If the
+CDN still cannot be reached, it falls back to the tag's source archive on
+`codeload.github.com`, which carries the same `ao3.koplugin` tree; the staged
+`_meta.lua` version is checked before installing.
+
+Because the fallback lives in the new code, a device whose current updater
+cannot reach the asset CDN needs this version copied once by hand (the zip on
+the release page is on `github.com`). Later updates then work in place.
+
 ### Reporting a bug
 
 **Tools → KO3 → Report a bug** opens a text field. After you
@@ -387,7 +400,11 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
 - The author tabs: tapping **Bookmarks** opens the author's bookmarked works
   (`screenshots/35`). The title bar's close target is trimmed to the bar so it
   no longer covers the rightmost tab.
-- The offline `busted` suite: 226 tests passing across parser, navigation,
+- The updater's network path: manual redirect following, a refused HTTPS → HTTP
+  downgrade, a stalled transfer resumed with a Range request, the retry budget,
+  and the codeload source archive installing a real 3.7 MB tree on the
+  emulator when the asset CDN is unreachable.
+- The offline `busted` suite: 235 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and
   bug-report tests, including 51 account tests across token parsing, the
