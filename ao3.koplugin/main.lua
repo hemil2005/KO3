@@ -9,6 +9,7 @@ No login, no kudos/comments, no images, no WebView.
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
+local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -236,6 +237,7 @@ end
 
 local MAIN_SOURCE = debug.getinfo(1, "S").source:sub(2)
 local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
+local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
 
 -- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
 -- same parser; listings, search results and bookmark pages share the markup.
@@ -1343,6 +1345,20 @@ function Ao3:homeRows()
                 self:workDialog()
             end,
         },
+        {
+            text = _("Update plugin"),
+            mandatory = T(_("Installed v%1"), Updater.currentVersion(self:pluginDir())),
+            action = function()
+                self:checkForUpdates()
+            end,
+        },
+        lfs.attributes(Updater.backupDir(self:pluginDir()), "mode") == "directory" and {
+            text = _("Restore previous version"),
+            mandatory = _("Undo the last update"),
+            action = function()
+                self:rollbackUpdate()
+            end,
+        } or nil,
     }
 end
 
@@ -1683,6 +1699,119 @@ function Ao3:workDialog()
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
+end
+
+-- ---------------------------------------------------------------------------
+-- Inline updates
+-- ---------------------------------------------------------------------------
+--
+-- Releases are published by .github/workflows/release.yml: a zip of the
+-- plugin plus a manifest carrying its version and SHA-256. Updating never
+-- touches the code that is running; the new tree is staged next to the
+-- install, validated, swapped in, and KOReader is restarted.
+
+function Ao3:pluginDir()
+    return self.path or "plugins/ao3.koplugin"
+end
+
+function Ao3:checkForUpdates()
+    local dir = self:pluginDir()
+    NetworkMgr:runWhenOnline(function()
+        local Trapper = require("ui/trapper")
+        local manifest, err
+        Trapper:wrap(function()
+            Trapper:info(_("Checking for updates…"), true)
+            local ok, result, check_err = pcall(Updater.fetchManifest)
+            if ok then
+                manifest, err = result, check_err
+            else
+                err = tostring(result)
+            end
+            Trapper:reset()
+        end)
+        NetworkMgr:afterWifiAction()
+
+        if not manifest then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Could not check for updates:\n%1"), err or _("unknown error")),
+            })
+            return
+        end
+        local current = Updater.currentVersion(dir)
+        if not Updater.isNewer(manifest.version, current) then
+            UIManager:show(InfoMessage:new{
+                text = T(_("You already have the latest version (v%1)."), current),
+            })
+            return
+        end
+        local notes = manifest.notes ~= "" and ("\n\n" .. manifest.notes) or ""
+        UIManager:show(ConfirmBox:new{
+            text = T(_("Update AO3 browser from v%1 to v%2?%3"), current, manifest.version, notes),
+            ok_text = _("Update"),
+            cancel_text = _("Later"),
+            ok_callback = function()
+                self:installUpdate(dir, manifest)
+            end,
+        })
+    end)
+end
+
+function Ao3:installUpdate(dir, manifest)
+    local Trapper = require("ui/trapper")
+    local installed, err
+    Trapper:wrap(function()
+        Trapper:info(T(_("Downloading v%1…"), manifest.version), true)
+        local ok, result, result_err = pcall(Updater.update, dir, manifest)
+        if not ok then
+            err = tostring(result)
+        elseif result then
+            installed = true
+        else
+            err = result_err
+        end
+        Trapper:reset()
+    end)
+    if not installed then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Update failed:\n%1"), err or _("unknown error")),
+        })
+        return
+    end
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Updated to v%1.\nRestart KOReader to use it."), manifest.version),
+        ok_text = _("Restart"),
+        cancel_text = _("Later"),
+        ok_callback = function()
+            UIManager:restartKOReader()
+        end,
+    })
+end
+
+function Ao3:rollbackUpdate()
+    local dir = self:pluginDir()
+    local previous = Updater.versionFromMeta(Updater.backupDir(dir)) or _("unknown")
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Restore v%1 and discard the current version?"), previous),
+        ok_text = _("Restore"),
+        cancel_text = _("Cancel"),
+        ok_callback = function()
+            local ok, err = Updater.rollback(dir)
+            if ok then
+                UIManager:show(ConfirmBox:new{
+                    text = _("Previous version restored. Restart KOReader now?"),
+                    ok_text = _("Restart"),
+                    cancel_text = _("Later"),
+                    ok_callback = function()
+                        UIManager:restartKOReader()
+                    end,
+                })
+            else
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Could not restore: %1"), err or _("unknown error")),
+                })
+            end
+        end,
+    })
 end
 
 -- ---------------------------------------------------------------------------

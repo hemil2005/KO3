@@ -12,6 +12,7 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
 - No kudos, comments, bookmarks or subscriptions
 - No third-party service
 - One page fetched per tap; only opened works are saved
+- Self-updating from GitHub Releases (checksum-verified, with rollback)
 
 ## Screenshots
 
@@ -28,16 +29,21 @@ details captured from a live work.
 | ![Work details](screenshots/07-work-details.png) | ![Reading a work](screenshots/08-reading.png) |
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
 | ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
-| ![Author works](screenshots/13-author-works.png) | |
+| ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/14-update-home.png) |
+| ![Update prompt](screenshots/15-update-dialog.png) | |
 
 ## Install
 
-1. Copy the `ao3.koplugin` folder to `koreader/plugins/` on the device
-   (over USB, or with whatever file manager you normally use).
-2. Restart KOReader.
-3. Open **Tools → More tools → AO3**.
+The quickest way is the release zip:
 
-The layout should be:
+1. Download `ao3.koplugin.zip` from
+   [the latest release](https://github.com/hemil2005/KO3/releases/latest).
+2. Unzip it into `koreader/plugins/` on the device (the archive already
+   contains the `ao3.koplugin` folder).
+3. Restart KOReader.
+4. Open **Tools → More tools → AO3**.
+
+Or copy the `ao3.koplugin` folder yourself. Either way, the layout should be:
 
 ```
 koreader/
@@ -45,11 +51,15 @@ koreader/
     ao3.koplugin/
       _meta.lua
       main.lua
+      updater.lua
       authorpage.lua
       fandompages.lua
       data/fandoms/index.lua
       data/fandoms/<category>/<letter>.tsv.z
 ```
+
+Once installed, later versions arrive through **Update plugin** (below), so
+the zip only has to be copied once.
 
 ## Use
 
@@ -64,6 +74,7 @@ One menu entry opens the whole app:
 | **Tag** | A tag name, or paste a full `/tags/.../works` URL |
 | **Downloads** | Works already saved on this device |
 | **Open work** | Paste `https://archiveofourown.org/works/1234567` or just `1234567` |
+| **Update plugin** | Check GitHub Releases for a newer version |
 
 Fandoms are browsed media category → letter → fandom, the same way AO3's
 own index is organised. Large letters load in local windows of up to 100
@@ -96,6 +107,25 @@ The first read downloads the whole work (usually 200 KB–1 MB); after that the
 cached copy opens instantly, offline. **Refresh** downloads and validates the
 latest version before replacing the saved copy, so a failed request leaves
 the offline book available.
+
+### Updating the plugin
+
+**No computer is needed after the first install.** Open
+**Tools → More tools → AO3 → Update plugin**:
+
+1. It reads `manifest.json` from the latest
+   [GitHub Release](https://github.com/hemil2005/KO3/releases/latest), and
+   shows the current version, the new version and the release notes.
+2. **Update** downloads `ao3.koplugin.zip`, verifies its SHA-256, unpacks it
+   next to the installed copy, and checks that the archive really contains
+   the plugin and the version it claims.
+3. It swaps the new tree in only after all of that passes, then offers to
+   restart KOReader. The running code is never modified mid-flight.
+
+The previous version is kept as `ao3.koplugin.bak`; **Restore previous
+version** appears on the home screen after an update and swaps it back.
+Updates are ~2.7 MB and come straight from `github.com`, so no Storefront
+or other plugin is required.
 
 ## How it works
 
@@ -160,9 +190,13 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   tabs render in the emulator (`screenshots/10`–`13`).
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
-- The offline `busted` suite: 106 tests passing across parser, navigation,
-  bounded-index, rendered-card interaction, old-build compatibility and
-  author-page tests.
+- The inline updater: manifest validation, version comparison, path-traversal
+  rejection, SHA-256 verification, staged install, failed-rename rollback and
+  restore-previous; the update row and prompt render in the emulator
+  (`screenshots/14`–`15`).
+- The offline `busted` suite: 121 tests passing across parser, navigation,
+  bounded-index, rendered-card interaction, old-build compatibility,
+  author-page and updater tests.
 
 **Current connectivity:** AO3 refused the emulator's listing request with
 `403`; independent Windows and WSL `curl` requests received `429` on this
@@ -222,6 +256,28 @@ done
 
 See `ao3.koplugin/spec/README.md` for details.
 
+### Releasing
+
+Releases are tag-driven, so the plugin and its updater manifest can never
+drift apart:
+
+```sh
+# bump version in ao3.koplugin/_meta.lua first
+git tag v1.0.1
+git push ko3 main --tags
+```
+
+`.github/workflows/release.yml` then:
+
+1. refuses to build unless `_meta.lua`'s `version` matches the tag;
+2. zips `ao3.koplugin/` (tests excluded);
+3. computes the SHA-256 and writes `manifest.json`;
+4. publishes both as release assets.
+
+`.github/workflows/ci.yml` runs a Lua 5.1 syntax check on every push and
+pull request. The updater reads
+`releases/latest/download/manifest.json`, so no API token is involved.
+
 ### Demonstrating a change in the emulator
 
 Every user-visible change is also shown in the local Kindle emulator
@@ -247,6 +303,10 @@ Tests prove behaviour; the emulator capture shows the actual result.
 | “did not return a work file” | Restricted/adult/login page instead of the work |
 | “Could not parse the AO3 page” | AO3 changed its HTML, or `htmlparser` failed |
 | Nothing happens after tapping Read | Check Wi-Fi and that the Kindle is online |
+| “Could not check for updates” | The device cannot reach `github.com`. Check Wi-Fi; the check is a single small request |
+| “failed its checksum” | The download was truncated or altered; nothing was installed. Try again |
+| “does not contain the plugin” | The release asset is wrong or incomplete; the installed copy was left untouched |
+| Update installed but nothing changed | KOReader is still running the old code — use **Restart** in the prompt, or restart it yourself |
 
 If a work opens as a login page or an adult warning, the file is rejected
 before it reaches the reader, so you should see an error rather than a

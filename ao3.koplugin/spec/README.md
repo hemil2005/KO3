@@ -30,6 +30,9 @@ The tests are offline:
   eviction, malformed files and exact tag URLs.
 - `fetchHtml` and `downloadWork` replace `socket.http.request` with a mock
   that streams fixture bytes into the same sinks the real client uses.
+- `ao3_updater_spec.lua` covers version comparison, manifest rejection,
+  traversal-safe entry planning, staged install, failed-rename rollback,
+  restore-previous and checksum verification, with no network or real zip.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and
   `main.lua` are loaded through KOReader's own plugin loader.
 

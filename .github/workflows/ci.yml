@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lua-syntax:
+    name: Lua 5.1 syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+
+      - name: Check every plugin file parses under LuaJIT's language level
+        run: |
+          fail=0
+          while IFS= read -r file; do
+            if ! luac5.1 -p "$file"; then
+              echo "::error file=$file::Lua syntax error"
+              fail=1
+            fi
+          done < <(find ao3.koplugin -name '*.lua' -not -path '*/spec/*' | sort)
+          exit $fail
