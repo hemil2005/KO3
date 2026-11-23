@@ -672,6 +672,50 @@ describe("AO3 browser", function()
             assert.is_truthy(joined:find("Author", 1, true))
             assert.is_truthy(joined:find("Downloads", 1, true))
             assert.is_truthy(joined:find("Open work", 1, true))
+            assert.is_truthy(joined:find("Update plugin", 1, true))
+            assert.is_truthy(joined:find("Report a bug", 1, true))
+        end)
+
+        it("asks before attaching the log and saves the report", function()
+            local UIManager = require("ui/uimanager")
+            local old_show, old_close = UIManager.show, UIManager.close
+            local old_settings = DataStorage.getSettingsDir
+            DataStorage.getSettingsDir = function() return tmp_root .. "/settings" end
+            local shown = {}
+            UIManager.show = function(_, widget)
+                shown[#shown + 1] = widget
+            end
+            UIManager.close = function() end
+            local ok, err = pcall(function()
+                plugin:reportBug()
+                local input = shown[#shown]
+                assert.is_truthy(input)
+                input.getInputValue = function()
+                    return "It crashes when I tap Read"
+                end
+                input.buttons[1][2].callback() -- Next
+                local consent = shown[#shown]
+                assert.is_truthy(consent.text:find("used only to find the cause", 1, true))
+                assert.is_truthy(consent.text:find("password", 1, true))
+                consent.ok_callback() -- Attach log
+                local saved = shown[#shown]
+                assert.is_truthy(saved.text:find("Report saved:", 1, true))
+            end)
+            UIManager.show, UIManager.close = old_show, old_close
+            DataStorage.getSettingsDir = old_settings
+            assert.is_true(ok, err)
+
+            local reports = tmp_root .. "/ao3/reports"
+            local found
+            for entry in lfs.dir(reports) do
+                if entry ~= "." and entry ~= ".." then
+                    found = reports .. "/" .. entry
+                end
+            end
+            assert.is_truthy(found)
+            assert.are.equal("file", lfs.attributes(found .. "/report.md", "mode"))
+            assert.are.equal("file", lfs.attributes(found .. "/log.txt", "mode"))
+            remove_tree(found)
         end)
 
         it("shows a results page with a short summary and backs out", function()

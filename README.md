@@ -30,7 +30,8 @@ details captured from a live work.
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
 | ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
 | ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/14-update-home.png) |
-| ![Update prompt](screenshots/15-update-dialog.png) | |
+| ![Update prompt](screenshots/15-update-dialog.png) | ![Report row](screenshots/16-report-home.png) |
+| ![Report editor](screenshots/17-report-editor.png) | ![Log consent](screenshots/18-report-consent.png) |
 
 ## Install
 
@@ -52,6 +53,7 @@ koreader/
       _meta.lua
       main.lua
       updater.lua
+      bugreport.lua
       authorpage.lua
       fandompages.lua
       data/fandoms/index.lua
@@ -75,6 +77,7 @@ One menu entry opens the whole app:
 | **Downloads** | Works already saved on this device |
 | **Open work** | Paste `https://archiveofourown.org/works/1234567` or just `1234567` |
 | **Update plugin** | Check GitHub Releases for a newer version |
+| **Report a bug** | Write what happened; optionally attach a diagnostic log |
 
 Fandoms are browsed media category → letter → fandom, the same way AO3's
 own index is organised. Large letters load in local windows of up to 100
@@ -125,6 +128,37 @@ The previous version is kept as `ao3.koplugin.bak`; **Restore previous
 version** appears on the home screen after an update and swaps it back.
 Updates are ~2.7 MB and come straight from `github.com`, so no Storefront
 or other plugin is required.
+
+### Reporting a bug
+
+**Tools → More tools → AO3 → Report a bug** opens a text field. After you
+describe what happened, a consent dialog asks whether to attach the
+diagnostic log and states that it is used only to find the cause of the
+issue. Choosing **Without log** sends the description alone.
+
+What the log contains:
+
+- plugin version, KOReader revision, device model, screen size and time;
+- each request's host and path with its HTTP status, download outcomes and
+  error text.
+
+What it never contains: your AO3 password (the plugin stores none), cookies,
+search text, work titles or work text. Query strings and fragments are
+stripped before anything is written.
+
+Delivery:
+
+- With `settings/ao3_report_token` present (a fine-grained GitHub token with
+  **Issues: write**), the report is filed automatically and the log is
+  embedded in the issue body.
+- Without it, the report is saved on the device as
+  `koreader/ao3/reports/bug-<timestamp>/report.md` plus `log.txt`, ready to
+  attach to [a new issue](https://github.com/hemil2005/KO3/issues/new).
+  GitHub does not allow anonymous issue creation, so this is the
+  credential-free path.
+
+The log itself lives at `koreader/ao3/logs/ao3.log`, is capped at 256 KB
+(one rotation to `ao3.log.1`) and is only read when you create a report.
 
 ## How it works
 
@@ -193,9 +227,12 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row and prompt render in the emulator
   (`screenshots/14`–`15`).
-- The offline `busted` suite: 124 tests passing across parser, navigation,
+- Bug reports: query stripping, consent-gated log inclusion, report bundle
+  writing, token handling and the three screens render in the emulator
+  (`screenshots/16`–`18`).
+- The offline `busted` suite: 135 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
-  author-page and updater tests.
+  author-page, updater and bug-report tests.
 
 **Current connectivity:** AO3 refused the emulator's listing request with
 `403`; independent Windows and WSL `curl` requests received `429` on this
@@ -306,6 +343,8 @@ Tests prove behaviour; the emulator capture shows the actual result.
 | “failed its checksum” | The download was truncated or altered; nothing was installed. Try again |
 | “does not contain the plugin” | The release asset is wrong or incomplete; the installed copy was left untouched |
 | Update installed but nothing changed | KOReader is still running the old code — use **Restart** in the prompt, or restart it yourself |
+| “Report saved” but no issue was created | No `settings/ao3_report_token`; attach `report.md` (and `log.txt`) to a new issue |
+| “Could not send the report” | Token rejected or no network; the report is still saved in `ao3/reports/` |
 
 If a work opens as a login page or an adult warning, the file is rejected
 before it reaches the reader, so you should see an error rather than a
