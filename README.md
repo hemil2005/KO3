@@ -193,7 +193,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row and prompt render in the emulator
   (`screenshots/14`–`15`).
-- The offline `busted` suite: 121 tests passing across parser, navigation,
+- The offline `busted` suite: 124 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
   author-page and updater tests.
 
