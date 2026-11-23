@@ -97,6 +97,32 @@ describe("AO3 work-list cards", function()
         assert.are.equal(chosen, opened)
     end)
 
+    it("measures card heights on builds without TextWidget.getTextHeight", function()
+        -- Regression: a physical Kindle on an older KOReader build crashed on
+        -- opening the AO3 menu with "attempt to call field 'getTextHeight'".
+        local TextWidget = require("ui/widget/textwidget")
+        local saved = TextWidget.getTextHeight
+        TextWidget.getTextHeight = nil
+        local ok, menu_or_err = pcall(open_listing,
+            listing_with({ work("1", "Old Build", "A", "Summary.") }))
+        TextWidget.getTextHeight = saved
+        assert.is_true(ok, menu_or_err)
+        assert.is_true(menu_or_err.item_table[1].height > 0)
+    end)
+
+    it("opens the menu on builds without mergeTitleBarIntoLayout", function()
+        -- The title-bar merge helper is newer than some device builds; the
+        -- menu must still render work rows without it.
+        local Menu = require("ui/widget/menu")
+        local saved = Menu.mergeTitleBarIntoLayout
+        Menu.mergeTitleBarIntoLayout = nil
+        local ok, menu_or_err = pcall(open_listing,
+            listing_with({ work("2", "Old Menu", "B", "Summary.") }))
+        Menu.mergeTitleBarIntoLayout = saved
+        assert.is_true(ok, menu_or_err)
+        assert.is_true(menu_or_err.item_table[1].height > 0)
+    end)
+
     it("keeps a short summary intact and bounds a long one for three lines", function()
         local short = work("1", "Short", "A", "A short summary of the story.")
         local long = work("2", "Long", "B", string.rep("word ", 100))

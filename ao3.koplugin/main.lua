@@ -468,12 +468,32 @@ local function ao3CardSizes(font_size, infont_size)
     return title_size, info_size, summary_size
 end
 
+-- Some device builds (older Kindle releases among them) lack the newer
+-- TextWidget.getTextHeight class helper. Measure a throwaway widget once
+-- per (size, bold) pair instead, so menu building stays cheap everywhere.
+local line_height_cache = {}
+local function lineHeight(face, bold)
+    local key = (face.size or 0) .. (bold and "b" or "n")
+    local h = line_height_cache[key]
+    if not h then
+        if TextWidget.getTextHeight then
+            h = TextWidget.getTextHeight("A", face, bold)
+        else
+            local probe = TextWidget:new{ text = "A", face = face, bold = bold }
+            h = probe:getSize().h
+            if probe.free then probe:free() end
+        end
+        line_height_cache[key] = h
+    end
+    return h
+end
+
 local function ao3CardMetrics(font_size, infont_size, linesize)
     local title_size, info_size, summary_size = ao3CardSizes(font_size, infont_size)
     local title_face = Font:getFace("smallinfofont", title_size)
     local info_face = Font:getFace("smallinfofont", info_size)
-    local title_h = TextWidget.getTextHeight("A", title_face, true)
-    local author_h = TextWidget.getTextHeight("A", info_face, false)
+    local title_h = lineHeight(title_face, true)
+    local author_h = lineHeight(info_face, false)
     -- TextBoxWidget computes its line height as (1 + line_height) * face.size.
     local summary_line_h = math.floor((1 + 0.3) * summary_size + 0.5)
     local summary_h = AO3_CARD_SUMMARY_LINES * summary_line_h
@@ -767,7 +787,11 @@ function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
     end
 
     self:updatePageInfo(select_number)
-    self:mergeTitleBarIntoLayout()
+    if self.mergeTitleBarIntoLayout then
+        -- Newer builds merge the title bar into the focus layout; older
+        -- device builds have no such method and must keep working.
+        self:mergeTitleBarIntoLayout()
+    end
 
     UIManager:setDirty(self.show_parent, function()
         local refresh_dimen = old_dimen and old_dimen:combine(self.dimen)
