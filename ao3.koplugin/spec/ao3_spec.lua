@@ -677,7 +677,7 @@ describe("AO3 browser", function()
             assert.are.equal("", menu.ao3_title)
 
             for _, role in ipairs({ "latest", "fandoms", "author", "tag",
-                "downloads", "open", "update" }) do
+                "account", "downloads", "open", "update" }) do
                 assert.is_truthy(tile(menu, role))
             end
         end)
@@ -704,7 +704,8 @@ describe("AO3 browser", function()
             end
             assert.are.same({
                 "hero", "search", "browse_label", "browse_row_1",
-                "browse_row_2", "library_label", "library_row",
+                "browse_row_2", "account_label", "account",
+                "library_label", "library_row",
                 "plugin_label", "update",
             }, roles)
             -- Each tile row carries its two entries for paging and tests.
@@ -716,6 +717,16 @@ describe("AO3 browser", function()
                         assert.is_truthy(entry.icon)
                     end
                 end
+            end
+        end)
+
+        it("keeps a group label with the first row of its group", function()
+            local menu = open_home()
+            -- A page may never end on a label whose content is overleaf.
+            for _, page in ipairs(menu.page_items) do
+                local last = menu.item_table[page[#page]]
+                assert.is_false(last.keep_with_next == true,
+                    "page ends alone on " .. tostring(last.role))
             end
         end)
 
@@ -880,17 +891,18 @@ describe("AO3 browser", function()
             for _, row in ipairs(menu.item_table) do
                 roles[#roles + 1] = row.role
             end
-            assert.are.same({ "hero", "actions", "stats", "facts",
+            assert.are.same({ "hero", "actions", "stats", "facts", "social",
                 "summary", "tags" }, roles)
 
-            -- A work with nothing but a title still gets the hero and the
-            -- actions; empty metadata rows are not invented.
+            -- A work with nothing but a title still gets the hero, the
+            -- actions and the account actions; empty metadata rows are not
+            -- invented.
             plugin:showWork({ id = "9922", title = "Bare", authors = "A" })
             local bare = {}
             for _, row in ipairs(menu.item_table) do
                 bare[#bare + 1] = row.role
             end
-            assert.are.same({ "hero", "actions" }, bare)
+            assert.are.same({ "hero", "actions", "social" }, bare)
         end)
 
         it("folds summary and tags away, and expands in place", function()
@@ -913,21 +925,23 @@ describe("AO3 browser", function()
                 end
             end
 
-            assert.are.same({ "hero", "actions", "summary", "tags" }, roles())
+            assert.are.same({ "hero", "actions", "social", "summary", "tags" },
+                roles())
 
             -- Expanding replaces the current page instead of pushing a new
             -- one, so Back still returns to the listing that opened the work.
             local depth = #menu.item_table_stack
             row_with("summary").action()
             assert.are.equal(depth, #menu.item_table_stack)
-            assert.are.same({ "hero", "actions", "summary", "summary_body",
-                "tags" }, roles())
+            assert.are.same({ "hero", "actions", "social", "summary",
+                "summary_body", "tags" }, roles())
 
             row_with("summary").action()
-            assert.are.same({ "hero", "actions", "summary", "tags" }, roles())
+            assert.are.same({ "hero", "actions", "social", "summary", "tags" },
+                roles())
 
             row_with("tags").action()
-            assert.are.same({ "hero", "actions", "summary", "tags",
+            assert.are.same({ "hero", "actions", "social", "summary", "tags",
                 "tags_body" }, roles())
         end)
 
@@ -1165,6 +1179,156 @@ describe("AO3 browser", function()
             plugin:showDownloads()
             assert.are.equal("No saved works yet.", menu.item_table[1].text)
             assert.is_truthy(menu.ao3_title:find("Downloads", 1, true))
+        end)
+
+        it("offers Sign in on the landing page and the account name after it", function()
+            local previous = plugin.session
+            plugin.session = nil
+            local ok, err = pcall(function()
+                local menu = open_home()
+                local entry = tile(menu, "account")
+                assert.is_truthy(entry)
+                assert.are.equal("Sign in", entry.text)
+                assert.are.equal("login", entry.icon)
+                assert.are.equal("Kudos, bookmarks and subscriptions", entry.hint)
+
+                local opened = 0
+                local old_show_account = plugin.showAccount
+                plugin.showAccount = function() opened = opened + 1 end
+                entry.action()
+                plugin.showAccount = old_show_account
+
+                -- Signing in replaces the way in with the reader's own name;
+                -- the tile keeps its position and becomes the account door.
+                plugin.session = { username = "demo_reader" }
+                menu = open_home()
+                entry = tile(menu, "account")
+                assert.are.equal("demo_reader", entry.text)
+                assert.are.equal("user", entry.icon)
+                assert.are.equal(
+                    "Bookmarks, marked for later, history, subscriptions",
+                    entry.hint)
+                assert.are.equal(1, opened)
+            end)
+            plugin.session = previous
+            assert.is_true(ok, err)
+        end)
+
+        it("asks for sign-in when the account tile is tapped anonymously", function()
+            local previous = plugin.session
+            plugin.session = nil
+            local called = 0
+            local old_sign_in = plugin.signIn
+            plugin.signIn = function() called = called + 1 end
+            local ok, err = pcall(function()
+                local menu = open_home()
+                tile(menu, "account").action()
+            end)
+            plugin.signIn = old_sign_in
+            plugin.session = previous
+            assert.is_true(ok, err)
+            assert.are.equal(1, called)
+        end)
+
+        it("lays the account page out as AO3's four lists plus log out", function()
+            local previous = plugin.session
+            plugin.session = { username = "demo_reader" }
+            local menu = open_home()
+            local ok, err = pcall(function() plugin:showAccount() end)
+            local roles = {}
+            for _, row in ipairs(menu.item_table) do
+                roles[#roles + 1] = row.role
+            end
+            local texts = {}
+            for _, row in ipairs(menu.item_table) do
+                if row.text then texts[#texts + 1] = row.text end
+            end
+            plugin.session = previous
+            assert.is_true(ok, err)
+            assert.are.same({ "account_hero", "lists_label",
+                "list_bookmarks", "list_marked", "list_history",
+                "list_subscriptions", "author_label", "works", "session" },
+                roles)
+            assert.are.equal(
+                "Bookmarks|Marked for later|History|Subscriptions"
+                .. "|Works by demo_reader",
+                table.concat(texts, "|"))
+        end)
+
+        it("logs out back to a home page that offers sign in again", function()
+            local previous = plugin.session
+            plugin.session = { username = "demo_reader" }
+            local menu = open_home()
+            local ok, err = pcall(function()
+                plugin:showAccount()
+                -- The session panel holds one control: the outlined Log out.
+                local button
+                local function walk(widget)
+                    if widget.onTap and not button then button = widget end
+                    for _, child in ipairs(widget) do walk(child) end
+                end
+                walk(menu.item_table[#menu.item_table].ao3_static)
+                assert.is_truthy(button)
+                button.onTap()
+            end)
+            local signed_out = plugin.session
+            menu = open_home()
+            local entry = tile(menu, "account")
+            plugin.session = previous
+            assert.is_true(ok, err)
+            assert.is_nil(signed_out)
+            assert.are.equal("Sign in", entry.text)
+        end)
+
+        it("checks the work actions that are already on", function()
+            local menu = open_home()
+            plugin.work_social = { ["9001"] = { kudos = true, bookmark = true } }
+            local ok, err = pcall(function()
+                plugin:showWork({ id = "9001", title = "Marked", authors = "A" })
+            end)
+            plugin.work_social = nil
+            assert.is_true(ok, err)
+
+            local social
+            for _, row in ipairs(menu.item_table) do
+                if row.role == "social" then social = row.ao3_static end
+            end
+            assert.is_truthy(social)
+            local marked = {}
+            local function walk(widget)
+                if widget.text and widget.text:find("✓", 1, true) then
+                    marked[#marked + 1] = widget.text
+                end
+                for _, child in ipairs(widget) do walk(child) end
+            end
+            walk(social)
+            assert.are.equal(2, #marked)
+            assert.is_truthy(marked[1]:find("Kudos", 1, true))
+            assert.is_truthy(marked[2]:find("Bookmark", 1, true))
+        end)
+
+        it("tells a signed-out reader what the account actions need", function()
+            local previous = plugin.session
+            plugin.session = nil
+            local menu = open_home()
+            local ok, err = pcall(function()
+                plugin:showWork({ id = "9002", title = "Anon", authors = "A" })
+            end)
+            plugin.session = previous
+            assert.is_true(ok, err)
+            local social
+            for _, row in ipairs(menu.item_table) do
+                if row.role == "social" then social = row.ao3_static end
+            end
+            local found
+            local function walk(widget)
+                if widget.text and widget.text:find("Sign in", 1, true) then
+                    found = widget.text
+                end
+                for _, child in ipairs(widget) do walk(child) end
+            end
+            walk(social)
+            assert.are.equal("Sign in to your AO3 account to use these.", found)
         end)
 
         it("lists cached works newest first", function()

@@ -269,6 +269,7 @@ function HomePage.build(o)
     rows[#rows + 1] = {
         ao3_static = Uikit.padded(HomePage.section_label(_("Browse"), o)),
         role = "browse_label",
+        keep_with_next = true,
     }
     rows[#rows + 1] = HomePage.tiles_row({
         {
@@ -291,9 +292,26 @@ function HomePage.build(o)
         },
     }, o, "browse_row_2")
 
+    -- One tile that changes with the session: a way in while signed out, the
+    -- reader's own name and lists once signed in. It sits below Browse so the
+    -- primary path stays first, and above Library so it is not buried.
+    rows[#rows + 1] = {
+        ao3_static = Uikit.padded(HomePage.section_label(_("Account"), o)),
+        role = "account_label",
+        keep_with_next = true,
+    }
+    rows[#rows + 1] = HomePage.wide_tile({
+        text = o.signed_in and (o.account_name or _("My account")) or _("Sign in"),
+        hint = o.signed_in and _("Bookmarks, marked for later, history, subscriptions")
+            or _("Kudos, bookmarks and subscriptions"),
+        icon = o.signed_in and "user" or "login",
+        role = "account", action = o.on_account,
+    }, o, "account")
+
     rows[#rows + 1] = {
         ao3_static = Uikit.padded(HomePage.section_label(_("Library"), o)),
         role = "library_label",
+        keep_with_next = true,
     }
     rows[#rows + 1] = HomePage.tiles_row({
         {
@@ -310,6 +328,7 @@ function HomePage.build(o)
     rows[#rows + 1] = {
         ao3_static = Uikit.padded(HomePage.section_label(_("Plugin"), o)),
         role = "plugin_label",
+        keep_with_next = true,
     }
     rows[#rows + 1] = HomePage.wide_tile({
         text = _("Update plugin"),

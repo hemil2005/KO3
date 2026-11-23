@@ -5,10 +5,15 @@ A deliberately small, read-only browser for archiveofourown.org:
 search and tag listings are fetched as HTML, parsed into native
 KOReader lists, and a work is fetched only when you tap Read.
 
-No login, no kudos/comments, no images, no WebView.
+Browsing stays read-only and needs no account. The account screens (sign-in,
+kudos, bookmarks, subscriptions, Marked for Later) are laid out here for the
+account module; this build does not send those requests yet.
+
+No comments, no images, no WebView.
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local Screen = require("device").screen
@@ -240,7 +245,9 @@ local MAIN_SOURCE = debug.getinfo(1, "S").source:sub(2)
 local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
 local WorkPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "workpage.lua")))
 local HomePage = dofile((MAIN_SOURCE:gsub("main%.lua$", "homepage.lua")))
+local AccountPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "accountpage.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
+local Uikit = dofile((MAIN_SOURCE:gsub("main%.lua$", "uikit.lua")))
 
 -- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
 -- same parser; listings, search results and bookmark pages share the markup.
@@ -329,6 +336,8 @@ function Ao3:loadFandomIndex()
     return index
 end
 
+-- Listing rows for the embedded index carry the work count as `mandatory`, so
+-- the same right-aligned value treatment as every other row applies.
 function Ao3:loadFandomLetter(category, letter, offset)
     local page = FandomPages.page(self:fandomDataDir(), category.index, letter, offset)
     if not page then return nil end
@@ -337,6 +346,7 @@ function Ao3:loadFandomLetter(category, letter, offset)
         rows[#rows + 1] = {
             text = entry.name,
             mandatory = entry.count ~= "" and entry.count or nil,
+            ao3_fandom = true,
             action = function()
                 self:loadListing(BASE_URL .. entry.url, entry.name)
             end,
@@ -444,6 +454,10 @@ local function ao3CardMetrics(font_size, infont_size, linesize)
     -- TextBoxWidget computes its line height as (1 + line_height) * face.size.
     local summary_line_h = math.floor((1 + 0.3) * summary_size + 0.5)
     local summary_h = AO3_CARD_SUMMARY_LINES * summary_line_h
+    -- A fandom index row is a name of at most two lines plus the air that
+    -- keeps two records apart; the second line is only paid when used.
+    local fandom_line_h = math.floor((1 + 0.3) * title_size + 0.5)
+    local fandom_pad = 2 * Size.span.vertical_large
     local card_content_h = title_h + author_h + summary_h
         + Size.span.vertical_default + Size.span.vertical_large
     return {
@@ -451,11 +465,64 @@ local function ao3CardMetrics(font_size, infont_size, linesize)
         info_size = info_size,
         summary_size = summary_size,
         summary_h = summary_h,
+        fandom_name_h = 2 * fandom_line_h,
+        fandom_line_h = fandom_line_h,
+        fandom_one_line_h = fandom_line_h + fandom_pad + linesize,
+        fandom_two_line_h = 2 * fandom_line_h + fandom_pad + linesize,
         card_h = card_content_h + linesize,
         card_no_summary_h = title_h + author_h
             + Size.span.vertical_default + Size.span.vertical_large + linesize,
         compact_h = title_h + 2 * Size.span.vertical_default + linesize,
     }
+end
+
+-- Paging through a big letter re-measures the same names, so remember each
+-- string's single-line width. The table is capped: browsing many letters must
+-- not grow without bound on a memory-tight device.
+local measured_width_cache = {}
+local measured_width_count = 0
+local MEASURED_WIDTH_CACHE_MAX = 2000
+
+local function measuredWidth(text, face, bold)
+    local key = tostring(face.size or 0) .. (bold and "b" or "n") .. "\1" .. text
+    local width = measured_width_cache[key]
+    if width then return width end
+    local probe = TextWidget:new{ text = text, face = face, bold = bold }
+    width = probe:getWidth()
+    if probe.free then probe:free() end
+    if measured_width_count >= MEASURED_WIDTH_CACHE_MAX then
+        measured_width_cache = {}
+        measured_width_count = 0
+    end
+    measured_width_cache[key] = width
+    measured_width_count = measured_width_count + 1
+    return width
+end
+
+-- The width a fandom name may use once the right-aligned count has taken its
+-- column. Shared by the height pass and the row builder so a name never wraps
+-- inside a row measured for one line.
+local function fandomNameWidth(entry, content_width, metrics)
+    local count = trim(tostring(entry.mandatory or ""))
+    local count_w = 0
+    if count ~= "" then
+        count_w = measuredWidth(count,
+            Font:getFace("infont", metrics.info_size), false)
+    end
+    return math.max(1, content_width - (count_w > 0
+        and (count_w + Size.span.horizontal_default) or 0))
+end
+
+-- Two lines is the ceiling; the row is measured for exactly what the name
+-- needs. Anything within a hair of the edge is given the second line rather
+-- than risk clipping a glyph.
+local function fandomNameLines(entry, content_width, metrics)
+    local name = trim(entry.text or "")
+    local available = fandomNameWidth(entry, content_width, metrics)
+    local name_w = measuredWidth(name,
+        Font:getFace("smallinfofont", metrics.title_size), true)
+    if name_w + 2 * Size.padding.small > available then return 2 end
+    return 1
 end
 
 local Ao3MenuItem = InputContainer:extend{
@@ -500,6 +567,40 @@ function Ao3MenuItem:buildCard(metrics)
     return content
 end
 
+-- A fandom index record: the name in bold, allowed to run to two lines and
+-- closed with an ellipsis after that, and its work count in the right-hand
+-- column like every other row.
+function Ao3MenuItem:buildFandom(metrics)
+    local width = self.content_width
+    local count = trim(tostring(self.entry.mandatory or ""))
+
+    self.fandom_count_widget = count ~= "" and TextWidget:new{
+        text = count,
+        face = Font:getFace("infont", metrics.info_size),
+    } or nil
+    local count_w = self.fandom_count_widget and self.fandom_count_widget:getWidth() or 0
+    local gap = count_w > 0 and Size.span.horizontal_default or 0
+
+    self.fandom_name_widget = TextBoxWidget:new{
+        text = trim(self.entry.text or ""),
+        face = Font:getFace("smallinfofont", metrics.title_size),
+        bold = true,
+        width = math.max(1, width - count_w - gap),
+        height = metrics.fandom_name_h,
+        height_adjust = true,
+        height_overflow_show_ellipsis = true,
+        alignment = "left",
+    }
+
+    local row = HorizontalGroup:new{ align = "center" }
+    row[#row + 1] = self.fandom_name_widget
+    if self.fandom_count_widget then
+        row[#row + 1] = HorizontalSpan:new{ width = gap }
+        row[#row + 1] = self.fandom_count_widget
+    end
+    return row
+end
+
 function Ao3MenuItem:buildCompact(metrics)
     local title_face = Font:getFace("smallinfofont", metrics.title_size)
     local mandatory = self.entry.mandatory
@@ -541,6 +642,8 @@ function Ao3MenuItem:init()
         content = self.entry.ao3_panel
     elseif self.entry.ao3_work then
         content = self:buildCard(metrics)
+    elseif self.entry.ao3_fandom then
+        content = self:buildFandom(metrics)
     else
         content = self:buildCompact(metrics)
     end
@@ -656,6 +759,11 @@ local Ao3WorkMenu = Menu:extend{
     items_max_lines = 4,
 }
 
+function Ao3WorkMenu:fandomContentWidth()
+    local width = self.item_dimen and self.item_dimen.w or Screen:getWidth()
+    return math.max(1, width - 2 * Size.padding.fullscreen)
+end
+
 function Ao3WorkMenu:setupItemHeights()
     local metrics = ao3CardMetrics(
         self.font_size,
@@ -679,8 +787,14 @@ function Ao3WorkMenu:setupItemHeights()
     local items, used = {}, 0
     for index, item in ipairs(self.item_table) do
         if item.ao3_tabs then
-            -- The author tab strip is a row of its own above the content.
+            -- The author tab strip is a row of its own above the content. A
+            -- sticky strip (the fandom letter index) is painted above every
+            -- page instead, so it pays for its height once and never scrolls
+            -- out of reach.
             item.height = item.ao3_tabs:getSize().h + Size.span.vertical_default
+            if item.ao3_sticky then
+                budget = math.max(1, budget - item.height)
+            end
         elseif item.ao3_static then
             -- A prebuilt, non-selectable block (hero, stats, folded text).
             item.height = item.ao3_static:getSize().h
@@ -690,13 +804,30 @@ function Ao3WorkMenu:setupItemHeights()
             item.height = item.ao3_panel:getSize().h + self.linesize
         elseif item.ao3_work then
             item.height = item.summary and metrics.card_h or metrics.card_no_summary_h
+        elseif item.ao3_fandom then
+            -- An index record: one line for most names, two when the name
+            -- needs it, never more.
+            item.height = fandomNameLines(item, self:fandomContentWidth(),
+                metrics) == 2 and metrics.fandom_two_line_h or metrics.fandom_one_line_h
         else
             item.height = compact_h
         end
-        if #items > 0 and used + item.height > budget then
-            self.page_items[#self.page_items + 1] = items
-            items = { index }
-            used = item.height
+        if item.ao3_sticky then
+            -- Not part of the paged item list; updateItems paints it first.
+        elseif #items > 0 and used + item.height > budget then
+            -- A group label travels with the first row of its group: a page
+            -- must not end on a label whose content is overleaf.
+            local carry
+            local last = self.item_table[items[#items]]
+            if last and last.keep_with_next then
+                carry = table.remove(items)
+                used = used - (last.height or 0)
+            end
+            if #items > 0 then
+                self.page_items[#self.page_items + 1] = items
+            end
+            items = carry and { carry, index } or { index }
+            used = item.height + (carry and (last.height or 0) or 0)
         else
             items[#items + 1] = index
             used = used + item.height
@@ -738,6 +869,20 @@ function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
     end
 
     local page_items = self.page_items and self.page_items[self.page] or {}
+
+    -- A sticky strip (the fandom letter index) is painted above every page so
+    -- the reader can change letters without paging back to the top.
+    local first = self.item_table[1]
+    if first and first.ao3_sticky and first.ao3_tabs then
+        local strip = first.ao3_tabs
+        strip.dimen = Geom:new{
+            x = 0, y = 0,
+            w = self.item_dimen.w,
+            h = first.height or strip:getSize().h,
+        }
+        table.insert(self.item_group, strip)
+    end
+
     for idx, index in ipairs(page_items) do
         local item = self.item_table[index]
         if item then
@@ -1034,6 +1179,9 @@ function Ao3:showWorkPage(work, replace, focus)
             UIManager:show(TextViewer:new{ title = title, text = text })
         end,
         on_author = function(name, url) self:showAuthor(name, url) end,
+        signed_in = self.session ~= nil,
+        social = self:workSocial(work),
+        on_action = function(action) self:workAction(work, action) end,
     }
 
     local title = _("Work details")
@@ -1318,6 +1466,75 @@ function Ao3:replaceRows(title, rows, itemnumber)
     menu.ao3_title = title
 end
 
+-- ---------------------------------------------------------------------------
+-- Account
+-- ---------------------------------------------------------------------------
+--
+-- The account surface is drawn by accountpage.lua (the reader's lists) and
+-- workpage.lua (the four actions on a work). The session, the list fetches
+-- and the form posts belong to the account module; the four functions below
+-- are its seam. `self.session` is `{ username = <AO3 name>, ... }` once it
+-- exists, and is nil while browsing anonymously.
+
+-- Which of the four work actions are already on. The account module replaces
+-- this with the state it parses from the signed-in work page.
+function Ao3:workSocial(work)
+    local cached = self.work_social and self.work_social[tostring(work and work.id or "")]
+    return cached or {}
+end
+
+-- One work action (kudos, bookmark, subscribe, later). The account module
+-- posts the form here and refreshes the page; until then the tap reports that
+-- the connection is not part of this build.
+function Ao3:workAction(work, action)
+    UIManager:show(InfoMessage:new{
+        text = _("AO3 account actions are not connected in this build."),
+    })
+end
+
+-- Signing in is the account module's dialog + two requests.
+function Ao3:signIn()
+    UIManager:show(InfoMessage:new{
+        text = _("AO3 sign-in is not connected in this build."),
+    })
+end
+
+-- Logging out only drops local state, so it is safe to offer here already.
+-- The account module also clears the saved session.
+function Ao3:signOut()
+    self.session = nil
+    self.work_social = nil
+    self:showHome()
+end
+
+-- One of the four account lists. The account module fetches it and pushes
+-- the rows; this is where that call goes.
+function Ao3:showAccountList(kind)
+    UIManager:show(InfoMessage:new{
+        text = _("AO3 account lists are not connected in this build."),
+    })
+end
+
+function Ao3:showAccount()
+    if not self.session then
+        self:signIn()
+        return
+    end
+    local font_size = (self.menu and self.menu.font_size) or 20
+    local width = Screen:getWidth() - 2 * Size.padding.fullscreen
+    local name = self.session.username or _("your account")
+    self:pushRows(_("Account"), AccountPage.build{
+        name = name,
+        width = width,
+        font_size = font_size,
+        on_list = function(kind) self:showAccountList(kind) end,
+        on_works = function()
+            self:showAuthor(name, BASE_URL .. "/users/" .. name)
+        end,
+        on_logout = function() self:signOut() end,
+    })
+end
+
 function Ao3:homeRows()
     local downloads = self:listDownloads()
 
@@ -1339,6 +1556,9 @@ function Ao3:homeRows()
         icons_dir = assets .. "icons/",
         downloads = #downloads,
         version = Updater.currentVersion(self:pluginDir()),
+        signed_in = self.session ~= nil,
+        account_name = self.session and self.session.username or nil,
+        on_account = function() self:showAccount() end,
         on_search = function() self:searchDialog() end,
         on_latest = function()
             self:loadListing(self:recentUrl(), _("Latest works"))
@@ -1381,7 +1601,8 @@ function Ao3:fandomRows(index)
             text = category.name,
             mandatory = T(fandoms_label, formatCount(category.count)),
             action = function()
-                self:showFandomLetters(category)
+                self:showFandomLetterPage(category,
+                    (category.letters and category.letters[1]) or "A", 0, false)
             end,
         }
     end
@@ -1399,21 +1620,75 @@ function Ao3:showFandoms()
     self:pushRows(_("Fandoms"), self:fandomRows(index))
 end
 
-function Ao3:showFandomLetters(category)
-    local rows = {}
-    for _, letter in ipairs(category.letters) do
-        rows[#rows + 1] = {
-            text = letter,
-            action = function()
-                self:showFandomLetter(category, letter)
-            end,
-        }
-    end
-    self:pushRows(category.name, rows)
+-- The alphabet as one printed thumb index: nine letters to a shelf, so the
+-- whole of A-Z and "#" sits on the page at once instead of taking two screens
+-- of near-empty rows. The open letter is the single inverted cell - the tab
+-- strip's checked state, and the only block of ink on the screen.
+local FANDOM_INDEX_COLUMNS = 9
+
+function Ao3:fandomLetterCell(letter, open, width, height, font_size, on_select)
+    local border = Size.border.thin
+    local label = TextWidget:new{
+        text = letter,
+        face = Font:getFace("smallinfofont", font_size),
+        bold = true,
+        fgcolor = open and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK,
+        max_width = math.max(1, width - 2 * border - 2 * Size.padding.small),
+    }
+    local frame = FrameContainer:new{
+        background = open and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
+        color = Blitbuffer.COLOR_BLACK,
+        bordersize = border,
+        margin = 0,
+        padding = 0,
+        CenterContainer:new{
+            dimen = Geom:new{
+                w = math.max(1, width - 2 * border),
+                h = math.max(1, height - 2 * border),
+            },
+            label,
+        },
+    }
+    return Uikit.tapArea(frame, width, height, function()
+        on_select(letter)
+    end)
 end
 
-function Ao3:showFandomLetter(category, letter)
-    self:showFandomLetterPage(category, letter, 0, false)
+function Ao3:fandomLetterIndex(category, open_letter, width, on_select)
+    local letters = category and category.letters
+    if not letters or #letters == 0 then return nil end
+
+    width = math.max(1, width or Screen:getWidth())
+    local gutter = Size.padding.fullscreen
+    local inner_w = math.max(1, width - 2 * gutter)
+    local font_size = (self.menu and self.menu.font_size) or 20
+    local cell_h = lineHeight(Font:getFace("smallinfofont", font_size), true)
+        + 2 * Size.padding.default
+    local columns = math.min(#letters, FANDOM_INDEX_COLUMNS)
+
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.large }
+    local first = 1
+    while first <= #letters do
+        local last = math.min(first + columns - 1, #letters)
+        local count = last - first + 1
+        local row = HorizontalGroup:new{ align = "top" }
+        row[#row + 1] = HorizontalSpan:new{ width = gutter }
+        for i = first, last do
+            -- Split the column evenly while keeping every cell a whole
+            -- number of pixels, so the grid has no ragged right edge.
+            local left = math.floor((i - first) * inner_w / count)
+            local right = math.floor((i - first + 1) * inner_w / count)
+            row[#row + 1] = self:fandomLetterCell(letters[i],
+                letters[i] == open_letter, right - left, cell_h, font_size,
+                on_select)
+        end
+        row[#row + 1] = HorizontalSpan:new{ width = gutter }
+        group[#group + 1] = row
+        first = last + 1
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.large }
+    return group
 end
 
 function Ao3:showFandomLetterPage(category, letter, offset, replace)
@@ -1425,12 +1700,24 @@ function Ao3:showFandomLetterPage(category, letter, offset, replace)
         return
     end
 
-    table.insert(rows, 1, {
+    local strip = self:fandomLetterIndex(category, letter, nil, function(selected)
+        -- Every tap starts that letter at its first window; tapping the open
+        -- letter is the way back to the top of a long list.
+        self:showFandomLetterPage(category, selected, 0, true)
+    end)
+    if strip then
+        table.insert(rows, 1, { ao3_tabs = strip, ao3_sticky = true })
+    end
+    table.insert(rows, strip and 2 or 1, {
         text = _("Find in this letter…"),
         action = function()
             self:findFandomDialog(category, letter)
         end,
     })
+
+    if #page.entries == 0 then
+        rows[#rows + 1] = { text = _("No fandoms in this letter.") }
+    end
 
     if page.offset > 0 then
         rows[#rows + 1] = {
@@ -1449,8 +1736,15 @@ function Ao3:showFandomLetterPage(category, letter, offset, replace)
         }
     end
 
-    local title = T(_("%1 · %2 · %3–%4/%5"), category.name, letter,
-        page.offset + 1, page.offset + #page.entries, formatCount(page.total))
+    -- The open letter is already the inverted tab; the title spends its one
+    -- line on where the reader is inside that letter.
+    local title
+    if page.total > 0 then
+        title = T(_("%1 · %2–%3 of %4"), category.name, page.offset + 1,
+            page.offset + #page.entries, formatCount(page.total))
+    else
+        title = T(_("%1 · %2 fandoms"), category.name, formatCount(page.total))
+    end
     if replace then
         self:replaceRows(title, rows)
     else

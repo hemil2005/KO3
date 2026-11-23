@@ -174,15 +174,18 @@ A two-ink press: pure black and pure white, with three greys separating chrome f
 
 **The Measure Rule.** A work card's blurb stops at three lines (320 characters, 1.3 line spacing). Anything longer belongs behind a section header or in the dedicated full-text viewer, never in the list.
 
+**The Two-Line Index Rule.** A fandom's name in the letter index runs to at most two lines and then ends with an ellipsis; its work count sits in a right-aligned column that never wraps. Only the second line is paid for when the name needs it, so a short name keeps a one-line row.
+
 ## Layout
 
 One column, one left edge. The reference canvas is 600×800; content is inset 15px each side (`Size.padding.fullscreen`), leaving a 570px column, and every static panel uses that same inset so it lines up with native menu rows (which inset themselves).
 
 Vertical rhythm is three steps: **20px** above a group label (two gutters), **5px** below it, **10px** between entries. Inside a card, title → byline is 2px, byline → blurb is 5px. Inside the details page, the hero opens with 5px, title → byline is 5px, byline → fandom is 2px, and a hairline closes the block.
 
-- **Landing page:** logo lockup (84px-wide mark + name + subtitle), then the full-width solid Search bar, then three labelled groups. Browse and Library are two-up tile grids: two 280px tiles with a 10px gutter. A group with a single action (Update plugin, Restore) uses one full-width tile of the same construction.
+- **Landing page:** logo lockup (84px-wide mark + name + subtitle), then the full-width solid Search bar, then four labelled groups: Browse, Account, Library, Plugin. Browse and Library are two-up tile grids: two 280px tiles with a 10px gutter. Account and Plugin each use one full-width tile of the same construction; Account swaps its symbol and name with the session (login → Sign in, user → the reader's name). A label always travels with the first row of its group, so paging never leaves a label alone at the foot of a page.
 - **Work listings:** full-width records, not a grid. Each card is as tall as its content needs (title line + byline + up to three blurb lines), closed by a 1px Slate separator inset to the gutter.
-- **Work details:** hero, then an action row split 60/40 with a 10px gap (Read / Refresh), then a four-cell stats strip with 10px gaps, then a two-column facts table whose label column is 23% of the width, then folded Summary and Tags sections.
+- **Fandom list:** the letter index band (about 135px, three shelves) is pinned above a full-width index: a bold name of one or two lines and a right-aligned count, closed by the same 1px Slate separator. The search row follows the band; paging rows close the list.
+- **Work details:** hero, then an action row split 60/40 with a 10px gap (Read / Refresh), then a four-cell stats strip with 10px gaps, then a two-column facts table whose label column is 23% of the width, then the four account actions in a 2×2 grid, then folded Summary and Tags sections.
 - **Paging is per item, not scroll.** The native menu header carries the screen title on one line (no subtitle band); the footer carries page arrows and "Page N of M". A page never clips a row.
 - **No keyboard-shortcut columns** (`is_enable_shortcut = false`): the title, byline and blurb own the full width on a touchscreen.
 
@@ -219,6 +222,19 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 - **Shape:** 7px radius, 1px Ink border, Paper fill, 10px padding.
 - **Content:** 26px stroke icon, 10px, bold 19px name; 5px below, a 14px Graphite hint ("Newest on AO3", "By media", "8 saved"). The tile is two columns wide in the grid or one full-width tile for a lone action.
 - **Height:** measured from its own content (81px at the reference), so the hint always fits.
+- **Account tile:** the one tile that reflects state. Signed out it is the login symbol and "Sign in" with "Kudos, bookmarks and subscriptions"; signed in it is the user symbol and the reader's AO3 name with "Bookmarks, marked for later, history, subscriptions". Position, size and hint size never change with the session.
+
+### Work Actions (account)
+- **Style:** a 2×2 grid of Secondary buttons under the facts table, each half the column width plus a 10px gutter, 2.4× font height (46px). A quiet "Your AO3" group label sits 20px above, 5px below.
+- **Labels:** Kudos, Bookmark, Subscribe, Mark for later. They never change position or width with state.
+- **State:** KOReader's own checkmark appended after the label ("Bookmark  ✓"), the same mark the tab strip uses. No fill, no grey-out: an action that is on is still a full-contrast action.
+- **Signed out:** the same four buttons at full contrast, with one 14px Graphite line beneath: "Sign in to your AO3 account to use these." Read stays the page's only solid bar.
+
+### Account Screen
+- **Shape:** a contents page, not a settings form. Bold display name (+6) with "Signed in to AO3" in Meta beneath, a hairline, then a "Lists" label and four native rows (Bookmarks, Marked for later, History, Subscriptions) with right-aligned hints.
+- **Order:** the four lists, then an "Author" group with "Works by <name>", then Log out after two gutters of air.
+- **Log out:** one full-width outlined Secondary button, not a solid bar — leaving is not the screen's purpose — with 14px Graphite reassurance below ("Saved works stay on this device.").
+- **Why rows, not a tab strip:** the four labels do not fit a 600px strip ("Marked for later" alone is wider than a quarter), and a contents page scans vertically.
 
 ### Work Cards (signature component)
 - **Shape:** no box, no border. A record on paper, closed by a 1px Slate rule inset to the gutter.
@@ -241,6 +257,11 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 - **Style:** four equal, edge-to-edge segments (Dashboard / Works / Series / Bookmarks) with 0.5px Ink borders, bold 19px labels, Paper fill in every state.
 - **State:** the current tab is marked with a "✓" after its label, not with a fill. No inset: the strip is the only full-bleed element in the system.
 
+### Letter Index (fandom list, signature component)
+- **Style:** the whole alphabet as one printed thumb index above the fandom list — three shelves of nine (A–I, J–R, S–Z and `#`), inset to the 15px gutter. Each letter is a square cell: 0.5px Ink border, Paper fill, one bold 19px letter centred, height from the letter's line plus 5px above and below.
+- **State:** the open letter is the one inverted cell (Ink fill, Paper letter). In a grid of single glyphs a "✓" would shout louder than the letter it marks, so the index carries the tab strip's checked signal as inversion instead; it is the only block of ink on the screen.
+- **Behaviour:** the index is pinned above every page of the open letter (it is not paged away), so switching letters never means paging back to the top. A tap reloads that letter at its first window. Cells scale to a shorter alphabet rather than leaving a ragged last row.
+
 ### Menu Rows
 - **Style:** native density — 19px title at the left, a right-aligned 15px grey value ("2,523 fandoms", "Author page"), 1px Slate separator inset to the gutter. No shortcut boxes, no chevrons, no pills.
 
@@ -253,6 +274,8 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 - **Do** use Graphite for sentences inside a record and Slate for chrome; keep contrast survivable in grayscale.
 - **Do** build tiles and actions from their content (icon + name + hint; 2.4× font height) so nothing clips.
 - **Do** close each work record with a single hairline and keep the blurb to three lines.
+- **Do** keep the fandom letter index on screen while a letter's list is paged, and let a long fandom name take a second line before it is elided.
+- **Do** let state be a KOReader checkmark and let the account tile keep its place while its symbol and name change with the session.
 - **Do** keep the AO3 mark and name as the only masthead identity, and leave the native title bar empty on the landing page.
 - **Do** verify every screen in the 600×800 emulator and save the capture under `screenshots/`.
 

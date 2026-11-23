@@ -67,13 +67,15 @@ function Uikit.tapArea(widget, width, height, callback)
 end
 
 -- A full-width button. Primary is a solid black bar with a white label; the
--- secondary keeps the native outlined look.
-function Uikit.button(label, width, height, primary, callback, font_size)
+-- secondary keeps the native outlined look. `checked` appends KOReader's own
+-- checkmark (the mark its Buttons and tab strips use), so a toggle says
+-- "on" in a language the device already speaks.
+function Uikit.button(label, width, height, primary, callback, font_size, checked)
     local border = primary and 0 or Size.border.button
     local inner_w = math.max(1, width - 2 * border)
     local inner_h = math.max(1, height - 2 * border)
     local label_widget = TextWidget:new{
-        text = label,
+        text = checked and (label .. "  \u{2713}") or label,
         face = Font:getFace("cfont", font_size),
         bold = true,
         fgcolor = primary and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK,

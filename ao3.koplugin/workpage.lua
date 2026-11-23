@@ -3,10 +3,11 @@ The work details screen.
 
 One work as a page rather than a list of key/value lines: identity at the
 top, the two decisions you actually make there (read it, or refresh the
-saved copy), the numbers that tell you what you are getting into, then a
-small table for the decision metadata. The long text — summary and tags —
-is folded away behind section headers so the page stays scannable and the
-work's own words are one tap from reach.
+saved copy), the numbers that tell you what you are getting into, a small
+table for the decision metadata, the four things an AO3 account can do with
+the work, then the long text — summary and tags — folded away behind section
+headers so the page stays scannable and the work's own words are one tap from
+reach.
 
 Everything is native KOReader widgets: TextWidget / TextBoxWidget /
 HorizontalGroup / VerticalGroup / LineWidget, the same building blocks the
@@ -209,6 +210,68 @@ function WorkPage.facts(work, width, font_size)
     return group
 end
 
+-- The four things an AO3 account does with a work. Read stays the page's one
+-- solid bar, so these are a 2x2 grid of outlined buttons: a second primary
+-- would cancel the first. The pressed state is KOReader's own checkmark, the
+-- same mark its tab strip uses, so the page needs no new state language.
+WorkPage.SOCIAL = {
+    { id = "kudos", label = _("Kudos") },
+    { id = "bookmark", label = _("Bookmark") },
+    { id = "subscribe", label = _("Subscribe") },
+    { id = "later", label = _("Mark for later") },
+}
+
+-- `state` maps a social id to whether it is already on. `signed_in` only
+-- changes the quiet line under the grid: the buttons keep full contrast
+-- either way and route the tap to sign-in themselves.
+function WorkPage.social(width, font_size, state, signed_in, on_action)
+    state = state or {}
+    on_action = on_action or function() end
+    local gap = Size.span.horizontal_default
+    local height = math.floor(font_size * 2.4 + 0.5)
+    local button_w = math.floor((width - gap) / 2)
+
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = Uikit.label(_("Your AO3"), width, font_size)
+    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+
+    for i = 1, #WorkPage.SOCIAL, 2 do
+        local row = HorizontalGroup:new{ align = "center" }
+        for column = 0, 1 do
+            local entry = WorkPage.SOCIAL[i + column]
+            if entry then
+                if column > 0 then
+                    row[#row + 1] = HorizontalSpan:new{ width = gap }
+                end
+                row[#row + 1] = Uikit.button(
+                    entry.label, button_w, height, false,
+                    function() on_action(entry.id) end,
+                    font_size - 2, state[entry.id] == true)
+            end
+        end
+        group[#group + 1] = row
+        if i + 2 <= #WorkPage.SOCIAL then
+            group[#group + 1] = VerticalSpan:new{ width = gap }
+        end
+    end
+
+    if not signed_in then
+        group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+        group[#group + 1] = TextBoxWidget:new{
+            text = _("Sign in to your AO3 account to use these."),
+            face = Font:getFace("smallinfofont", font_size - 5),
+            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            width = width,
+            height_adjust = true,
+            alignment = "left",
+        }
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = Uikit.rule(width)
+    return group
+end
+
 -- Section header for the folded content. The menu's focus underline sits
 -- under it, so it also acts as the rule between sections.
 function WorkPage.section(title, width, font_size, expanded)
@@ -296,6 +359,15 @@ function WorkPage.build(o)
     if facts then
         rows[#rows + 1] = { ao3_static = Uikit.padded(facts), role = "facts" }
     end
+
+    -- Account actions sit below the metadata so Read keeps the top of the
+    -- page, and above the folded text so they stay on the first screen.
+    rows[#rows + 1] = {
+        ao3_static = Uikit.padded(WorkPage.social(
+            width, font_size, o.social or {}, o.signed_in == true,
+            o.on_action or function() end)),
+        role = "social",
+    }
 
     if hasText(work.summary) then
         rows[#rows + 1] = {

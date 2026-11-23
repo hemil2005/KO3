@@ -7,9 +7,10 @@ It does **not** embed a WebView and never renders AO3's site. AO3 is only a
 data source: pages are fetched, parsed, and rebuilt as a native KOReader
 `Menu`; a work's HTML download is handed to crengine when you tap **Read**.
 
-- No login
+- Browsing without an account; sign-in and account actions are laid out but
+  not connected in this build
 - No images
-- No kudos, comments, bookmarks or subscriptions
+- No comments
 - No third-party service
 - One page fetched per tap; only opened works are saved
 - Self-updating from GitHub Releases (checksum-verified, with rollback)
@@ -24,14 +25,16 @@ details captured from a live work.
 | | |
 |---|---|
 | ![AO3 in the menu](screenshots/01-menu.png) | ![Home](screenshots/02-home.png) |
-| ![Fandoms by media](screenshots/03-fandoms.png) | ![Letters](screenshots/04-letters.png) |
-| ![Fandom list](screenshots/05-fandom-list.png) | ![Works with summaries](screenshots/06-works.png) |
+| ![Fandoms by media](screenshots/03-fandoms.png) | ![Fandom index](screenshots/04-letters.png) |
+| ![A letter's fandoms](screenshots/05-fandom-list.png) | ![Works with summaries](screenshots/06-works.png) |
 | ![Work details](screenshots/07-work-details.png) | ![Reading a work](screenshots/08-reading.png) |
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
 | ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
 | ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/14-update-home.png) |
 | ![Update prompt](screenshots/15-update-dialog.png) | ![Work summary expanded](screenshots/18-work-summary.png) |
-| ![Work tags expanded](screenshots/19-work-tags.png) | |
+| ![Work tags expanded](screenshots/19-work-tags.png) | ![Sign in on the landing page](screenshots/24-home-signed-out.png) |
+| ![Account on the landing page](screenshots/25-home-signed-in.png) | ![Work account actions](screenshots/26-work-account-actions.png) |
+| ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) | ![Account page](screenshots/28-account.png) |
 
 ## Install
 
@@ -88,12 +91,16 @@ name beside the icon, with a one-line hint underneath:
 | **Update plugin** | Check GitHub Releases for a newer version |
 
 Fandoms are browsed media category → letter → fandom, the same way AO3's
-own index is organised. Large letters load in local windows of up to 100
-fandoms. **Find in this letter…** jumps to a matching name without going
-online; tapping a fandom fetches only its 20-work page. Each work is one
-selectable card with title, author and up to three lines of summary. On the
-AO3 screens, the letter shortcut boxes are hidden so the text gets the full
-touchscreen width.
+own index is organised. Choosing a category opens the whole alphabet as one
+index above the list: three shelves of nine (A–I, J–R, S–Z and `#`), with the
+open letter inverted. The index stays on screen while you page through a
+letter, so changing letters never means paging back. A fandom's name may run
+to two lines and is then elided; its work count keeps the right-hand column.
+Large letters load in local windows of up to 100 fandoms. **Find in this
+letter…** jumps to a matching name without going online; tapping a fandom
+fetches only its 20-work page. Each work is one selectable card with title,
+author and up to three lines of summary. On the AO3 screens, the letter
+shortcut boxes are hidden so the text gets the full touchscreen width.
 
 Tap a result to drill in; tap a work for its details. The work screen leads
 with the title, author and fandom, then **Read** (the solid bar, which
@@ -199,15 +206,24 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
 - Work lists render a single selectable title/author/three-line summary card
   per work, without separate shortcut or description rows.
 - The work screen is one page, not a key/value list: title/author/fandom,
-  Read and Refresh, a four-number strip, an aligned metadata table, and
-  folded Summary and Tags sections. A summary longer than a page is elided
-  and opens in full; expanding lands on the text it revealed. Captured in
-  `screenshots/07` and `18`–`19`.
+  Read and Refresh, a four-number strip, an aligned metadata table, four
+  account actions (Kudos, Bookmark, Subscribe, Mark for later), and folded
+  Summary and Tags sections. A summary longer than a page is elided and opens
+  in full; expanding lands on the text it revealed. Captured in
+  `screenshots/07`, `18`–`19` and `26`–`27`.
 - The landing page: AO3 logo lockup, one solid Search bar, then Browse,
-  Library and Plugin groups of icon tiles (clock, grid, person, tag,
-  download, file, refresh). The logo is OTW's official PNG plus a traced
-  SVG; the tile symbols are authored 24x24 SVGs, so no build falls back to a
-  missing-icon glyph. Captured in `screenshots/02`.
+  Account, Library and Plugin groups of icon tiles (clock, grid, person, tag,
+  login, download, file, refresh). The Account tile is the login symbol while
+  signed out and becomes the reader's own name with the user symbol once
+  signed in. The logo is OTW's official PNG plus a traced SVG; the tile
+  symbols are authored 24x24 SVGs, so no build falls back to a missing-icon
+  glyph. Captured in `screenshots/02`, `24` and `25`.
+- The account page is a contents page for AO3's four lists (Bookmarks,
+  Marked for later, History, Subscriptions), the reader's author page, and
+  an outlined Log out with the note that saved works stay on the device.
+  Captured in `screenshots/28`. The four actions and the list screens are
+  layout only in this build; sign-in and the AO3 requests belong to the
+  account module.
 - The author page (Dashboard / Works / Series / Bookmarks) is built from the
   exact live AO3 markup captured on 2026-11-23, including author-scoped
   fandom links, series stats, work bookmarks and series bookmarks; the four
@@ -218,9 +234,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row and prompt render in the emulator
   (`screenshots/14`–`15`).
-- The offline `busted` suite: 130 tests passing across parser, navigation,
+- The offline `busted` suite: 149 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
-  author-page, work-page, home-page and updater tests.
+  author-page, work-page, account-screen, home-page and updater tests.
 
 **Current connectivity:** AO3 refused the emulator's listing request with
 `403`; independent Windows and WSL `curl` requests received `429` on this

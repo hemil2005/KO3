@@ -28,7 +28,9 @@ without losing a previously saved copy.
 AO3 is a data source, never a rendered site. The plugin lives inside
 KOReader, parses AO3's HTML and rebuilds it with stock KOReader widgets, then
 hands AO3's own work download to crengine. No WebView, no embedded browser,
-no third-party service, no account. The offline fandom index (77,535 fandoms
+no third-party service. Browsing needs no account; the account screens are
+laid out in this build, but their requests are not connected yet. The offline
+fandom index (77,535 fandoms
 across 10 media categories, shipped with the plugin) means browsing still
 works when AO3 refuses the device.
 
@@ -52,20 +54,24 @@ works when AO3 refuses the device.
 
 ## Capabilities and Constraints
 
-Confirmed surfaces: landing page; latest works and search; the shipped fandom
-index (media category → letter → bounded 100-entry windows, with offline
-"Find in this letter"); tag listings; work cards (bold title, author, up to
-three summary lines); work details (title, author, fandom, Read/Refresh,
-four-number strip, metadata table, folded Summary and Tags); author page with
-Dashboard / Works / Series / Bookmarks tabs; Downloads; open by URL or work
-ID; self-update and restore-previous.
+Confirmed surfaces: landing page with its account tile; latest works and
+search; the shipped fandom index (media category → letter index → bounded
+100-entry windows, with offline "Find in this letter"); tag listings; work
+cards (bold title, author, up to three summary lines); work details (title,
+author, fandom, Read/Refresh, four-number strip, metadata table, folded
+Summary and Tags, and the stubbed per-work account actions); author page with
+Dashboard / Works / Series / Bookmarks tabs; the account page (four lists,
+author link, log out); Downloads; open by URL or work ID; self-update and
+restore-previous.
 
 Hard constraints:
 
 - Lua 5.1 inside KOReader; stock KOReader widgets only. No WebView, no
   embedded browser, no hand-drawn bitmaps for controls.
-- Read-only and public: no login, no session, no kudos, comments, bookmarks or
-  subscriptions; no images; adult-gated works may be refused.
+- Read-only browsing: no comments, no images; adult-gated works may be
+  refused. The account screens (sign-in, kudos, bookmark, subscribe, Marked
+  for Later, the four account lists) are UI-only in this build: they say the
+  account module is not connected and store no credentials.
 - One page per tap, 20 works per page, no infinite scroll, no crawling;
   `Retry-After` honoured; a download is validated before it replaces a cached
   copy.
@@ -97,9 +103,9 @@ Do not widen scope as a side effect of a design task; confirm it first.
 - `README.md` — the user-facing source of truth: capabilities, verification
   record, limits, troubleshooting.
 - `AGENTS.md` — working rules for UI, downloaded works and network behaviour.
-- `screenshots/` — emulator captures of every current screen (01–19), used as
+- `screenshots/` - emulator captures of every current screen (01-28), used as
   visual-regression evidence.
-- `ao3.koplugin/spec/` — 130 offline tests plus real AO3 markup captured on
+- `ao3.koplugin/spec/` — 149 offline tests plus real AO3 markup captured on
   2026-11-23 (`fixtures/`, including author dashboard/works/series/bookmarks).
 - `research/ao3-access-policy.md`, `research/koreader-network-options.md`,
   `research/kindle-crash-candidates.md` — access, networking and
