@@ -660,17 +660,26 @@ describe("AO3 browser", function()
             plugin.menu = nil
         end)
 
-        it("opens a home menu with the browse entries", function()
+        local function tile(menu, role)
+            for _, row in ipairs(menu.item_table) do
+                for _, entry in ipairs(row.tiles or {}) do
+                    if entry.role == role then return entry end
+                end
+            end
+        end
+
+        it("opens a home menu led by the logo, not a repeated title", function()
             local menu = open_home()
             assert.is_truthy(menu)
-            assert.are.equal("AO3", menu.title_bar.title)
+            -- The wordmark lives in the page header, so the native bar is
+            -- empty: one identity, not two.
+            assert.are.equal("", menu.title_bar.title_widget.text)
+            assert.are.equal("", menu.ao3_title)
 
-            local joined = texts(menu)
-            assert.is_truthy(joined:find("Latest works", 1, true))
-            assert.is_truthy(joined:find("Fandoms", 1, true))
-            assert.is_truthy(joined:find("Author", 1, true))
-            assert.is_truthy(joined:find("Downloads", 1, true))
-            assert.is_truthy(joined:find("Open work", 1, true))
+            for _, role in ipairs({ "latest", "fandoms", "author", "tag",
+                "downloads", "open", "update" }) do
+                assert.is_truthy(tile(menu, role))
+            end
         end)
 
         it("leads with the logo lockup and one primary search bar", function()
@@ -687,20 +696,30 @@ describe("AO3 browser", function()
             assert.are.equal(1, calls)
         end)
 
-        it("groups the home rows under Browse, Library and Plugin", function()
+        it("groups the home rows into tile sections", function()
             local menu = open_home()
             local roles = {}
             for _, row in ipairs(menu.item_table) do
                 roles[#roles + 1] = row.role
             end
             assert.are.same({
-                "hero", "search", "browse_label", "latest", "fandoms",
-                "author", "tag", "library_label", "downloads", "open",
+                "hero", "search", "browse_label", "browse_row_1",
+                "browse_row_2", "library_label", "library_row",
                 "plugin_label", "update",
             }, roles)
+            -- Each tile row carries its two entries for paging and tests.
+            for _, row in ipairs(menu.item_table) do
+                if row.tiles then
+                    assert.is_true(#row.tiles == 1 or #row.tiles == 2)
+                    for _, entry in ipairs(row.tiles) do
+                        assert.is_truthy(entry.action)
+                        assert.is_truthy(entry.icon)
+                    end
+                end
+            end
         end)
 
-        it("ships the official logo and its traced SVG", function()
+        it("ships the official logo, its traced SVG and the tile icons", function()
             local dir = "plugins/ao3.koplugin/assets/"
             local png = assert(io.open(dir .. "ao3-logo.png", "rb"))
             local png_head = png:read(8)
@@ -712,6 +731,14 @@ describe("AO3 browser", function()
             svg:close()
             assert.is_truthy(svg_head:find("<svg", 1, true))
             assert.is_truthy(svg_head:find('viewBox="0 0 351 240"', 1, true))
+
+            for _, name in ipairs({ "clock", "grid", "user", "tag",
+                "download", "file", "refresh", "restore", "search" }) do
+                local f = assert(io.open(dir .. "icons/" .. name .. ".svg", "rb"))
+                local head = f:read(200)
+                f:close()
+                assert.is_truthy(head:find("<svg", 1, true), name)
+            end
         end)
 
         it("shows a results page with a short summary and backs out", function()
@@ -750,8 +777,14 @@ describe("AO3 browser", function()
             assert.is_truthy(menu.ao3_title:find("317,737", 1, true))
 
             menu:onClose()
-            assert.are.equal("AO3", menu.ao3_title)
-            assert.is_truthy(texts(menu):find("Latest works", 1, true))
+            assert.are.equal("", menu.ao3_title)
+            local home_latest
+            for _, row in ipairs(menu.item_table) do
+                for _, entry in ipairs(row.tiles or {}) do
+                    if entry.role == "latest" then home_latest = entry end
+                end
+            end
+            assert.is_truthy(home_latest)
         end)
 
         it("keeps one back-stack entry while paging through AO3 results", function()
@@ -782,7 +815,7 @@ describe("AO3 browser", function()
             plugin.fetchPage = old_fetch
             assert.is_true(ok, err)
             menu:onClose()
-            assert.are.equal("AO3", menu.ao3_title)
+            assert.are.equal("", menu.ao3_title)
         end)
 
         it("builds the fandom list from the embedded index", function()
@@ -1065,15 +1098,16 @@ describe("AO3 browser", function()
                 opened_url, opened_title = name, profile
             end
             local ok, err = pcall(function()
-                local author_row
+                local author_tile
                 for _, row in ipairs(plugin:homeRows()) do
-                    if type(row) == "table" and row.text == "Author" then
-                        author_row = row
-                        break
+                    for _, entry in ipairs(row.tiles or {}) do
+                        if entry.role == "author" then
+                            author_tile = entry
+                        end
                     end
                 end
-                assert.is_truthy(author_row)
-                author_row.action()
+                assert.is_truthy(author_tile)
+                author_tile.action()
                 assert.is_truthy(shown)
                 shown.getInputValue = function() return "An Author" end
                 shown.buttons[1][2].callback()

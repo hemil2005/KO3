@@ -59,6 +59,7 @@ koreader/
       uikit.lua
       assets/ao3-logo.png
       assets/ao3-logo.svg
+      assets/icons/*.svg
       fandompages.lua
       data/fandoms/index.lua
       data/fandoms/<category>/<letter>.tsv.z
@@ -70,10 +71,11 @@ the zip only has to be copied once.
 ## Use
 
 One menu entry opens the whole app. The landing page leads with the AO3 mark
-and name, then one solid **Search works** bar; everything else is grouped
-under **Browse**, **Library** and **Plugin**:
+and name (the native title bar is left empty, so the wordmark is the only
+identity), then one solid **Search works** bar. Everything else is an icon
+tile grouped under **Browse**, **Library** and **Plugin**:
 
-| Home row | What it does |
+| Tile or bar | What it does |
 |---|---|
 | **Search works** (solid bar) | Work title, author or keyword |
 | **Latest works** | Newest works across the archive (`/works`) |
@@ -201,8 +203,10 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   and opens in full; expanding lands on the text it revealed. Captured in
   `screenshots/07` and `18`–`19`.
 - The landing page: AO3 logo lockup, one solid Search bar, then Browse,
-  Library and Plugin groups. The logo is OTW's official PNG plus a traced
-  SVG, rendered natively. Captured in `screenshots/02`.
+  Library and Plugin groups of icon tiles (clock, grid, person, tag,
+  download, file, refresh). The logo is OTW's official PNG plus a traced
+  SVG; the tile symbols are authored 24x24 SVGs, so no build falls back to a
+  missing-icon glyph. Captured in `screenshots/02`.
 - The author page (Dashboard / Works / Series / Bookmarks) is built from the
   exact live AO3 markup captured on 2026-11-23, including author-scoped
   fandom links, series stats, work bookmarks and series bookmarks; the four

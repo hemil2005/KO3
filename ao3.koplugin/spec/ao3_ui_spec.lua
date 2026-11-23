@@ -287,12 +287,16 @@ describe("AO3 work-list cards", function()
         local old_show = UIManager.show
         UIManager.show = function() end
         plugin:showHome()
+        plugin:showWork({
+            id = "1", title = "Work", authors = "A Writer",
+            author_names = { "A Writer" }, author_urls = { "/users/a" },
+        })
         UIManager.show = old_show
 
         local menu = plugin.menu
         local item
         for _, row in ipairs(menu.item_table) do
-            if row.text == "Latest works" then
+            if row.role == "author" then
                 item = row
                 break
             end
@@ -306,7 +310,8 @@ describe("AO3 work-list cards", function()
             end
         end
         assert.is_truthy(row)
-        assert.are.equal("Newest on AO3", row.mandatory_widget.text)
+        assert.are.equal("A Writer", row.entry.text)
+        assert.are.equal("Author page", row.mandatory_widget.text)
         assert.are.equal(row.content_width, row.content_group:getSize().w)
     end)
 

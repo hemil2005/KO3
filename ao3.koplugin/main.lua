@@ -1281,15 +1281,20 @@ function Ao3:showHome()
     if self.menu then
         self.menu.item_table_stack = {}
         self.menu.ao3_title_stack = {}
-        self.menu.ao3_title = _("AO3")
-        self.menu:switchItemTable(_("AO3"), self:homeRows(), 1)
+        -- The logo lockup is the page header; the native bar keeps only the
+        -- close button, so "AO3" is not written twice.
+        self.menu.title = ""
+        self.menu.ao3_title = ""
+        self.menu:switchItemTable("", self:homeRows(), 1)
         if self.menu.page_return_arrow then
             self.menu.page_return_arrow:enableDisable(false)
         end
         return
     end
     local menu = self:ensureMenu()
-    menu:switchItemTable(_("AO3"), self:homeRows(), 1)
+    menu.title = ""
+    menu.ao3_title = ""
+    menu:switchItemTable("", self:homeRows(), 1)
     UIManager:show(menu)
 end
 
@@ -1327,6 +1332,7 @@ function Ao3:homeRows()
         width = Screen:getWidth() - 2 * Size.padding.fullscreen,
         font_size = (self.menu and self.menu.font_size) or 20,
         logo_path = logo,
+        icons_dir = assets .. "icons/",
         downloads = #downloads,
         version = Updater.currentVersion(self:pluginDir()),
         on_search = function() self:searchDialog() end,
@@ -1339,18 +1345,9 @@ function Ao3:homeRows()
         on_downloads = function() self:showDownloads() end,
         on_open = function() self:workDialog() end,
         on_update = function() self:checkForUpdates() end,
+        on_restore = lfs.attributes(Updater.backupDir(self:pluginDir()), "mode") == "directory"
+            and function() self:rollbackUpdate() end or nil,
     }
-
-    if lfs.attributes(Updater.backupDir(self:pluginDir()), "mode") == "directory" then
-        rows[#rows + 1] = {
-            text = _("Restore previous version"),
-            mandatory = _("Undo the last update"),
-            action = function()
-                self:rollbackUpdate()
-            end,
-            role = "restore",
-        }
-    end
 
     return rows
 end
