@@ -614,7 +614,10 @@ function Ao3MenuItem:init()
     self._underline_container = UnderlineContainer:new{
         color = self.line_color,
         linesize = self.linesize,
-        focus_linesize = Size.line.focus_row,
+        -- Older releases have no Size.line.focus_row, and debug builds raise
+        -- on unknown Size.line keys; rawget keeps both cases safe.
+        focus_linesize = rawget(Size.line, "focus_row")
+            or rawget(Size.line, "thick"),
         background = Blitbuffer.COLOR_WHITE,
         vertical_align = "center",
         padding = 0,
@@ -670,11 +673,16 @@ function Ao3MenuItem:onHoldSelect(arg, ges)
 end
 
 function Ao3MenuItem:getFocusIndicatorRegion()
-    return self._underline_container:getFocusIndicatorRegion()
+    if self._underline_container.getFocusIndicatorRegion then
+        return self._underline_container:getFocusIndicatorRegion()
+    end
 end
 
 function Ao3MenuItem:repaintFocusIndicator(bb)
-    return self._underline_container:repaintFocusIndicator(bb)
+    if self._underline_container.repaintFocusIndicator then
+        return self._underline_container:repaintFocusIndicator(bb)
+    end
+    return false
 end
 
 function Ao3MenuItem:onFocus()
@@ -713,6 +721,10 @@ function Ao3WorkMenu:setupItemHeights()
     -- Rows that are not work cards keep the native menu density: one row per
     -- slot on a full page. Cards take as much height as their text needs.
     local compact_h = math.max(self.item_dimen.h, metrics.compact_h)
+    -- Builds older than 2024.07 never set available_height; fall back to the
+    -- height of a full native page so the list still gets rows.
+    local budget = self.available_height
+        or ((self.item_dimen and self.item_dimen.h or 0) * (self.perpage or 1))
     local items, used = {}, 0
     for index, item in ipairs(self.item_table) do
         if item.ao3_work then
@@ -720,7 +732,7 @@ function Ao3WorkMenu:setupItemHeights()
         else
             item.height = compact_h
         end
-        if #items > 0 and used + item.height > self.available_height then
+        if #items > 0 and used + item.height > budget then
             self.page_items[#self.page_items + 1] = items
             items = { index }
             used = item.height
@@ -757,6 +769,12 @@ function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
     self.return_button:resetLayout()
     self.content_group:resetLayout()
     self:_recalculateDimen(no_recalculate_dimen)
+
+    if not self.page_items then
+        -- Builds before 2024.07 never call setupItemHeights from
+        -- _recalculateDimen; without this the list would render no rows.
+        self:setupItemHeights()
+    end
 
     local page_items = self.page_items and self.page_items[self.page] or {}
     for idx, index in ipairs(page_items) do

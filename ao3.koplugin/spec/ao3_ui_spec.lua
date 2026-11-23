@@ -123,6 +123,93 @@ describe("AO3 work-list cards", function()
         assert.is_true(menu_or_err.item_table[1].height > 0)
     end)
 
+    it("opens the menu on debug builds that reject unknown Size.line keys", function()
+        -- Older releases have no Size.line.focus_row, and debug builds install
+        -- an __index metatable on Size.line that raises for missing keys. The
+        -- card must read the key with rawget and fall back to Size.line.thick.
+        local Size = require("ui/size")
+        local saved_focus_row = rawget(Size.line, "focus_row")
+        local saved_mt = getmetatable(Size.line)
+        rawset(Size.line, "focus_row", nil)
+        setmetatable(Size.line, {
+            __index = function(_, key)
+                error("Size: this property does not exist: Size.line."
+                    .. tostring(key))
+            end,
+        })
+        local ok, menu_or_err = pcall(open_listing,
+            listing_with({ work("3", "Debug Build", "C", "Summary.") }))
+        rawset(Size.line, "focus_row", saved_focus_row)
+        setmetatable(Size.line, saved_mt)
+        assert.is_true(ok, menu_or_err)
+        assert.is_true(#menu_or_err.item_group > 0)
+    end)
+
+    it("rebuilds rows on builds whose Menu never computes page_items", function()
+        -- Before 2024.07 Menu._recalculateDimen neither called
+        -- setupItemHeights nor set available_height, so page_items stayed nil
+        -- and the listing rendered blank. updateItems must build the heights
+        -- itself and setupItemHeights must fall back to a height budget.
+        local Menu = require("ui/widget/menu")
+        local Geom = require("ui/geometry")
+        local saved = Menu._recalculateDimen
+        Menu._recalculateDimen = function(self, no_recalculate_dimen)
+            if no_recalculate_dimen then return end
+            local perpage = self.perpage or self.items_per_page_default
+            self.perpage = perpage
+            self.font_size = self.font_size or Menu.getItemFontSize(perpage)
+            self.item_dimen = Geom:new{
+                x = 0, y = 0,
+                w = self.inner_dimen.w,
+                h = math.floor(self.inner_dimen.h / perpage),
+            }
+            self.page_num = math.max(1,
+                math.ceil(#self.item_table / perpage))
+        end
+        local ok, menu_or_err = pcall(function()
+            local menu = open_listing(listing_with({
+                work("1", "Old Build One", "A", "Summary."),
+                work("2", "Old Build Two", "B", "Summary."),
+            }))
+            menu.page_items = nil
+            menu.available_height = nil
+            menu:updateItems(1)
+            return menu
+        end)
+        Menu._recalculateDimen = saved
+        assert.is_true(ok, menu_or_err)
+        assert.is_true(#menu_or_err.item_group > 0)
+        assert.is_true(#menu_or_err.page_items > 0)
+    end)
+
+    it("survives builds whose UnderlineContainer lacks the focus API", function()
+        -- FocusManager on newer builds calls these item methods; older
+        -- UnderlineContainer classes have neither, so the card must report
+        -- "no fast repaint" instead of calling a nil method.
+        local UnderlineContainer =
+            require("ui/widget/container/underlinecontainer")
+        local saved_region = UnderlineContainer.getFocusIndicatorRegion
+        local saved_repaint = UnderlineContainer.repaintFocusIndicator
+        UnderlineContainer.getFocusIndicatorRegion = nil
+        UnderlineContainer.repaintFocusIndicator = nil
+        local ok, result = pcall(function()
+            local menu = open_listing(listing_with(
+                { work("4", "Old Underline", "D", "Summary.") }))
+            local card = menu.item_group[1]
+            return {
+                menu = menu,
+                region = card:getFocusIndicatorRegion(),
+                repainted = card:repaintFocusIndicator(Screen.bb),
+            }
+        end)
+        UnderlineContainer.getFocusIndicatorRegion = saved_region
+        UnderlineContainer.repaintFocusIndicator = saved_repaint
+        assert.is_true(ok, result)
+        assert.is_true(#result.menu.item_group > 0)
+        assert.is_nil(result.region)
+        assert.is_false(result.repainted)
+    end)
+
     it("keeps a short summary intact and bounds a long one for three lines", function()
         local short = work("1", "Short", "A", "A short summary of the story.")
         local long = work("2", "Long", "B", string.rep("word ", 100))
