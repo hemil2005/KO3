@@ -699,6 +699,19 @@ describe("AO3 browser", function()
             end
         end)
 
+        it("keeps the close tap zone inside the title bar", function()
+            local menu = open_home()
+            local bar = menu.title_bar
+            local close = bar and bar.right_button
+            assert.is_truthy(close)
+            -- The author screen's tab strip is the first content row. If the
+            -- close button's target reached below the bar, its right end
+            -- would swallow taps on the rightmost tab (Bookmarks) and close
+            -- the screen instead of switching tabs.
+            assert.are.equal(0, close.padding_bottom)
+            assert.is_true(close.dimen.h <= bar.dimen.h)
+        end)
+
         it("leads with the logo lockup and one primary search bar", function()
             local menu = open_home()
             assert.are.equal("hero", menu.item_table[1].role)

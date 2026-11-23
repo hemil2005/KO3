@@ -29,7 +29,7 @@ details captured from a live work.
 | ![A letter's fandoms](screenshots/05-fandom-list.png) | ![Works with summaries](screenshots/06-works.png) |
 | ![Work details](screenshots/07-work-details.png) | ![Reading a work](screenshots/08-reading.png) |
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
-| ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
+| ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/35-author-bookmarks.png) |
 | ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/29-update-home.png) |
 | ![Update prompt](screenshots/30-update-dialog.png) | ![Report row](screenshots/31-report-home.png) |
 | ![Report editor](screenshots/32-report-editor.png) | ![Log consent](screenshots/33-report-consent.png) |
@@ -384,7 +384,10 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   (`screenshots/31`–`33`).
 - The KO3 entry is directly on the Tools tab, at the bottom of its first page
   (`screenshots/34`), not nested under More tools.
-- The offline `busted` suite: 225 tests passing across parser, navigation,
+- The author tabs: tapping **Bookmarks** opens the author's bookmarked works
+  (`screenshots/35`). The title bar's close target is trimmed to the bar so it
+  no longer covers the rightmost tab.
+- The offline `busted` suite: 226 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and
   bug-report tests, including 51 account tests across token parsing, the

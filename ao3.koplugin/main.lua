@@ -2603,6 +2603,25 @@ function Ao3:ensureMenu()
     menu.ao3_title_stack = {}
     menu.ao3_title = _("AO3")
 
+    -- The title bar's close button pads its tap zone one icon-height below a
+    -- 49px bar, so its target covers the top half of the first content row.
+    -- The author screen's tab strip is that row: tapping "Bookmarks" hit
+    -- Close and dropped back to Home instead of switching tabs. Keep the
+    -- icon where it is, but end its target with the bar.
+    local close = menu.title_bar and menu.title_bar.right_button
+    if close and type(close.padding_bottom) == "number" and close.padding_bottom > 0 then
+        local pad = close.padding_bottom
+        close.padding_bottom = 0
+        -- IconButton keeps the pad as the last cell of its vertical group and
+        -- counts it in its dimen; update both so hit testing follows.
+        if close.button and close.button[3] then
+            close.button[3].width = 0
+        end
+        if close.dimen then
+            close.dimen.h = math.max(0, close.dimen.h - pad)
+        end
+    end
+
     -- Menu's own back logic pops `item_table_stack`; keep the title stack and
     -- the footer arrow in sync with it.
     menu.onClose = function(menu_self)
