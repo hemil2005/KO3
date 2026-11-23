@@ -49,12 +49,18 @@ jobs:
         run: |
           set -eu
           mkdir -p dist
-          cd ao3.koplugin
-          zip -q -r ../dist/ao3.koplugin.zip . \
-            -x 'spec/*' \
+          # Zip the folder itself so the archive contains ao3.koplugin/...;
+          # the updater and a manual `unzip` into plugins/ both rely on it.
+          zip -q -r dist/ao3.koplugin.zip ao3.koplugin \
+            -x 'ao3.koplugin/spec/*' \
             -x '*/.DS_Store' \
             -x '*.zip'
-          cd ..
+          unzip -l dist/ao3.koplugin.zip | grep -q 'ao3.koplugin/main.lua'
+          unzip -l dist/ao3.koplugin.zip | grep -q 'ao3.koplugin/updater.lua'
+          if unzip -l dist/ao3.koplugin.zip | grep -q 'ao3.koplugin/spec/'; then
+            echo "::error::release zip contains tests"
+            exit 1
+          fi
           sha=$(sha256sum dist/ao3.koplugin.zip | awk '{print $1}')
           notes=$(git log -1 --pretty=%s | sed 's/\\/\\\\/g; s/"/\\"/g')
           cat > dist/manifest.json <<EOF
