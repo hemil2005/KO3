@@ -31,15 +31,15 @@ details captured from a live work.
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
 | ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/35-author-bookmarks.png) |
 | ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/29-update-home.png) |
-| ![Update prompt](screenshots/30-update-dialog.png) | ![Report row](screenshots/31-report-home.png) |
-| ![Report editor](screenshots/32-report-editor.png) | ![Log consent](screenshots/33-report-consent.png) |
-| ![Report sent](screenshots/36-report-sent.png) | ![Work summary expanded](screenshots/18-work-summary.png) |
-| ![Work tags expanded](screenshots/19-work-tags.png) | ![Sign in on the landing page](screenshots/24-home-signed-out.png) |
-| ![Account on the landing page](screenshots/25-home-signed-in.png) | ![Work account actions](screenshots/26-work-account-actions.png) |
-| ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) | ![Account page](screenshots/28-account.png) |
-| ![Chapter-only TOC](screenshots/14-reader-toc.png) | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) |
-| ![Back to AO3 at end](screenshots/16-end-dialog-back.png) | ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) |
-| ![KO3 on the first Tools page](screenshots/34-tools-menu.png) | |
+| ![Update prompt](screenshots/30-update-dialog.png) | ![Update changelog](screenshots/37-update-changelog.png) |
+| ![Report row](screenshots/31-report-home.png) | ![Report editor](screenshots/32-report-editor.png) |
+| ![Log consent](screenshots/33-report-consent.png) | ![Report sent](screenshots/36-report-sent.png) |
+| ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
+| ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
+| ![Work account actions](screenshots/26-work-account-actions.png) | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) |
+| ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
+| ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
+| ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![KO3 on the first Tools page](screenshots/34-tools-menu.png) |
 
 ## Install
 
@@ -398,8 +398,8 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rotated session cookie cannot be replaced by an expired deletion cookie.
 - The inline updater: manifest validation, version comparison, path-traversal
   rejection, SHA-256 verification, staged install, failed-rename rollback and
-  restore-previous; the update row and prompt render in the emulator
-  (`screenshots/29`–`30`).
+  restore-previous; the update row, prompt and full changelog render in the
+  emulator (`screenshots/29`–`30`, `37`).
 - Bug reports: query stripping, consent-gated log inclusion, report bundle
   writing, relay submission and token handling; the four screens render in
   the emulator (`screenshots/31`–`33`, `36`). The relay was tested live end
