@@ -694,7 +694,7 @@ describe("AO3 browser", function()
             assert.are.equal("", menu.ao3_title)
 
             for _, role in ipairs({ "latest", "fandoms", "author", "tag",
-                "account", "downloads", "open", "update" }) do
+                "account", "downloads", "open", "update", "report" }) do
                 assert.is_truthy(tile(menu, role))
             end
         end)
@@ -723,7 +723,7 @@ describe("AO3 browser", function()
                 "hero", "search", "browse_label", "browse_row_1",
                 "browse_row_2", "account_label", "account",
                 "library_label", "library_row",
-                "plugin_label", "update",
+                "plugin_label", "update", "report",
             }, roles)
             -- Each tile row carries its two entries for paging and tests.
             for _, row in ipairs(menu.item_table) do
@@ -767,6 +767,48 @@ describe("AO3 browser", function()
                 f:close()
                 assert.is_truthy(head:find("<svg", 1, true), name)
             end
+        end)
+
+        it("asks before attaching the log and saves the report", function()
+            local UIManager = require("ui/uimanager")
+            local old_show, old_close = UIManager.show, UIManager.close
+            local old_settings = DataStorage.getSettingsDir
+            DataStorage.getSettingsDir = function() return tmp_root .. "/settings" end
+            local shown = {}
+            UIManager.show = function(_, widget)
+                shown[#shown + 1] = widget
+            end
+            UIManager.close = function() end
+            local ok, err = pcall(function()
+                plugin:reportBug()
+                local input = shown[#shown]
+                assert.is_truthy(input)
+                input.getInputValue = function()
+                    return "It crashes when I tap Read"
+                end
+                input.buttons[1][2].callback() -- Next
+                local consent = shown[#shown]
+                assert.is_truthy(consent.text:find("used only to find the cause", 1, true))
+                assert.is_truthy(consent.text:find("password", 1, true))
+                consent.ok_callback() -- Attach log
+                local saved = shown[#shown]
+                assert.is_truthy(saved.text:find("Report saved:", 1, true))
+            end)
+            UIManager.show, UIManager.close = old_show, old_close
+            DataStorage.getSettingsDir = old_settings
+            assert.is_true(ok, err)
+
+            local reports = tmp_root .. "/ao3/reports"
+            local found
+            for entry in lfs.dir(reports) do
+                if entry ~= "." and entry ~= ".." then
+                    found = reports .. "/" .. entry
+                end
+            end
+            assert.is_truthy(found)
+            assert.are.equal("file", lfs.attributes(found .. "/report.md", "mode"))
+            assert.are.equal("file", lfs.attributes(found .. "/log.txt", "mode"))
+            remove_tree(found)
         end)
 
         it("shows a results page with a short summary and backs out", function()
@@ -1395,6 +1437,18 @@ describe("AO3 browser", function()
             assert.are.equal("tools", menu.ao3_browser.sorting_hint)
             assert.is_truthy(menu.ao3_browser.callback)
             assert.is_nil(menu.ao3_browser.sub_item_table)
+
+            -- Directly on the Tools tab, at the bottom of its first page:
+            -- in the shared order just before Profiles.
+            local order = require("ui/elements/reader_menu_order")
+            local at, profiles
+            for i, id in ipairs(order.tools) do
+                if id == "ao3_browser" then at = i end
+                if id == "profiles" then profiles = i end
+            end
+            assert.is_truthy(at)
+            assert.is_truthy(profiles)
+            assert.is_true(at < profiles)
         end)
     end)
 end)

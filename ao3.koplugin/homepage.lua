@@ -334,7 +334,13 @@ function HomePage.build(o)
         text = _("Update plugin"),
         hint = o.version and T(_("Installed v%1"), o.version) or nil,
         icon = "refresh", role = "update", action = o.on_update,
-    }, o, "update", o.on_restore and GUTTER or 0)
+    }, o, "update", GUTTER)
+
+    rows[#rows + 1] = HomePage.wide_tile({
+        text = _("Report a bug"),
+        hint = _("Description and log"),
+        icon = "file", role = "report", action = o.on_report,
+    }, o, "report", o.on_restore and GUTTER or 0)
 
     if o.on_restore then
         rows[#rows + 1] = HomePage.wide_tile({

@@ -31,12 +31,14 @@ details captured from a live work.
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
 | ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
 | ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/29-update-home.png) |
-| ![Update prompt](screenshots/30-update-dialog.png) | ![Work summary expanded](screenshots/18-work-summary.png) |
-| ![Work tags expanded](screenshots/19-work-tags.png) | ![Sign in on the landing page](screenshots/24-home-signed-out.png) |
-| ![Account on the landing page](screenshots/25-home-signed-in.png) | ![Work account actions](screenshots/26-work-account-actions.png) |
-| ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) | ![Account page](screenshots/28-account.png) |
-| ![Chapter-only TOC](screenshots/14-reader-toc.png) | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) |
-| ![Back to AO3 at end](screenshots/16-end-dialog-back.png) | ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) |
+| ![Update prompt](screenshots/30-update-dialog.png) | ![Report row](screenshots/31-report-home.png) |
+| ![Report editor](screenshots/32-report-editor.png) | ![Log consent](screenshots/33-report-consent.png) |
+| ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
+| ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
+| ![Work account actions](screenshots/26-work-account-actions.png) | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) |
+| ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
+| ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
+| ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![AO3 at the bottom of Tools](screenshots/34-tools-menu.png) |
 
 ## Install
 
@@ -47,7 +49,7 @@ The quickest way is the release zip:
 2. Unzip it into `koreader/plugins/` on the device (the archive already
    contains the `ao3.koplugin` folder).
 3. Restart KOReader.
-4. Open **Tools → More tools → AO3**.
+4. Open **Tools → AO3**.
 
 Or copy the `ao3.koplugin` folder yourself. Either way, the layout should be:
 
@@ -64,6 +66,7 @@ koreader/
       workpage.lua
       uikit.lua
       updater.lua
+      bugreport.lua
       assets/ao3-logo.png
       assets/ao3-logo.svg
       assets/icons/*.svg
@@ -94,6 +97,7 @@ name beside the icon, with a one-line hint underneath:
 | **Downloads** | Works already saved on this device |
 | **Open work** | Paste `https://archiveofourown.org/works/1234567` or just `1234567` |
 | **Update plugin** | Check GitHub Releases for a newer version |
+| **Report a bug** | Write what happened; optionally attach a diagnostic log |
 
 Fandoms are browsed media category → letter → fandom, the same way AO3's
 own index is organised. Choosing a category opens the whole alphabet as one
@@ -197,7 +201,7 @@ heading.
 ### Updating the plugin
 
 **No computer is needed after the first install.** Open
-**Tools → More tools → AO3 → Update plugin**:
+**Tools → AO3 → Update plugin**:
 
 1. It asks GitHub for the latest release and shows the current version, the
    new version and the release notes (`manifest.json` is the fallback).
@@ -211,6 +215,37 @@ The previous version is kept as `ao3.koplugin.bak`; **Restore previous
 version** appears on the home screen after an update and swaps it back.
 Updates are ~2.7 MB and come straight from `github.com`, so no Storefront
 or other plugin is required.
+
+### Reporting a bug
+
+**Tools → AO3 → Report a bug** opens a text field. After you
+describe what happened, a consent dialog asks whether to attach the
+diagnostic log and states that it is used only to find the cause of the
+issue. Choosing **Without log** sends the description alone.
+
+What the log contains:
+
+- plugin version, KOReader revision, device model, screen size and time;
+- each request's host and path with its HTTP status, download outcomes and
+  error text.
+
+What it never contains: your AO3 password (the plugin stores none), cookies,
+search text, work titles or work text. Query strings and fragments are
+stripped before anything is written.
+
+Delivery:
+
+- With `settings/ao3_report_token` present (a fine-grained GitHub token with
+  **Issues: write**), the report is filed automatically and the log is
+  embedded in the issue body.
+- Without it, the report is saved on the device as
+  `koreader/ao3/reports/bug-<timestamp>/report.md` plus `log.txt`, ready to
+  attach to [a new issue](https://github.com/hemil2005/KO3/issues/new).
+  GitHub does not allow anonymous issue creation, so this is the
+  credential-free path.
+
+The log itself lives at `koreader/ao3/logs/ao3.log`, is capped at 256 KB
+(one rotation to `ao3.log.1`) and is only read when you create a report.
 
 ## How it works
 
@@ -344,15 +379,20 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row and prompt render in the emulator
   (`screenshots/29`–`30`).
-- The offline `busted` suite: 214 tests passing across parser, navigation,
+- Bug reports: query stripping, consent-gated log inclusion, report bundle
+  writing, token handling and the three screens render in the emulator
+  (`screenshots/31`–`33`).
+- The AO3 entry is directly on the Tools tab, at the bottom of its first page
+  (`screenshots/34`), not nested under More tools.
+- The offline `busted` suite: 225 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
-  author-page, work-page, account-screen, home-page, reader-hook and updater
-  tests, including 47 account tests across token parsing, the three-request
-  sign-in, cookie scoping/rotation, session persistence/logout, subscription
-  parsing and work actions. The work-action tests cover the website's form
-  bodies, reading the work page's bookmarked/subscribed/read-later state,
-  one-time token reuse, bookmark and subscription ids returned by AO3,
-  already-done duplicates and the refusal to post twice.
+  author-page, work-page, account-screen, home-page, reader-hook, updater and
+  bug-report tests, including 51 account tests across token parsing, the
+  three-request sign-in, cookie scoping/rotation, session persistence/logout,
+  subscription parsing and work actions. The work-action tests cover the
+  website's form bodies, reading the work page's bookmarked/subscribed/
+  read-later state, one-time token reuse, bookmark and subscription ids
+  returned by AO3, already-done duplicates and the refusal to post twice.
 
 **Current connectivity (checked 2026-11-23 14:20):** AO3's edge accepts the
 Firefox header set used for sign-in. `/token_dispenser.json` returned `200`
@@ -472,6 +512,8 @@ Tests prove behaviour; the emulator capture shows the actual result.
 | “failed its checksum” | The download was truncated or altered; nothing was installed. Try again |
 | “does not contain the plugin” | The release asset is wrong or incomplete; the installed copy was left untouched |
 | Update installed but nothing changed | KOReader is still running the old code — use **Restart** in the prompt, or restart it yourself |
+| “Report saved” but no issue was created | No `settings/ao3_report_token`; attach `report.md` (and `log.txt`) to a new issue |
+| “Could not send the report” | Token rejected or no network; the report is still saved in `ao3/reports/` |
 
 If a work opens as a login page or an adult warning, the file is rejected
 before it reaches the reader, so you should see an error rather than a

@@ -15,6 +15,7 @@ local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
+local Device = require("device")
 local Screen = require("device").screen
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -49,6 +50,10 @@ local util = require("util")
 local htmlparser = require("htmlparser")
 local _ = require("gettext")
 local T = ffiutil.template
+
+-- Assigned after the module files are loaded, but referenced by the network
+-- helpers defined before it.
+local BugReport
 
 local BASE_URL = "https://archiveofourown.org"
 local DOWNLOAD_HOST = "https://download.archiveofourown.org"
@@ -381,7 +386,8 @@ function Ao3:httpRequest(url, opts, timeout)
 end
 
 function Ao3:fetchHtml(url, timeout)
-    local body, err = self:httpRequest(url, nil, timeout)
+    local body, err, code = self:httpRequest(url, nil, timeout)
+    BugReport.log("http", T("%1 -> %2", BugReport.sanitizeUrl(url), tostring(code)))
     return body, err
 end
 
@@ -395,6 +401,7 @@ local HomePage = dofile((MAIN_SOURCE:gsub("main%.lua$", "homepage.lua")))
 local AccountPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "accountpage.lua")))
 local Uikit = dofile((MAIN_SOURCE:gsub("main%.lua$", "uikit.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
+BugReport = dofile((MAIN_SOURCE:gsub("main%.lua$", "bugreport.lua")))
 
 -- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
 -- same parser; listings, search results and bookmark pages share the markup.
@@ -527,6 +534,7 @@ function Ao3:fetchPage(url, parse, label, on_success, on_error, silent)
                 data, err = result, parse_err
             else
                 err = tostring(result)
+                BugReport.log("error", err)
             end
             Trapper:reset()
         end)
@@ -2278,6 +2286,7 @@ function Ao3:downloadWork(id, title)
         end
     end
 
+    BugReport.log("download", T("%1 -> %2", BugReport.sanitizeUrl(url), tostring(code)))
     if not ok then
         os.remove(tmp)
         return nil, tostring(code)
@@ -2301,11 +2310,13 @@ function Ao3:downloadWork(id, title)
         -- it. Keep it (the reader may still have an offline session) and say
         -- exactly what happened instead of blaming the work.
         os.remove(tmp)
+        BugReport.log("download", "rejected: session ended (lost cookie)")
         return nil, _("AO3 ended the saved session. Sign in again from Account.")
     end
     if not head:find('id="preface"', 1, true) and not head:find('id="chapters"', 1, true) then
         local page_title = head:match("<title[^>]*>(.-)</title>") or ""
         page_title = util.htmlEntitiesToUtf8(page_title)
+        BugReport.log("download", "rejected: response was not a work file")
         os.remove(tmp)
         return nil, T(_("AO3 did not return a work file (%1). It may be restricted or unavailable."), page_title)
     end
@@ -2330,6 +2341,7 @@ function Ao3:downloadWork(id, title)
     if old and old ~= final then
         os.remove(old)
     end
+    BugReport.log("download", "saved work " .. tostring(id))
     return final
 end
 
@@ -2692,6 +2704,7 @@ function Ao3:homeRows()
         on_downloads = function() self:showDownloads() end,
         on_open = function() self:workDialog() end,
         on_update = function() self:checkForUpdates() end,
+        on_report = function() self:reportBug() end,
         on_restore = lfs.attributes(Updater.backupDir(self:pluginDir()), "mode") == "directory"
             and function() self:rollbackUpdate() end or nil,
     }
@@ -3141,12 +3154,14 @@ function Ao3:checkForUpdates()
         NetworkMgr:afterWifiAction()
 
         if not manifest then
+            BugReport.log("update", "check failed: " .. tostring(err))
             UIManager:show(InfoMessage:new{
                 text = T(_("Could not check for updates:\n%1"), err or _("unknown error")),
             })
             return
         end
         local current = Updater.currentVersion(dir)
+        BugReport.log("update", T("installed %1, latest %2", current, manifest.version))
         if not Updater.isNewer(manifest.version, current) then
             UIManager:show(InfoMessage:new{
                 text = T(_("You already have the latest version (v%1)."), current),
@@ -3181,11 +3196,13 @@ function Ao3:installUpdate(dir, manifest)
         Trapper:reset()
     end)
     if not installed then
+        BugReport.log("update", "install failed: " .. tostring(err))
         UIManager:show(InfoMessage:new{
             text = T(_("Update failed:\n%1"), err or _("unknown error")),
         })
         return
     end
+    BugReport.log("update", "installed " .. tostring(manifest.version))
     UIManager:show(ConfirmBox:new{
         text = T(_("Updated to v%1.\nRestart KOReader to use it."), manifest.version),
         ok_text = _("Restart"),
@@ -3224,6 +3241,142 @@ function Ao3:rollbackUpdate()
 end
 
 -- ---------------------------------------------------------------------------
+-- Bug reports
+-- ---------------------------------------------------------------------------
+--
+-- The report is built locally first. The log is attached only after the
+-- consent dialog, which states what it contains and why it is needed.
+
+function Ao3:openLink(url)
+    if type(Device.openLink) == "function" then
+        if pcall(Device.openLink, Device, url) then return true end
+    end
+    UIManager:show(InfoMessage:new{
+        text = T(_("Open this URL in a browser:\n%1"), url),
+    })
+    return false
+end
+
+function Ao3:reportBug()
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Report a bug"),
+        description = _("What happened, and what did you expect?\nPlease avoid personal details."),
+        allow_newline = true,
+        text_height = math.floor(Device.screen:getHeight() / 3),
+        buttons = {{
+            {
+                text = _("Cancel"),
+                id = "close",
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Next"),
+                callback = function()
+                    local text = trim(dialog:getInputValue() or "")
+                    UIManager:close(dialog)
+                    if text == "" then
+                        UIManager:show(InfoMessage:new{
+                            text = _("Please describe the problem first."),
+                        })
+                        return
+                    end
+                    self:askAttachLog(text)
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function Ao3:askAttachLog(description)
+    UIManager:show(ConfirmBox:new{
+        text = _("Attach a diagnostic log?\n\nThe log is used only to find the cause of this issue. It contains the plugin version, KOReader and device details, and recent request results. It does not contain your AO3 password, cookies, search text, or work text."),
+        ok_text = _("Attach log"),
+        ok_callback = function()
+            self:finishReport(description, true)
+        end,
+        cancel_text = _("Without log"),
+        cancel_callback = function()
+            self:finishReport(description, false)
+        end,
+        other_buttons_first = true,
+        other_buttons = {{{
+            text = _("Cancel report"),
+            callback = function() end,
+        }}},
+    })
+end
+
+function Ao3:finishReport(description, include_log)
+    local dir, _, _, err = BugReport.save(description, include_log)
+    if not dir then
+        UIManager:show(InfoMessage:new{
+            text = T(_("Could not save the report:\n%1"), err or _("unknown error")),
+        })
+        return
+    end
+    BugReport.log("report", "saved (log=" .. tostring(include_log) .. ")")
+
+    local token = BugReport.token()
+    if not token then
+        self:showSavedReport(dir, include_log, description)
+        return
+    end
+
+    local title = BugReport.title(description)
+    local body = BugReport.build(description, include_log)
+    NetworkMgr:runWhenOnline(function()
+        local Trapper = require("ui/trapper")
+        local url, submit_err
+        Trapper:wrap(function()
+            Trapper:info(_("Sending the report…"), true)
+            local ok, result, result_err = pcall(BugReport.submit, token, title, body)
+            if ok then
+                url, submit_err = result, result_err
+            else
+                submit_err = tostring(result)
+            end
+            Trapper:reset()
+        end)
+        NetworkMgr:afterWifiAction()
+
+        if url then
+            UIManager:show(ConfirmBox:new{
+                text = T(_("Report sent. Thank you!\n%1"), url),
+                ok_text = _("Open issue"),
+                cancel_text = _("Close"),
+                ok_callback = function()
+                    self:openLink(url)
+                end,
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = T(_("Could not send the report (%1).\nIt is saved in:\n%2"),
+                    submit_err or _("unknown error"), dir),
+            })
+        end
+    end)
+end
+
+function Ao3:showSavedReport(dir, include_log, description)
+    local files = include_log and _("report.md and log.txt") or _("report.md")
+    local url = BugReport.issueUrl(BugReport.title(description))
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Report saved:\n%1\n\nAttach %2 to a new issue:\n%3"),
+            dir, files, BugReport.ISSUE_URL),
+        ok_text = _("Open issue page"),
+        cancel_text = _("Close"),
+        ok_callback = function()
+            self:openLink(url)
+        end,
+    })
+end
+
+-- ---------------------------------------------------------------------------
 -- Plugin entry point
 -- ---------------------------------------------------------------------------
 
@@ -3232,9 +3385,43 @@ function Ao3:init()
     -- as before when there is none.
     self.session = Account.load()
     self.ui.menu:registerToMainMenu(self)
+    BugReport.log("session", table.concat(BugReport.environment(), " | "))
+end
+
+-- KOReader appends plugin rows to the end of the tab they name. The Tools tab
+-- is two pages on a 600px screen, so appending would hide AO3 on page 2. Put
+-- it in the built-in order at the bottom of page 1, just before Profiles,
+-- which moves to page 2. The order table is shared with MenuSorter, so
+-- inserting here affects both the file manager and reader menus.
+local function placeOnToolsTab()
+    for _, module in ipairs({
+        "ui/elements/filemanager_menu_order",
+        "ui/elements/reader_menu_order",
+    }) do
+        local ok, order = pcall(require, module)
+        local tools = ok and order and order.tools
+        if type(tools) == "table" then
+            for i = #tools, 1, -1 do
+                if tools[i] == "ao3_browser" then
+                    table.remove(tools, i)
+                end
+            end
+            local at
+            for i, id in ipairs(tools) do
+                if id == "profiles" then at = i break end
+            end
+            if not at then
+                for i, id in ipairs(tools) do
+                    if id == "more_tools" then at = i break end
+                end
+            end
+            table.insert(tools, at or (#tools + 1), "ao3_browser")
+        end
+    end
 end
 
 function Ao3:addToMainMenu(menu_items)
+    placeOnToolsTab()
     -- One entry, one app. Everything else lives inside the AO3 screen.
     menu_items.ao3_browser = {
         text = _("AO3"),
