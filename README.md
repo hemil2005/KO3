@@ -504,9 +504,10 @@ git push ko3 main --tags
 `.github/workflows/release.yml` then:
 
 1. refuses to build unless `_meta.lua`'s `version` matches the tag;
-2. zips `ao3.koplugin/` (tests excluded);
-3. computes the SHA-256 and writes `manifest.json`;
-4. publishes both as release assets.
+2. builds a changelog from the commits since the previous tag;
+3. zips `ao3.koplugin/` (tests excluded);
+4. computes the SHA-256 and writes `manifest.json` with the full changelog;
+5. publishes both as release assets, with the same changelog as the body.
 
 `.github/workflows/ci.yml` runs a Lua 5.1 syntax check on every push and
 pull request. The updater reads

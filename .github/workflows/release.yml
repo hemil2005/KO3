@@ -19,6 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Resolve version and tag
         id: v
@@ -45,6 +48,32 @@ jobs:
             exit 1
           fi
 
+      - name: Build changelog
+        run: |
+          set -eu
+          mkdir -p dist
+          tag="${{ steps.v.outputs.tag }}"
+          head_ref="$tag"
+          if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            head_ref="HEAD"
+          fi
+          prev=$(git tag --sort=-creatordate | grep -vx "$tag" | head -1 || true)
+          {
+            echo "## Changes"
+            echo
+            if [ -n "$prev" ]; then
+              git log --pretty=format:'- %s' "$prev..$head_ref"
+            else
+              git log --pretty=format:'- %s' "$head_ref"
+            fi
+            echo
+            if [ -n "$prev" ]; then
+              echo
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag}"
+            fi
+          } > dist/RELEASE_NOTES.md
+          cat dist/RELEASE_NOTES.md
+
       - name: Build plugin zip and manifest.json
         run: |
           set -eu
@@ -66,16 +95,16 @@ jobs:
             exit 1
           fi
           sha=$(sha256sum "dist/${zip_name}" | awk '{print $1}')
-          notes=$(git log -1 --pretty=%s | sed 's/\\/\\\\/g; s/"/\\"/g')
-          cat > dist/manifest.json <<EOF
-          {
-            "version": "$version",
-            "zip_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.v.outputs.tag }}/${zip_name}",
-            "sha256": "$sha",
-            "notes": "$notes",
-            "published_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          }
-          EOF
+          # Keep the same full changelog in the manifest (the updater prompt)
+          # and in the release body. jq escapes the newlines correctly.
+          jq -n \
+            --arg version "$version" \
+            --arg zip_url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.v.outputs.tag }}/${zip_name}" \
+            --arg sha256 "$sha" \
+            --arg notes "$(cat dist/RELEASE_NOTES.md)" \
+            --arg published_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version: $version, zip_url: $zip_url, sha256: $sha256, notes: $notes, published_at: $published_at}' \
+            > dist/manifest.json
           test -s "dist/${zip_name}"
           test -s dist/manifest.json
           echo "zip: $(stat -c%s "dist/${zip_name}") bytes, sha256: $sha"
@@ -86,7 +115,8 @@ jobs:
         with:
           tag_name: ${{ steps.v.outputs.tag }}
           name: ${{ steps.v.outputs.tag }}
-          generate_release_notes: true
+          body_path: dist/RELEASE_NOTES.md
+          generate_release_notes: false
           files: |
             dist/ao3.koplugin-${{ steps.v.outputs.version }}.zip
             dist/manifest.json
