@@ -55,6 +55,10 @@ koreader/
       updater.lua
       authorpage.lua
       workpage.lua
+      homepage.lua
+      uikit.lua
+      assets/ao3-logo.png
+      assets/ao3-logo.svg
       fandompages.lua
       data/fandoms/index.lua
       data/fandoms/<category>/<letter>.tsv.z
@@ -65,13 +69,15 @@ the zip only has to be copied once.
 
 ## Use
 
-One menu entry opens the whole app:
+One menu entry opens the whole app. The landing page leads with the AO3 mark
+and name, then one solid **Search works** bar; everything else is grouped
+under **Browse**, **Library** and **Plugin**:
 
 | Home row | What it does |
 |---|---|
+| **Search works** (solid bar) | Work title, author or keyword |
 | **Latest works** | Newest works across the archive (`/works`) |
 | **Fandoms** | Categorized fandom index, shipped with the plugin |
-| **Search** | Work title, author or keyword |
 | **Author** | An author's name or profile URL — their works list |
 | **Tag** | A tag name, or paste a full `/tags/.../works` URL |
 | **Downloads** | Works already saved on this device |
@@ -194,6 +200,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   folded Summary and Tags sections. A summary longer than a page is elided
   and opens in full; expanding lands on the text it revealed. Captured in
   `screenshots/07` and `18`–`19`.
+- The landing page: AO3 logo lockup, one solid Search bar, then Browse,
+  Library and Plugin groups. The logo is OTW's official PNG plus a traced
+  SVG, rendered natively. Captured in `screenshots/02`.
 - The author page (Dashboard / Works / Series / Bookmarks) is built from the
   exact live AO3 markup captured on 2026-11-23, including author-scoped
   fandom links, series stats, work bookmarks and series bookmarks; the four
@@ -204,9 +213,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row and prompt render in the emulator
   (`screenshots/14`–`15`).
-- The offline `busted` suite: 127 tests passing across parser, navigation,
+- The offline `busted` suite: 130 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
-  author-page, work-page and updater tests.
+  author-page, work-page, home-page and updater tests.
 
 **Current connectivity:** AO3 refused the emulator's listing request with
 `403`; independent Windows and WSL `curl` requests received `429` on this
@@ -321,3 +330,13 @@ Tests prove behaviour; the emulator capture shows the actual result.
 If a work opens as a login page or an adult warning, the file is rejected
 before it reaches the reader, so you should see an error rather than a
 broken book.
+
+## Credits and trademarks
+
+- The Archive of Our Own name and logo are trademarks of the Organization for
+  Transformative Works (OTW). `assets/ao3-logo.png` is copied byte-for-byte
+  from the OTW's own repository (`public/images/ao3_logos/logo.png`), and
+  `assets/ao3-logo.svg` is a vector trace of it. Both identify the service
+  this plugin reads; this plugin is unofficial and is not affiliated with or
+  endorsed by the OTW.
+- KOReader is made by the KOReader contributors.

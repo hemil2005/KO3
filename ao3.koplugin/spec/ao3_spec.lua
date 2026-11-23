@@ -668,10 +668,50 @@ describe("AO3 browser", function()
             local joined = texts(menu)
             assert.is_truthy(joined:find("Latest works", 1, true))
             assert.is_truthy(joined:find("Fandoms", 1, true))
-            assert.is_truthy(joined:find("Search", 1, true))
             assert.is_truthy(joined:find("Author", 1, true))
             assert.is_truthy(joined:find("Downloads", 1, true))
             assert.is_truthy(joined:find("Open work", 1, true))
+        end)
+
+        it("leads with the logo lockup and one primary search bar", function()
+            local menu = open_home()
+            assert.are.equal("hero", menu.item_table[1].role)
+            assert.is_truthy(menu.item_table[1].ao3_static)
+            assert.are.equal("search", menu.item_table[2].role)
+            assert.is_truthy(menu.item_table[2].ao3_panel)
+
+            local calls = 0
+            plugin.searchDialog = function() calls = calls + 1 end
+            menu.item_table[2].action()
+            plugin.searchDialog = nil
+            assert.are.equal(1, calls)
+        end)
+
+        it("groups the home rows under Browse, Library and Plugin", function()
+            local menu = open_home()
+            local roles = {}
+            for _, row in ipairs(menu.item_table) do
+                roles[#roles + 1] = row.role
+            end
+            assert.are.same({
+                "hero", "search", "browse_label", "latest", "fandoms",
+                "author", "tag", "library_label", "downloads", "open",
+                "plugin_label", "update",
+            }, roles)
+        end)
+
+        it("ships the official logo and its traced SVG", function()
+            local dir = "plugins/ao3.koplugin/assets/"
+            local png = assert(io.open(dir .. "ao3-logo.png", "rb"))
+            local png_head = png:read(8)
+            png:close()
+            assert.are.equal("\137PNG\r\n\26\n", png_head)
+
+            local svg = assert(io.open(dir .. "ao3-logo.svg", "rb"))
+            local svg_head = svg:read(400)
+            svg:close()
+            assert.is_truthy(svg_head:find("<svg", 1, true))
+            assert.is_truthy(svg_head:find('viewBox="0 0 351 240"', 1, true))
         end)
 
         it("shows a results page with a short summary and backs out", function()

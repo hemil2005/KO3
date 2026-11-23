@@ -239,6 +239,7 @@ end
 local MAIN_SOURCE = debug.getinfo(1, "S").source:sub(2)
 local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
 local WorkPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "workpage.lua")))
+local HomePage = dofile((MAIN_SOURCE:gsub("main%.lua$", "homepage.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
 
 -- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
@@ -1310,73 +1311,48 @@ end
 
 function Ao3:homeRows()
     local downloads = self:listDownloads()
-    return {
-        { text = _("Browse"), bold = true },
-        {
-            text = _("Latest works"),
-            mandatory = _("Newest on AO3"),
-            action = function()
-                self:loadListing(self:recentUrl(), _("Latest works"))
-            end,
-        },
-        {
-            text = _("Fandoms"),
-            mandatory = _("By media"),
-            action = function()
-                self:showFandoms()
-            end,
-        },
-        {
-            text = _("Search"),
-            mandatory = _("Title, author or keyword"),
-            action = function()
-                self:searchDialog()
-            end,
-        },
-        {
-            text = _("Author"),
-            mandatory = _("Works by a writer"),
-            action = function()
-                self:authorDialog()
-            end,
-        },
-        {
-            text = _("Tag"),
-            mandatory = _("Tag name or URL"),
-            action = function()
-                self:tagDialog()
-            end,
-        },
-        { text = _("Library"), bold = true },
-        {
-            text = _("Downloads"),
-            mandatory = #downloads > 0 and T(_("%1 saved"), #downloads) or _("None yet"),
-            action = function()
-                self:showDownloads()
-            end,
-        },
-        {
-            text = _("Open work"),
-            mandatory = _("URL or ID"),
-            action = function()
-                self:workDialog()
-            end,
-        },
-        {
-            text = _("Update plugin"),
-            mandatory = T(_("Installed v%1"), Updater.currentVersion(self:pluginDir())),
-            action = function()
-                self:checkForUpdates()
-            end,
-        },
-        lfs.attributes(Updater.backupDir(self:pluginDir()), "mode") == "directory" and {
+
+    -- The traced SVG is preferred; the official PNG is the fallback (and the
+    -- source of truth) if the asset is missing.
+    local assets = self:pluginDir() .. "/assets/"
+    local logo = assets .. "ao3-logo.svg"
+    if lfs.attributes(logo, "mode") ~= "file" then
+        logo = assets .. "ao3-logo.png"
+    end
+    if lfs.attributes(logo, "mode") ~= "file" then
+        logo = nil
+    end
+
+    local rows = HomePage.build{
+        width = Screen:getWidth() - 2 * Size.padding.fullscreen,
+        font_size = (self.menu and self.menu.font_size) or 20,
+        logo_path = logo,
+        downloads = #downloads,
+        version = Updater.currentVersion(self:pluginDir()),
+        on_search = function() self:searchDialog() end,
+        on_latest = function()
+            self:loadListing(self:recentUrl(), _("Latest works"))
+        end,
+        on_fandoms = function() self:showFandoms() end,
+        on_author = function() self:authorDialog() end,
+        on_tag = function() self:tagDialog() end,
+        on_downloads = function() self:showDownloads() end,
+        on_open = function() self:workDialog() end,
+        on_update = function() self:checkForUpdates() end,
+    }
+
+    if lfs.attributes(Updater.backupDir(self:pluginDir()), "mode") == "directory" then
+        rows[#rows + 1] = {
             text = _("Restore previous version"),
             mandatory = _("Undo the last update"),
             action = function()
                 self:rollbackUpdate()
             end,
-        } or nil,
-    }
+            role = "restore",
+        }
+    end
+
+    return rows
 end
 
 -- The complete fandom list ships with the plugin, so this screen opens

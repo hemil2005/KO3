@@ -20,16 +20,11 @@ bar) and get the menu's focus underline.
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Font = require("ui/font")
-local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local LineWidget = require("ui/widget/linewidget")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
@@ -38,78 +33,15 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+local SOURCE = debug.getinfo(1, "S").source:sub(2)
+local Uikit = dofile((SOURCE:gsub("workpage%.lua$", "uikit.lua")))
+
 local WorkPage = {}
 
-local SECONDARY = Blitbuffer.COLOR_DARK_GRAY
-local RULE = Blitbuffer.COLOR_GRAY_5
-local RULE_H = rawget(Size.line, "thin") or 1
+local SECONDARY = Uikit.SECONDARY
 
 local function hasText(s)
     return s ~= nil and s ~= ""
-end
-
-local function rule(width)
-    return LineWidget:new{
-        dimen = Geom:new{ w = width, h = RULE_H },
-        background = RULE,
-    }
-end
-
--- Full-bleed row content: the menu's own rows are inset by this padding, so
--- static panels use the same inset to keep one left edge down the page.
-function WorkPage.padded(widget)
-    return HorizontalGroup:new{
-        HorizontalSpan:new{ width = Size.padding.fullscreen },
-        widget,
-        HorizontalSpan:new{ width = Size.padding.fullscreen },
-    }
-end
-
--- A tap target around an already-built widget (buttons are not native
--- Buttons: an inverted primary needs a white label, which Button does not
--- expose).
-local function tapArea(widget, width, height, callback)
-    local area = InputContainer:new{
-        dimen = Geom:new{ x = 0, y = 0, w = width, h = height },
-    }
-    area[1] = widget
-    area.ges_events = {
-        Tap = {
-            GestureRange:new{ ges = "tap", range = area.dimen },
-        },
-    }
-    area.onTap = function()
-        callback()
-        return true
-    end
-    return area
-end
-
--- A full-width button. Primary is a solid black bar with a white label; the
--- secondary keeps the native outlined look.
-local function button(label, width, height, primary, callback, font_size)
-    local border = primary and 0 or Size.border.button
-    local inner_w = math.max(1, width - 2 * border)
-    local inner_h = math.max(1, height - 2 * border)
-    local label_widget = TextWidget:new{
-        text = label,
-        face = Font:getFace("cfont", font_size),
-        bold = true,
-        fgcolor = primary and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK,
-        max_width = math.max(1, inner_w - 2 * Size.padding.large),
-    }
-    local frame = FrameContainer:new{
-        background = primary and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
-        color = Blitbuffer.COLOR_BLACK,
-        bordersize = border,
-        padding = 0,
-        margin = 0,
-        CenterContainer:new{
-            dimen = Geom:new{ w = inner_w, h = inner_h },
-            label_widget,
-        },
-    }
-    return tapArea(frame, width, height, callback)
 end
 
 -- Title, author, fandoms. The title wraps: AO3 titles are long, and a
@@ -148,7 +80,7 @@ function WorkPage.hero(work, width, font_size)
         }
     end
     group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
-    group[#group + 1] = rule(width)
+    group[#group + 1] = Uikit.rule(width)
     return group
 end
 
@@ -161,9 +93,9 @@ function WorkPage.actions(width, font_size, primary_label, on_read, on_refresh)
     local refresh_w = width - gap - read_w
 
     local row = HorizontalGroup:new{ align = "center" }
-    row[#row + 1] = button(primary_label, read_w, height, true, on_read, font_size)
+    row[#row + 1] = Uikit.button(primary_label, read_w, height, true, on_read, font_size)
     row[#row + 1] = HorizontalSpan:new{ width = gap }
-    row[#row + 1] = button(_("Refresh"), refresh_w, height, false, on_refresh,
+    row[#row + 1] = Uikit.button(_("Refresh"), refresh_w, height, false, on_refresh,
         font_size - 2)
 
     local group = VerticalGroup:new{ align = "left" }
@@ -218,7 +150,7 @@ function WorkPage.stats(work, width, font_size)
     group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
     group[#group + 1] = row
     group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
-    group[#group + 1] = rule(width)
+    group[#group + 1] = Uikit.rule(width)
     return group
 end
 
@@ -338,7 +270,7 @@ function WorkPage.build(o)
     local rows = {}
 
     rows[#rows + 1] = {
-        ao3_static = WorkPage.padded(WorkPage.hero(work, width, font_size)),
+        ao3_static = Uikit.padded(WorkPage.hero(work, width, font_size)),
         role = "hero",
     }
 
@@ -357,12 +289,12 @@ function WorkPage.build(o)
 
     local stats = WorkPage.stats(work, width, font_size)
     if stats then
-        rows[#rows + 1] = { ao3_static = WorkPage.padded(stats), role = "stats" }
+        rows[#rows + 1] = { ao3_static = Uikit.padded(stats), role = "stats" }
     end
 
     local facts = WorkPage.facts(work, width, font_size)
     if facts then
-        rows[#rows + 1] = { ao3_static = WorkPage.padded(facts), role = "facts" }
+        rows[#rows + 1] = { ao3_static = Uikit.padded(facts), role = "facts" }
     end
 
     if hasText(work.summary) then
@@ -377,7 +309,7 @@ function WorkPage.build(o)
             local body, clamped = WorkPage.body(
                 work.summary, width, font_size, o.body_max_height)
             rows[#rows + 1] = {
-                ao3_static = WorkPage.padded(body),
+                ao3_static = Uikit.padded(body),
                 role = "summary_body",
             }
             if clamped then
@@ -406,7 +338,7 @@ function WorkPage.build(o)
                 (work.tags:gsub(",%s*", "  ·  ")), width, font_size,
                 o.body_max_height)
             rows[#rows + 1] = {
-                ao3_static = WorkPage.padded(body),
+                ao3_static = Uikit.padded(body),
                 role = "tags_body",
             }
             if clamped then

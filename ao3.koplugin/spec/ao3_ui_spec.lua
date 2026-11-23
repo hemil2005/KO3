@@ -290,8 +290,22 @@ describe("AO3 work-list cards", function()
         UIManager.show = old_show
 
         local menu = plugin.menu
-        local row = menu.item_group[2] -- "Latest works" + "Newest on AO3"
-        assert.are.equal("Latest works", row.entry.text)
+        local item
+        for _, row in ipairs(menu.item_table) do
+            if row.text == "Latest works" then
+                item = row
+                break
+            end
+        end
+        assert.is_truthy(item)
+        local row
+        for _, widget in ipairs(menu.item_group) do
+            if widget.entry == item then
+                row = widget
+                break
+            end
+        end
+        assert.is_truthy(row)
         assert.are.equal("Newest on AO3", row.mandatory_widget.text)
         assert.are.equal(row.content_width, row.content_group:getSize().w)
     end)
