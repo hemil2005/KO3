@@ -1221,6 +1221,10 @@ function Ao3:ensureMenu()
         is_borderless = true,
         is_popout = false,
         title_bar_fm_style = true,
+        -- The plugin never writes a subtitle, and the file-manager style would
+        -- still reserve a blank line for one. Dropping it keeps the header one
+        -- line tall instead of leaving a band of empty paper above every page.
+        subtitle = false,
         -- AO3 listings are tapped, not keyboard-navigated. Hiding the
         -- per-row A/S/D shortcut boxes gives the title, author and summary
         -- the full width on every device (Menu still keeps page-turn keys).

@@ -26,7 +26,6 @@ local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -34,6 +33,12 @@ local SOURCE = debug.getinfo(1, "S").source:sub(2)
 local Uikit = dofile((SOURCE:gsub("homepage%.lua$", "uikit.lua")))
 
 local HomePage = {}
+
+-- One spacing rhythm for the screen: cards sit a gutter apart, a new group
+-- starts two gutters above its label, and a label sits one small step above
+-- the cards it names. Tight inside a group, open between groups.
+local GUTTER = Size.span.horizontal_default
+local GROUP_GAP = Size.padding.large * 2
 
 -- An icon from assets/icons/, rendered at the given size. Missing files (or
 -- a build without SVG support) simply leave the text-only tile intact.
@@ -86,21 +91,27 @@ function HomePage.hero(o)
     row[#row + 1] = text
 
     local group = VerticalGroup:new{ align = "left" }
-    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    -- Equal air above and below the lockup: the gap to the top is the gap
+    -- before the search bar (which carries its own matching padding), and the
+    -- solid bar is the divider, so the header needs no hairline of its own.
+    group[#group + 1] = VerticalSpan:new{ width = GUTTER }
     group[#group + 1] = row
-    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
-    group[#group + 1] = Uikit.rule(o.width)
-    return group
+    -- Pin the lockup to the full column width: the mark and name are a header,
+    -- not a floating badge in the middle of the page.
+    return LeftContainer:new{
+        dimen = Geom:new{ w = o.width, h = group:getSize().h },
+        group,
+    }
 end
 
 -- The one primary action on the screen, styled like Read on the work page.
 function HomePage.search(o)
     local height = math.floor(o.font_size * 2.4 + 0.5)
     local group = VerticalGroup:new{ align = "left" }
-    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = VerticalSpan:new{ width = GUTTER }
     group[#group + 1] = Uikit.button(_("Search works"), o.width, height, true,
         o.on_search, o.font_size)
-    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    -- No padding below: the next group's label gap owns that separation.
     return group
 end
 
@@ -108,43 +119,71 @@ end
 -- the menu (whose item group centres) cannot float it to the middle.
 function HomePage.section_label(text, o, top)
     local group = VerticalGroup:new{ align = "left" }
-    group[#group + 1] = VerticalSpan:new{
-        width = top or (Size.padding.default + Size.span.vertical_default),
-    }
+    group[#group + 1] = VerticalSpan:new{ width = top or GROUP_GAP }
     group[#group + 1] = Uikit.label(text, o.width, o.font_size)
-    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_small }
+    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
     return LeftContainer:new{
         dimen = Geom:new{ w = o.width, h = group:getSize().h },
         group,
     }
 end
 
--- One tile: symbol over a bold label and a short hint, inside a hairline
--- card. Sized explicitly so a row of tiles has one baseline.
-function HomePage.tile(entry, width, height, o)
+-- The icon is a fixed visual weight; the text beside it carries the name.
+local function iconSize()
+    return Screen:scaleBySize(26)
+end
+
+-- The hint is secondary but still has to be read on e-ink: one step below the
+-- tile name, not a footnote.
+function HomePage.hint_size(o)
+    return o.font_size - 5
+end
+
+-- Single-line height for a face, so the card can be measured from the content
+-- it actually holds rather than from a font-size multiplier.
+local function lineHeight(face, bold)
+    if TextWidget.getTextHeight then
+        local ok, h = pcall(TextWidget.getTextHeight, "Ag", face, bold)
+        if ok and h then return h end
+    end
+    local probe = TextWidget:new{ text = "Ag", face = face, bold = bold }
+    local h = probe:getSize().h
+    if probe.free then probe:free() end
+    return h
+end
+
+-- Name beside the symbol, hint underneath both: the name is what the eye
+-- lands on, and the card spends its height on the words, not on a gap.
+function HomePage.card(entry, width, height, o)
     local pad = Size.padding.large
     local border = Size.border.default
-    local inner_w = width - 2 * (pad + border)
-    local inner_h = height - 2 * (pad + border)
+    local inner_w = math.max(1, width - 2 * (pad + border))
+    local inner_h = math.max(1, height - 2 * (pad + border))
+    local mark = icon(o, entry.icon, iconSize())
+    local mark_w = mark and iconSize() + Size.padding.large or 0
 
-    local content = VerticalGroup:new{ align = "left" }
-    local mark = icon(o, entry.icon, Screen:scaleBySize(26))
+    local top = HorizontalGroup:new{ align = "center" }
     if mark then
-        content[#content + 1] = mark
-        content[#content + 1] = VerticalSpan:new{ width = Size.padding.default }
+        top[#top + 1] = mark
+        top[#top + 1] = HorizontalSpan:new{ width = Size.padding.large }
     end
-    content[#content + 1] = TextWidget:new{
+    top[#top + 1] = TextWidget:new{
         text = entry.text,
         face = Font:getFace("smallinfofont", o.font_size),
         bold = true,
-        max_width = inner_w,
+        max_width = math.max(1, inner_w - mark_w),
     }
+
+    local content = VerticalGroup:new{ align = "left" }
+    content[#content + 1] = top
     if entry.hint then
-        content[#content + 1] = VerticalSpan:new{ width = Size.span.vertical_default }
+        content[#content + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
         content[#content + 1] = TextWidget:new{
             text = entry.hint,
-            face = Font:getFace("smallinfofont", o.font_size - 8),
-            fgcolor = Uikit.SECONDARY,
+            face = Font:getFace("smallinfofont", HomePage.hint_size(o)),
+            -- The same secondary grey as the work cards' author and summary:
+            -- a hint that has been made readable should not stay pale.
+            fgcolor = Blitbuffer.COLOR_GRAY_6,
             max_width = inner_w,
         }
     end
@@ -155,7 +194,7 @@ function HomePage.tile(entry, width, height, o)
         radius = Size.radius.button,
         background = Blitbuffer.COLOR_WHITE,
         padding = pad,
-        WidgetContainer:new{
+        LeftContainer:new{
             dimen = Geom:new{ w = inner_w, h = inner_h },
             content,
         },
@@ -163,71 +202,41 @@ function HomePage.tile(entry, width, height, o)
     return Uikit.tapArea(frame, width, height, entry.action)
 end
 
+-- A card row plus the air that separates it from the next row. The gap lives
+-- in the row so tile rows cannot end up flush against each other.
+local function rowBlock(row, space_below)
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = Uikit.padded(row)
+    if space_below and space_below > 0 then
+        group[#group + 1] = VerticalSpan:new{ width = space_below }
+    end
+    return group
+end
+
 -- Two tiles side by side. The pair is a static row; taps land on the tiles.
-function HomePage.tiles_row(entries, o, role)
-    local gap = Size.span.horizontal_default
+function HomePage.tiles_row(entries, o, role, space_below)
+    local gap = GUTTER
     local tile_w = math.floor((o.width - gap) / 2)
     local row = HorizontalGroup:new{ align = "top" }
     for i, entry in ipairs(entries) do
         if i > 1 then
             row[#row + 1] = HorizontalSpan:new{ width = gap }
         end
-        row[#row + 1] = HomePage.tile(entry, tile_w, o.tile_height, o)
+        row[#row + 1] = HomePage.card(entry, tile_w, o.tile_height, o)
     end
     return {
-        ao3_static = Uikit.padded(row),
+        ao3_static = rowBlock(row, space_below),
         role = role,
         tiles = entries,
     }
 end
 
--- A full-width tile for the occasional single action (Plugin).
-function HomePage.wide_tile(entry, o, role)
-    local pad = Size.padding.large
-    local border = Size.border.default
-    local width = o.width
-    local height = o.wide_height
-    local inner_w = width - 2 * (pad + border)
-    local inner_h = height - 2 * (pad + border)
-
-    local mark = icon(o, entry.icon, Screen:scaleBySize(26))
-    local text = VerticalGroup:new{ align = "left" }
-    text[#text + 1] = TextWidget:new{
-        text = entry.text,
-        face = Font:getFace("smallinfofont", o.font_size),
-        bold = true,
-        max_width = inner_w - (mark and Screen:scaleBySize(26) + pad or 0),
-    }
-    if entry.hint then
-        text[#text + 1] = VerticalSpan:new{ width = Size.span.vertical_default }
-        text[#text + 1] = TextWidget:new{
-            text = entry.hint,
-            face = Font:getFace("smallinfofont", o.font_size - 8),
-            fgcolor = Uikit.SECONDARY,
-            max_width = inner_w - (mark and Screen:scaleBySize(26) + pad or 0),
-        }
-    end
-
-    local row = HorizontalGroup:new{ align = "center" }
-    if mark then
-        row[#row + 1] = mark
-        row[#row + 1] = HorizontalSpan:new{ width = Size.padding.large }
-    end
-    row[#row + 1] = text
-
-    local frame = FrameContainer:new{
-        bordersize = border,
-        color = Blitbuffer.COLOR_BLACK,
-        radius = Size.radius.button,
-        background = Blitbuffer.COLOR_WHITE,
-        padding = pad,
-        WidgetContainer:new{
-            dimen = Geom:new{ w = inner_w, h = inner_h },
-            row,
-        },
-    }
+-- A full-width tile for the occasional single action (Plugin). Same card as
+-- the grid, just wider, so the two read as one family.
+function HomePage.wide_tile(entry, o, role, space_below)
+    local card = HomePage.card(entry, o.width, o.tile_height, o)
     return {
-        ao3_static = Uikit.padded(Uikit.tapArea(frame, width, height, entry.action)),
+        ao3_static = rowBlock(card, space_below),
         role = role,
         tiles = { entry },
     }
@@ -235,8 +244,13 @@ end
 
 function HomePage.build(o)
     local rows = {}
-    o.tile_height = math.floor(o.font_size * 5.2 + 0.5)
-    o.wide_height = math.floor(o.font_size * 3.4 + 0.5)
+    -- Measured from the card's own content: the icon row, the gap under it and
+    -- the hint line, plus the frame's padding and border. Spending the height
+    -- on the words is what lets the hint keep a readable size.
+    o.tile_height = 2 * (Size.padding.large + Size.border.default)
+        + math.max(iconSize(), lineHeight(Font:getFace("smallinfofont", o.font_size), true))
+        + Size.span.vertical_large
+        + lineHeight(Font:getFace("smallinfofont", HomePage.hint_size(o)), false)
 
     rows[#rows + 1] = {
         ao3_static = Uikit.padded(HomePage.hero(o)),
@@ -265,7 +279,7 @@ function HomePage.build(o)
             text = _("Fandoms"), hint = _("By media"), icon = "grid",
             role = "fandoms", action = o.on_fandoms,
         },
-    }, o, "browse_row_1")
+    }, o, "browse_row_1", GUTTER)
     rows[#rows + 1] = HomePage.tiles_row({
         {
             text = _("Author"), hint = _("Works by a writer"), icon = "user",
@@ -301,7 +315,7 @@ function HomePage.build(o)
         text = _("Update plugin"),
         hint = o.version and T(_("Installed v%1"), o.version) or nil,
         icon = "refresh", role = "update", action = o.on_update,
-    }, o, "update")
+    }, o, "update", o.on_restore and GUTTER or 0)
 
     if o.on_restore then
         rows[#rows + 1] = HomePage.wide_tile({

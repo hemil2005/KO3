@@ -73,7 +73,8 @@ the zip only has to be copied once.
 One menu entry opens the whole app. The landing page leads with the AO3 mark
 and name (the native title bar is left empty, so the wordmark is the only
 identity), then one solid **Search works** bar. Everything else is an icon
-tile grouped under **Browse**, **Library** and **Plugin**:
+tile grouped under **Browse**, **Library** and **Plugin**. Each tile keeps its
+name beside the icon, with a one-line hint underneath:
 
 | Tile or bar | What it does |
 |---|---|
