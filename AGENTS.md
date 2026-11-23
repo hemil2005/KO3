@@ -33,9 +33,12 @@ Working rules for agents changing this plugin.
 - Use the Firefox header set (`UA` in `main.lua`) for AO3 requests. With the
   old Chrome UA, `/token_dispenser.json` returned `403 cf-mitigated: challenge`
   on the same network; the Firefox set returned `200`.
-- Store only AO3's `_otwarchive_session` / `remember_user_token` cookies, never
-  the password and never Cloudflare cookies. Keep the cookie jar scoped to
-  `archiveofourown.org` and `download.archiveofourown.org`.
+- Store only AO3's `_otwarchive_session`, `remember_user_token` and the
+  `user_credentials` marker, never the password and never Cloudflare cookies.
+  AO3 redirects a logged-in request without `user_credentials` to
+  `/lost_cookie`; send `user_credentials=1` for saved sessions that predate
+  it. Keep the cookie jar scoped to `archiveofourown.org` and
+  `download.archiveofourown.org`.
 - Follow redirects manually so the session cookie is recomputed per host;
   refuse an HTTPS → HTTP downgrade. `LuaSocket`'s automatic redirect copies
   the original `Cookie` header to the new URL.

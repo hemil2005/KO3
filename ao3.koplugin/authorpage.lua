@@ -31,6 +31,11 @@ local AuthorPage = {}
 
 local BASE_URL = "https://archiveofourown.org"
 
+-- Button grew checked_func (and the class-level checkmark it appends) after
+-- the oldest supported builds. Without it the active tab would carry no mark,
+-- so fall back to drawing the same checkmark into the label.
+local BUTTON_HAS_CHECKMARK = Button.checkmark ~= nil
+
 local function trim(s)
     return (s:gsub("^%s+", ""):gsub("%s+$", ""))
 end
@@ -92,8 +97,13 @@ function AuthorPage.tabStrip(current, on_select, width)
     local count = #AuthorPage.TABS
     local tab_width = math.floor((width or Screen:getWidth()) / count)
     for _, tab in ipairs(AuthorPage.TABS) do
+        local checked = tab.id == current
+        local label = tab.label
+        if checked and not BUTTON_HAS_CHECKMARK then
+            label = label .. "  \u{2713}"
+        end
         group[#group + 1] = Button:new{
-            text = tab.label,
+            text = label,
             width = tab_width,
             margin = 0,
             padding = Size.padding.small,

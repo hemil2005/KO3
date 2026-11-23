@@ -42,6 +42,11 @@ and `challenge.html` cover the two common non-work responses.
 work page forms: the first has nothing marked, the second has a bookmark,
 subscription and read-later entry to remove.
 
+Live checks are separate from this suite. A repo-root `.env` may hold test
+credentials as `EMAIL` and `PASSWORD`; it is gitignored, and its values must
+never be printed, logged or committed. Use it only for a deliberate signed-in
+check, then remove anything the check created on AO3.
+
 ## Build environment notes
 
 A full `make base` is the heavy part. On current Debian/Ubuntu images the

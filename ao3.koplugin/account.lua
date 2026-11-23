@@ -35,10 +35,14 @@ Account.LOGIN_URL = Account.BASE_URL .. "/users/login"
 Account.TOKEN_URL = Account.BASE_URL .. "/token_dispenser.json"
 
 -- Rails session cookie plus the optional persistent "remember me" token.
--- Everything else in Set-Cookie is dropped.
+-- `user_credentials` is a Rails/nginx cache marker (value "1"), not a
+-- credential: AO3 signs a logged-in request out to /lost_cookie when it is
+-- missing, so it has to travel with the session. Everything else in
+-- Set-Cookie is dropped.
 Account.KEPT_COOKIES = {
     "_otwarchive_session",
     "remember_user_token",
+    "user_credentials",
 }
 
 local KEPT = {}
@@ -222,6 +226,14 @@ function Account.cookieHeader(jar)
             parts[#parts + 1] = name .. "=" .. value
         end
     end
+    -- AO3 rejects a logged-in request without its `user_credentials` marker
+    -- and redirects it to /lost_cookie. Sessions saved before the marker was
+    -- kept, and Set-Cookie responses that never carried it, still have a live
+    -- session cookie, so send the marker rather than force a new sign-in.
+    if (jar._otwarchive_session or "") ~= ""
+        and (jar.user_credentials or "") == "" then
+        parts[#parts + 1] = "user_credentials=1"
+    end
     if #parts == 0 then return nil end
     return table.concat(parts, "; ")
 end
@@ -230,6 +242,17 @@ function Account.isLoginPage(html)
     html = html or ""
     return html:find('id="new_user_session', 1, true) ~= nil
         or html:find('form class="new_user"', 1, true) ~= nil
+end
+
+-- AO3's ApplicationController sends a logged-in request that lacks the
+-- user_credentials marker to /lost_cookie, which tells the reader the session
+-- was ended. Recognize it by the page's URL or its title: cheap, and tolerant
+-- of the surrounding markup changing.
+function Account.isLostCookiePage(html)
+    if type(html) ~= "string" or html == "" then return false end
+    if html:find("/lost_cookie", 1, true) then return true end
+    local title = html:match("<title[^>]*>(.-)</title>")
+    return title ~= nil and title:lower():find("lost cookie", 1, true) ~= nil
 end
 
 -- The flash block AO3 renders above a failed sign-in.

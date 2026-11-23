@@ -428,6 +428,23 @@ describe("AO3 browser", function()
             end)
         end)
 
+        it("reports an ended session when AO3 serves the lost-cookie page", function()
+            -- AO3 redirects a signed-in request without user_credentials to
+            -- /lost_cookie; the download is a 200 page, so the generic
+            -- "did not return a work file" message would hide the real cause.
+            with_http(function(req)
+                req.sink(read_fixture("account/lost_cookie.html"))
+                req.sink(nil)
+                return 1, 200, {}, "OK"
+            end, function()
+                local path, err = plugin:downloadWork("9911", nil)
+                assert.is_nil(path)
+                assert.is_truthy(err)
+                assert.is_truthy(err:find("Sign in again", 1, true))
+                assert.is_nil(err:find("did not return a work file", 1, true))
+            end)
+        end)
+
         it("reports a 404", function()
             with_http(function(req)
                 req.sink("missing")

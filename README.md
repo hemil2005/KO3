@@ -329,6 +329,12 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
 - All four actions were exercised against live AO3: a kudos returned `201`;
   a bookmark, a subscription and a Marked for Later entry were each created
   and then removed, and a fresh work-page read showed all three off again.
+- After AO3 began redirecting logged-in requests without its
+  `user_credentials` marker to `/lost_cookie`, a signed-in download and a
+  bookmark/unbookmark round-trip were repeated live on 2026-11-23. The
+  download completed, the bookmark was created and removed, and the final
+  work-page state showed it off. The plugin now sends the marker with a saved
+  session and reports a lost-cookie page as an ended session.
 - The sign-in handshake is covered offline. A successful POST must be
   confirmed by AO3's logged-in greeting; an anonymous cookie plus a redirect
   back to the form is rejected. Cloudflare cookies are dropped, the session
@@ -338,7 +344,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row and prompt render in the emulator
   (`screenshots/29`–`30`).
-- The offline `busted` suite: 209 tests passing across parser, navigation,
+- The offline `busted` suite: 214 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook and updater
   tests, including 47 account tests across token parsing, the three-request

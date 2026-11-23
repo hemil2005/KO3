@@ -5,3 +5,8 @@
 # Local build/test scratch
 *.log
 *.part
+
+# Local credentials for live AO3 tests; only the placeholder is versioned.
+.env
+.env.*
+!.env.example

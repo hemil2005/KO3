@@ -169,6 +169,17 @@ describe("AO3 account", function()
             local failed = read_fixture("login_error.html")
             assert.are.equal("Invalid username or password.", Account.loginError(failed))
         end)
+
+        it("recognizes AO3's lost-cookie page but not a work page", function()
+            assert.is_true(Account.isLostCookiePage(read_fixture("lost_cookie.html")))
+            assert.is_true(Account.isLostCookiePage(
+                '<html><head><title>Lost Cookie | Archive of Our Own</title></head></html>'))
+            assert.is_truthy(Account.isLostCookiePage(
+                '<a href="/lost_cookie">Lost Cookie</a>'))
+            assert.is_false(Account.isLostCookiePage(read_root_fixture("work.html")))
+            assert.is_false(Account.isLostCookiePage(""))
+            assert.is_false(Account.isLostCookiePage(nil))
+        end)
     end)
 
     describe("session cookies", function()
@@ -176,17 +187,41 @@ describe("AO3 account", function()
             local jar, changed = Account.mergeCookies({}, table.concat({
                 "_otwarchive_session=abc123; path=/; HttpOnly; Secure",
                 "remember_user_token=rem456; path=/",
+                "user_credentials=1; path=/",
                 "__cf_bm=bot; path=/",
                 "cf_clearance=pass; path=/",
             }, ", "))
             assert.is_true(changed)
             assert.are.equal("abc123", jar._otwarchive_session)
             assert.are.equal("rem456", jar.remember_user_token)
+            assert.are.equal("1", jar.user_credentials)
             assert.is_nil(jar.__cf_bm)
             assert.is_nil(jar.cf_clearance)
             assert.are.equal(
-                "_otwarchive_session=abc123; remember_user_token=rem456",
+                "_otwarchive_session=abc123; remember_user_token=rem456; user_credentials=1",
                 Account.cookieHeader(jar))
+        end)
+
+        it("sends the user_credentials marker for sessions saved without it", function()
+            -- AO3 redirects a logged-in request to /lost_cookie when the
+            -- marker is missing. A session saved before the plugin kept it
+            -- must keep working without asking the reader to sign in again.
+            local header = Account.cookieHeader({ _otwarchive_session = "live" })
+            assert.are.equal(
+                "_otwarchive_session=live; user_credentials=1", header)
+            assert.is_nil(Account.cookieHeader({}))
+            assert.is_nil(Account.cookieHeader({ remember_user_token = "r" })
+                :find("user_credentials", 1, true))
+        end)
+
+        it("uses an explicit user_credentials value instead of duplicating it", function()
+            local header = Account.cookieHeader({
+                _otwarchive_session = "live",
+                user_credentials = "custom",
+            })
+            assert.are.equal(
+                "_otwarchive_session=live; user_credentials=custom", header)
+            assert.are.equal(1, select(2, header:gsub("user_credentials=", "")))
         end)
 
         it("reports no change for a repeated cookie", function()
@@ -290,7 +325,7 @@ describe("AO3 account", function()
                     assert.is_truthy(body:find("user%5Blogin%5D=testuser", 1, true))
                     assert.is_truthy(body:find("user%5Bpassword%5D=hunter2", 1, true))
                     assert.are.equal(
-                        "_otwarchive_session=anonymous-1; view_adult=true",
+                        "_otwarchive_session=anonymous-1; user_credentials=1; view_adult=true",
                         req.headers["Cookie"])
                     assert.are.equal("https://archiveofourown.org/users/login", req.url)
                     req.sink("")
@@ -379,7 +414,7 @@ describe("AO3 account", function()
                 assert.are.equal("<html>ok</html>", body)
             end)
             assert.are.equal(
-                "_otwarchive_session=sess-9; view_adult=true",
+                "_otwarchive_session=sess-9; user_credentials=1; view_adult=true",
                 seen.headers["Cookie"])
             plugin.session = nil
         end)
@@ -414,6 +449,18 @@ describe("AO3 account", function()
             local data, err = parse(read_fixture("login.html"))
             assert.is_nil(data)
             assert.is_truthy(err:find("expired", 1, true))
+            assert.is_nil(plugin.session)
+        end)
+
+        it("treats a lost-cookie page as an ended session", function()
+            plugin.session = {
+                username = "testuser",
+                cookies = { _otwarchive_session = "stale" },
+            }
+            local parse = plugin:accountParser("bookmarks")
+            local data, err = parse(read_fixture("lost_cookie.html"))
+            assert.is_nil(data)
+            assert.is_truthy(err:find("Sign in again", 1, true))
             assert.is_nil(plugin.session)
         end)
 
@@ -456,7 +503,7 @@ describe("AO3 account", function()
                 assert.are.equal("final", body)
             end)
             assert.are.equal(2, #calls)
-            assert.are.equal("_otwarchive_session=keep-me; view_adult=true",
+            assert.are.equal("_otwarchive_session=keep-me; user_credentials=1; view_adult=true",
                 calls[1].headers["Cookie"])
             assert.are.equal("view_adult=true", calls[2].headers["Cookie"])
             plugin.session = nil

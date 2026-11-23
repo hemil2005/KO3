@@ -1386,6 +1386,14 @@ end
 
 function Ao3:accountParser(kind)
     return function(html)
+        if Account.isLostCookiePage(html) then
+            -- AO3 ended the session because a required marker cookie was
+            -- missing. Retrying with the same jar cannot help.
+            self.session = nil
+            self:clearWorkActionCache()
+            Account.clear()
+            return nil, _("AO3 ended the saved session. Sign in again from Account.")
+        end
         if Account.isLoginPage(html) then
             -- The cookie is stale or revoked. Drop it so Home offers Sign in
             -- instead of silently showing empty lists.
@@ -2288,6 +2296,13 @@ function Ao3:downloadWork(id, title)
     local f = io.open(tmp, "rb")
     local head = f and f:read(32768) or ""
     if f then f:close() end
+    if Account.isLostCookiePage(head) then
+        -- The session jar is live as far as the plugin knows, but AO3 ended
+        -- it. Keep it (the reader may still have an offline session) and say
+        -- exactly what happened instead of blaming the work.
+        os.remove(tmp)
+        return nil, _("AO3 ended the saved session. Sign in again from Account.")
+    end
     if not head:find('id="preface"', 1, true) and not head:find('id="chapters"', 1, true) then
         local page_title = head:match("<title[^>]*>(.-)</title>") or ""
         page_title = util.htmlEntitiesToUtf8(page_title)
