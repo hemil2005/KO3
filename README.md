@@ -1,16 +1,17 @@
 # AO3 browser for KOReader
 
-A deliberately small, read-only browser for [Archive of Our Own](https://archiveofourown.org)
+A deliberately small browser for [Archive of Our Own](https://archiveofourown.org)
 that runs inside KOReader on Kindle (and other e-readers).
 
 It does **not** embed a WebView and never renders AO3's site. AO3 is only a
 data source: pages are fetched, parsed, and rebuilt as a native KOReader
 `Menu`; a work's HTML download is handed to crengine when you tap **Read**.
 
-- No login
+- Optional AO3 sign-in for your own bookmarks, marked-for-later, history and
+  subscriptions
+- Optional kudos, bookmark, subscribe and Marked for Later from a work page
 - No images
-- No kudos, comments, bookmarks or subscriptions
-- No third-party service
+- No comments, no work posting, no third-party service
 - One page fetched per tap; only opened works are saved
 
 ## Screenshots
@@ -28,7 +29,12 @@ details captured from a live work.
 | ![Work details](screenshots/07-work-details.png) | ![Reading a work](screenshots/08-reading.png) |
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
 | ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
-| ![Author works](screenshots/13-author-works.png) | |
+| ![Author works](screenshots/13-author-works.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
+| ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
+| ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![Work summary expanded](screenshots/18-work-summary.png) |
+| ![Work tags expanded](screenshots/19-work-tags.png) | |
+| ![Account on Home](screenshots/20-account-home.png) | ![Sign in](screenshots/21-account-sign-in.png) |
+| ![Account screen](screenshots/22-account-screen.png) | ![Signed out](screenshots/23-account-after-logout.png) |
 
 ## Install
 
@@ -45,7 +51,9 @@ koreader/
     ao3.koplugin/
       _meta.lua
       main.lua
+      account.lua
       authorpage.lua
+      workpage.lua
       fandompages.lua
       data/fandoms/index.lua
       data/fandoms/<category>/<letter>.tsv.z
@@ -62,6 +70,7 @@ One menu entry opens the whole app:
 | **Search** | Work title, author or keyword |
 | **Author** | An author's name or profile URL — their works list |
 | **Tag** | A tag name, or paste a full `/tags/.../works` URL |
+| **Account** | Sign in to AO3, then your bookmarks, marked-for-later, history and subscriptions |
 | **Downloads** | Works already saved on this device |
 | **Open work** | Paste `https://archiveofourown.org/works/1234567` or just `1234567` |
 
@@ -73,10 +82,14 @@ selectable card with title, author and up to three lines of summary. On the
 AO3 screens, the letter shortcut boxes are hidden so the text gets the full
 touchscreen width.
 
-Tap a result to drill in; tap a work for its tags, summary and stats; tap
-**Read** to fetch it and open it in the KOReader reader. On the work
-screen each author's name opens the author page (co-authors each get a
-row; Anonymous stays plain text).
+Tap a result to drill in; tap a work for its details. The work screen leads
+with the title, author and fandom, then **Read** (the solid bar, which
+fetches the work and opens it in the KOReader reader) and **Refresh** (the
+outlined one), a four-number strip (words, chapters, kudos, hits) and a small
+table for rating, warnings, category, status and date. **Summary** and
+**Tags** stay folded until tapped; a summary too long for one page is elided
+and opens in full from **Read full summary**. Each author's name opens the
+author page (co-authors each get a row; Anonymous stays plain text).
 
 The author page has four tabs in a horizontal strip:
 
@@ -92,10 +105,69 @@ forth does not re-request AO3. Back (the footer
 arrow, the hardware Back key, the X, or a downward swipe) goes one level up
 instead of dropping you into the file manager.
 
+Signing in is optional and only unlocks the personal lists. **Account → Sign
+in** takes an AO3 username (or email) and password. The password is posted
+once, directly to AO3, and is never written to disk. What is kept is AO3's own
+session cookie (`_otwarchive_session`, plus `remember_user_token` when AO3 sets
+it) in `settings/ao3.lua`; **Log out** removes that file and its backup.
+Cloudflare cookies are never stored or replayed. Sign-in is three ordinary
+requests: fetch AO3's JSON CSRF token, submit the form, and load one page to
+confirm the logged-in greeting. A redirect alone is not treated as success,
+because the anonymous form cookie would otherwise look like a session.
+
+Two details matter for AO3's edge. The login page (`/users/login`) is
+challenged for this client, so the token comes from
+`/token_dispenser.json` instead. The request also uses the Firefox header set
+that AO3 accepts; a specific Chrome UA is refused with `cf-mitigated:
+challenge` on the same request. AO3 rotates the session cookie during
+sign-in, sometimes alongside a deletion cookie, so an expired cookie is
+ignored rather than allowed to overwrite the live session.
+
+After sign-in, **Account** lists:
+
+| Row | Opens |
+|---|---|
+| **Bookmarks** | Works and series you bookmarked |
+| **Marked for Later** | Your reading queue |
+| **History** | Works you opened |
+| **Subscriptions** | Works, series and authors you follow |
+| **Works by you** | Your own author page, with the usual tabs |
+| **Log out** | Clears the session cookie |
+
+Each row fetches one page on tap and uses the same work cards as the rest of
+the app. If AO3 stops accepting the session, the plugin says so, clears the
+cookie and returns Home to **Sign in** instead of showing an empty list.
+
+A signed-in work page can also leave kudos, bookmark the work, subscribe to
+it, and add it to Marked for Later. These are the website's own form posts,
+sent only when you tap them; nothing is posted on startup or in the background.
+Loading the work page once supplies the current state (bookmarked, subscribed,
+on the read-later list) and the pseud or subscription id needed to undo the
+action. The form token comes from `/token_dispenser.json` and is cached until
+the session cookie changes; the tokens embedded in a work page belong to their
+forms, so they are not reused for a different action. A form post is never
+retried, so a 403 cannot leave two kudos or two bookmarks behind.
+
 The first read downloads the whole work (usually 200 KB–1 MB); after that the
 cached copy opens instantly, offline. **Refresh** downloads and validates the
 latest version before replacing the saved copy, so a failed request leaves
 the offline book available.
+
+Inside the reader, a work opened from AO3 has three ways back to the screen
+you left, instead of KOReader's file manager:
+
+- **Back to AO3** at the bottom of the reader menu's Navigation tab, on its
+  first page.
+- The Back key / Back gesture (its usual "go to file browser" exit is
+  redirected for AO3 works).
+- **Back to AO3** in the end-of-the-work dialog, alongside the standard
+  choices. The stock **File browser** button still opens the file manager.
+
+The table of contents is the work's chapters only. AO3's download file adds
+hidden "Preface" and title headings for Calibre, which crengine turned into
+two collapsed top-level entries. Those are filtered out and the chapter list
+is flattened, so the index opens fully expanded and contains no metadata
+heading.
 
 ## How it works
 
@@ -118,6 +190,24 @@ Author page (four tabs):
   GET /users/<name>/series                    Series
   GET /users/<name>/bookmarks                 Bookmarks
   GET /users/<name>/works?fandom_id=<id>      one fandom, author-scoped
+
+Account (only after Sign in):
+  GET  /token_dispenser.json                  JSON CSRF token
+  POST /users/login                           user[login], user[password]
+  GET  /users/<name>/bookmarks                Bookmarks
+  GET  /users/<name>/marked_for_later         Marked for Later
+  GET  /users/<name>/readings                 History
+  GET  /users/<name>/subscriptions            Subscriptions
+
+Work actions (only after Sign in; one form post per tap):
+  GET  /works/<id>                            state, pseud, bookmark/subscription ids
+  POST /kudos.js                              kudo[commentable_id]
+  POST /works/<id>/bookmarks                  bookmark[pseud_id] + optional notes/tags
+  POST /bookmarks/<bookmark_id>               _method=delete
+  POST /users/<name>/subscriptions.json       subscription[subscribable_id]
+  POST /users/<name>/subscriptions/<id>.json  _method=delete
+  POST /works/<id>/mark_for_later             _method=patch
+  POST /works/<id>/mark_as_read               _method=patch
 
 Reading:
   GET https://download.archiveofourown.org/downloads/<work_id>/work.html
@@ -154,29 +244,60 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   page with the count and working page navigation.
 - Work lists render a single selectable title/author/three-line summary card
   per work, without separate shortcut or description rows.
+- The work screen is one page, not a key/value list: title/author/fandom,
+  Read and Refresh, a four-number strip, an aligned metadata table, and
+  folded Summary and Tags sections. A summary longer than a page is elided
+  and opens in full; expanding lands on the text it revealed. Captured in
+  `screenshots/07` and `18`–`19`.
 - The author page (Dashboard / Works / Series / Bookmarks) is built from the
   exact live AO3 markup captured on 2026-11-23, including author-scoped
   fandom links, series stats, work bookmarks and series bookmarks; the four
   tabs render in the emulator (`screenshots/10`–`13`).
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
-- The offline `busted` suite: 106 tests passing across parser, navigation,
-  bounded-index, rendered-card interaction, old-build compatibility and
-  author-page tests.
+- Works opened from AO3 return to the plugin from the Back key, the reader
+  menu and the end-of-work dialog. The TOC lists only the work's chapters and
+  opens fully expanded.
+- The account screens render in the emulator: Home's Account section, the
+  sign-in form with a masked password field, the signed-in Account list, and
+  Home after Log out (`screenshots/20`–`23`). Those captures use a local demo
+  session and make no AO3 request.
+- The sign-in flow completed against live AO3 on 2026-11-23 and saved AO3's
+  session and remember-me cookies to `settings/ao3.lua`; the saved data has no
+  password field. The Account screen and sign-in form render in the emulator
+  (`screenshots/20`–`23`).
+- A signed-in work page loaded successfully and the parser read its CSRF
+  token, bookmark pseud and existing bookmark/subscription ids.
+- All four actions were exercised against live AO3: a kudos returned `201`;
+  a bookmark, a subscription and a Marked for Later entry were each created
+  and then removed, and a fresh work-page read showed all three off again.
+- The sign-in handshake is covered offline. A successful POST must be
+  confirmed by AO3's logged-in greeting; an anonymous cookie plus a redirect
+  back to the form is rejected. Cloudflare cookies are dropped, the session
+  is not attached to other hosts, an HTTPS → HTTP redirect is refused, and a
+  rotated session cookie cannot be replaced by an expired deletion cookie.
+- The offline `busted` suite: 182 tests passing, including 47 account tests
+  across token parsing, the three-request sign-in, cookie scoping/rotation,
+  session persistence/logout, subscription parsing and work actions. The
+  work-action tests cover the website's form bodies, reading the work page's
+  bookmarked/subscribed/read-later state, one-time token reuse, bookmark and
+  subscription ids returned by AO3, already-done duplicates and the refusal
+  to post twice.
 
-**Current connectivity:** AO3 refused the emulator's listing request with
-`403`; independent Windows and WSL `curl` requests received `429` on this
-connection. Captured once on 2026-11-23, the `429` came from
-`Server: cloudflare` with a `CF-Ray` header and the body “The bot servers are
-currently overloaded… our systems think you may be a robot… could be due to
-using a VPN”. That is Cloudflare's bot-management layer, not AO3's content
-rules, and a VPN exit can worsen it. Online search, listings and new
-downloads may remain unavailable until AO3 lifts the limit. The plugin spaces
-requests one second apart, respects a
-numeric `Retry-After` on `429` without immediately retrying, and does not
-retry a recognizable browser challenge. Other `403` responses get one retry
-before a five-minute cooldown. Offline fandom search and saved
-works remain available. No physical Kindle connectivity check has been made.
+**Current connectivity (checked 2026-11-23 14:20):** AO3's edge accepts the
+Firefox header set used for sign-in. `/token_dispenser.json` returned `200`
+with the JSON token; the same request with a Chrome UA returned `403
+cf-mitigated: challenge`. The public homepage also returned `200` from cache
+earlier. Sign-in is still done only when you tap it: no startup request, no
+background verification, no retry after a challenge, and no replay of
+Cloudflare's cookies. AO3 remains in degraded mode (HTML downloads only, some
+features disabled), so each screen still loads one page per tap.
+
+This is **not** a rate-limit exemption. The header set avoids the bot
+challenge observed on this connection, but AO3's own limits still apply: a
+real `429` is still possible, still honoured with `Retry-After`, and never
+retried. If AO3 is queueing traffic, stop and try later rather than tapping
+through it.
 
 If AO3 works in your browser but not here, use AO3's **Download → HTML**
 button in the browser, transfer the file to your device, and open it from
@@ -190,11 +311,19 @@ what made the 403 stick for the plugin while `curl` could still fetch pages.
 
 ## Limits
 
-- **Public works only.** Works restricted to logged-in users need a session
-  and a login flow, which this version deliberately does not have.
+- **Personal lists need a session.** Signing in enables bookmarks,
+  marked-for-later, history and subscriptions. Restricted works are requested
+  with the session cookie; if AO3 still returns a login or warning page, the
+  download is rejected and any cached copy is kept.
 - **Adult-gated works** may return the warning page instead of the work.
   The plugin sends `view_adult=true`, but it is not guaranteed.
-- **Read-only.** No kudos, comments, bookmarks or subscriptions.
+- **No comments or posting.** The only writes are the four work actions a
+  signed-in user taps: kudos, bookmark, subscribe and Marked for Later. There
+  is no comment box and no work editing.
+- **The session cookie is stored locally.** It lives in plain text in
+  `settings/ao3.lua`, like KOReader's other service settings. The password is
+  never written. **Log out** deletes the session and its backup file; delete
+  that file by hand if you want to be certain.
 - **No images.** AO3's HTML download references images remotely, and the
   plugin does not fetch them.
 - **Snapshot, not live.** The fandom list is a point-in-time copy; tag names

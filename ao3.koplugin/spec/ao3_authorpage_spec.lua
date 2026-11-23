@@ -149,3 +149,76 @@ describe("AO3 author page parsers", function()
         assert.is_nil(legacy.prev_url)
     end)
 end)
+
+describe("AO3 downloaded-work TOC", function()
+    local AuthorPage = dofile("plugins/ao3.koplugin/authorpage.lua")
+
+    it("drops the Preface and the work-title wrapper, keeping chapters", function()
+        local toc = {
+            { title = "Preface", depth = 0, page = 1 },
+            { title = "The Evans Boy", depth = 0, page = 1 },
+            { title = "Chapter 1: Halloween, 1977", depth = 1, page = 2 },
+            { title = "Chapter 2: The Letter", depth = 1, page = 9 },
+            { title = "Afterword", depth = 1, page = 40 },
+        }
+        local cleaned = AuthorPage.cleanToc(toc)
+        assert.are.equal(3, #cleaned)
+        assert.are.equal("Chapter 1: Halloween, 1977", cleaned[1].title)
+        assert.are.equal("Chapter 2: The Letter", cleaned[2].title)
+        assert.are.equal("Afterword", cleaned[3].title)
+        for _, item in ipairs(cleaned) do
+            assert.are.equal(0, item.depth)
+        end
+        -- Pages are kept, so chapter navigation still lands correctly.
+        assert.are.equal(2, cleaned[1].page)
+        -- The input is not modified: ReaderToc caches what it is given.
+        assert.are.equal(5, #toc)
+        assert.are.equal(1, toc[3].depth)
+    end)
+
+    it("drops a Preface that crengine reports as a dash", function()
+        local cleaned = AuthorPage.cleanToc({
+            { title = "-", depth = 0, page = 1 },
+            { title = "A Work", depth = 0, page = 3 },
+            { title = "Chapter 1", depth = 1, page = 5 },
+            { title = "INT. A ROOM — NIGHT", depth = 1, page = 5 },
+        })
+        assert.are.equal(2, #cleaned)
+        assert.are.equal("Chapter 1", cleaned[1].title)
+        assert.are.equal("INT. A ROOM — NIGHT", cleaned[2].title)
+    end)
+
+    it("drops an empty Preface entry too", function()
+        local cleaned = AuthorPage.cleanToc({
+            { title = "", depth = 0, page = 1 },
+            { title = "A Work", depth = 0, page = 1 },
+            { title = "Chapter 1", depth = 1, page = 2 },
+        })
+        assert.are.equal(1, #cleaned)
+        assert.are.equal("Chapter 1", cleaned[1].title)
+    end)
+
+    it("keeps a one-chapter work's title as its only entry", function()
+        local cleaned = AuthorPage.cleanToc({
+            { title = "Preface", depth = 0, page = 1 },
+            { title = "Blood and Chrome", depth = 0, page = 1 },
+        })
+        assert.are.equal(1, #cleaned)
+        assert.are.equal("Blood and Chrome", cleaned[1].title)
+        assert.are.equal(0, cleaned[1].depth)
+    end)
+
+    it("leaves an already flat TOC flat", function()
+        local cleaned = AuthorPage.cleanToc({
+            { title = "Chapter 1", depth = 0, page = 1 },
+            { title = "Chapter 2", depth = 0, page = 4 },
+        })
+        assert.are.equal(2, #cleaned)
+        assert.are.equal("Chapter 1", cleaned[1].title)
+    end)
+
+    it("handles an empty or missing TOC", function()
+        assert.are.same({}, AuthorPage.cleanToc({}))
+        assert.is_nil(AuthorPage.cleanToc(nil))
+    end)
+end)

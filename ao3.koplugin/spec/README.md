@@ -35,6 +35,9 @@ The tests are offline:
 
 `fixtures/work.html` is a minimal valid AO3 HTML download. `login.html`
 and `challenge.html` cover the two common non-work responses.
+`fixtures/account/work_actions_*.html` are trimmed copies of AO3's signed-in
+work page forms: the first has nothing marked, the second has a bookmark,
+subscription and read-later entry to remove.
 
 ## Build environment notes
 

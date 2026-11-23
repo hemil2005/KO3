@@ -1,15 +1,19 @@
 --[[
 AO3 browser for KOReader.
 
-A deliberately small, read-only browser for archiveofourown.org:
+A deliberately small browser for archiveofourown.org:
 search and tag listings are fetched as HTML, parsed into native
 KOReader lists, and a work is fetched only when you tap Read.
 
-No login, no kudos/comments, no images, no WebView.
+No comments, no images, no WebView. An optional AO3 sign-in adds the user's
+own bookmarks, marked-for-later, history and subscriptions, and lets the work
+page leave kudos, bookmark, subscribe and mark a work for later. Without it
+the browser is unchanged and reads public works.
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
 local DataStorage = require("datastorage")
+local Screen = require("device").screen
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -19,12 +23,13 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
-local KeyValuePage = require("ui/widget/keyvaluepage")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local Menu = require("ui/widget/menu")
+local MultiInputDialog = require("ui/widget/multiinputdialog")
 local NetworkMgr = require("ui/network/manager")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextViewer = require("ui/widget/textviewer")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local UnderlineContainer = require("ui/widget/container/underlinecontainer")
@@ -36,6 +41,7 @@ local lfs = require("libs/libkoreader-lfs")
 local ltn12 = require("ltn12")
 local socket = require("socket")
 local socketutil = require("socketutil")
+local socketurl = require("socket.url")
 local http = require("socket.http")
 local util = require("util")
 local htmlparser = require("htmlparser")
@@ -44,7 +50,11 @@ local T = ffiutil.template
 
 local BASE_URL = "https://archiveofourown.org"
 local DOWNLOAD_HOST = "https://download.archiveofourown.org"
-local UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+-- AO3's edge distinguishes this client. With a specific Chrome UA the token
+-- endpoint and login page return 403 (cf-mitigated: challenge); this Firefox
+-- UA and the headers below return 200 on the same request. Keep them in sync
+-- with the working request; see AGENTS.md.
+local UA = "Mozilla/5.0 (platform; rv:gecko-version) Gecko/gecko-trail Firefox/firefox-version"
 
 local Ao3 = WidgetContainer:extend{
     name = "ao3",
@@ -133,6 +143,13 @@ local function findCachedWork(dir, id)
 end
 
 -- ---------------------------------------------------------------------------
+-- Account module
+-- ---------------------------------------------------------------------------
+
+local MAIN_SOURCE = debug.getinfo(1, "S").source:sub(2)
+local Account = dofile((MAIN_SOURCE:gsub("main%.lua$", "account.lua")))
+
+-- ---------------------------------------------------------------------------
 -- Networking
 -- ---------------------------------------------------------------------------
 
@@ -140,13 +157,34 @@ end
 -- requests are bursty. One page per tap is already cheap; this keeps rapid
 -- taps from tripping the gate.
 --
--- Deliberately no cookie jar: Cloudflare's bot cookies are bound to the
--- client that earned them, and replaying them from LuaSocket is what started
--- returning 403. Only the adult-content preference is sent.
+-- No Cloudflare cookies are kept. The only cookies sent are the adult-content
+-- preference and, after an explicit sign-in, AO3's own session cookie. See
+-- account.lua.
 local MIN_REQUEST_INTERVAL = 1.0
 local last_request_at = 0
 local REQUEST_COOKIE = "view_adult=true"
 local DEFAULT_BLOCK_SECONDS = 300
+
+-- Session cookies belong to AO3 only. The download host is included because
+-- AO3's FAQ says restricted-work downloads need the session, and it is the
+-- host the plugin already uses. Any other redirect target gets no cookies.
+local COOKIE_HOSTS = {
+    ["archiveofourown.org"] = true,
+    ["www.archiveofourown.org"] = true,
+    ["download.archiveofourown.org"] = true,
+}
+local REDIRECT_CODES = { [301] = true, [302] = true, [303] = true, [307] = true, [308] = true }
+local MAX_REDIRECTS = 5
+
+local function urlHost(url)
+    local ok, parsed = pcall(socketurl.parse, url or "")
+    if not ok or type(parsed) ~= "table" or not parsed.host then return nil end
+    return parsed.host:lower()
+end
+
+local function cookiesAllowed(url)
+    return COOKIE_HOSTS[urlHost(url) or ""] == true
+end
 
 local function blockedMessage(code, seconds)
     if code == "challenge" then
@@ -175,67 +213,182 @@ local function throttle()
     last_request_at = socket.gettime()
 end
 
-function Ao3:fetchHtml(url, timeout)
+-- Cookies for a request: the session (when signed in) plus view_adult. The
+-- session is only attached for AO3's own hosts; a redirect elsewhere gets
+-- just the adult-content preference.
+function Ao3:cookieHeader(request_url, jar)
+    local parts = {}
+    local cookies = jar or (self.session and self.session.cookies)
+    if cookies and cookiesAllowed(request_url) then
+        local header = Account.cookieHeader(cookies)
+        if header then parts[#parts + 1] = header end
+    end
+    parts[#parts + 1] = REQUEST_COOKIE
+    return table.concat(parts, "; ")
+end
+
+-- AO3 rotates session cookies rarely, so only a real change is written back.
+-- Cookies set by another host are ignored. A caller doing a sign-in check can
+-- pass its own jar so nothing is persisted before confirmation.
+function Ao3:absorbCookies(response_headers, request_url, jar)
+    if not response_headers or not cookiesAllowed(request_url) then return end
+    if jar then
+        Account.mergeCookies(jar, response_headers["set-cookie"])
+        return
+    end
+    if not self.session then return end
+    local merged, changed = Account.mergeCookies(
+        self.session.cookies, response_headers["set-cookie"])
+    if changed then
+        self.session.cookies = merged
+        Account.save(Account.settingsPath(), self.session)
+    end
+end
+
+-- One request path for page GETs and the sign-in POST. `opts` may carry
+-- method, body, cookie, redirect and retry_on_403.
+-- Returns body, error, status_code, response_headers. Body is set for
+-- 2xx/3xx responses; error is set otherwise.
+--
+-- Redirects are followed here, not by LuaSocket: LuaSocket copies the
+-- original headers (including Cookie) to the new URL. Recomputing cookies per
+-- hop and refusing an HTTPS -> HTTP downgrade is the same approach the OPDS
+-- client uses.
+function Ao3:httpRequest(url, opts, timeout)
+    opts = opts or {}
     local now = socket.gettime()
     if self.blocked_until and now < self.blocked_until then
         return nil, blockedMessage(self.blocked_code, self.blocked_until - now)
     end
     self.blocked_until = nil
-    local chunks = {}
-    local function attempt()
-        throttle()
-        return pcall(function()
-            return socket.skip(1, http.request{
-                url = url,
-                method = "GET",
-                headers = {
-                    ["User-Agent"] = UA,
-                    ["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    ["Accept-Language"] = "en-US,en;q=0.9",
-                    ["Cookie"] = REQUEST_COOKIE,
-                },
-                sink = ltn12.sink.table(chunks),
-                redirect = true,
-            })
-        end)
+
+    local method = opts.method or "GET"
+    local body = opts.body
+    local request_url = url
+    local hops = 0
+    local first_hop = true
+
+    local function finish(...)
+        socketutil:reset_timeout()
+        return ...
     end
 
     socketutil:set_timeout(timeout or 20, (timeout or 20) * 3)
-    local ok, code, headers, status = attempt()
-    local challenged = isBrowserChallenge(code, headers, chunks)
-    if ok and code == 403 and not challenged then
-        -- Retry a transient challenge once. A 429, particularly one with
-        -- Retry-After, must not be retried immediately.
-        socket.sleep(3)
-        chunks = {}
-        ok, code, headers, status = attempt()
-        challenged = isBrowserChallenge(code, headers, chunks)
-    end
-    socketutil:reset_timeout()
+    while true do
+        local chunks = {}
+        local headers = {
+            ["User-Agent"] = UA,
+            ["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            ["Accept-Language"] = "en-US,en;q=0.5",
+            ["Sec-GPC"] = "1",
+            ["DNT"] = "1",
+            ["Connection"] = "keep-alive",
+            ["Cookie"] = (first_hop and opts.cookie)
+                or self:cookieHeader(request_url, opts.cookie_jar),
+        }
+        for name, value in pairs(opts.headers or {}) do
+            -- Cookies are decided above; never let a caller override them
+            -- across a redirect.
+            if name:lower() ~= "cookie" then headers[name] = value end
+        end
+        if body then
+            headers["Content-Type"] = headers["Content-Type"]
+                or "application/x-www-form-urlencoded"
+            headers["Content-Length"] = tostring(#body)
+        end
 
-    if not ok then
-        return nil, tostring(code)
+        local function attempt()
+            throttle()
+            return pcall(function()
+                local request = {
+                    url = request_url,
+                    method = method,
+                    headers = headers,
+                    sink = ltn12.sink.table(chunks),
+                    redirect = false,
+                }
+                if body then
+                    request.source = ltn12.source.string(body)
+                end
+                return socket.skip(1, http.request(request))
+            end)
+        end
+
+        local ok, code, response_headers, status = attempt()
+        local challenged = isBrowserChallenge(code, response_headers, chunks)
+        if ok and code == 403 and not challenged and opts.retry_on_403 ~= false then
+            -- Retry a transient challenge once. A 429, particularly one with
+            -- Retry-After, must not be retried immediately. A sign-in POST
+            -- sets retry_on_403=false so credentials are not posted twice.
+            socket.sleep(3)
+            chunks = {}
+            ok, code, response_headers, status = attempt()
+            challenged = isBrowserChallenge(code, response_headers, chunks)
+        end
+
+        if not ok then
+            return finish(nil, tostring(code))
+        end
+        self:absorbCookies(response_headers, request_url, opts.cookie_jar)
+        local response_body = table.concat(chunks)
+
+        local location = response_headers and response_headers["location"]
+        if REDIRECT_CODES[code] and location and opts.redirect ~= false then
+            hops = hops + 1
+            if hops > MAX_REDIRECTS then
+                return finish(nil, _("AO3 redirected too many times."), code, response_headers)
+            end
+            local next_url = socketurl.absolute(request_url, location)
+            if not next_url then
+                return finish(nil, _("AO3 sent an invalid redirect."), code, response_headers)
+            end
+            if request_url:match("^https:") and next_url:match("^http:") then
+                return finish(nil, _("AO3 redirected to an insecure address; stopped."),
+                    code, response_headers)
+            end
+            -- 301/302/303 change a POST to a GET with no body, as browsers do.
+            if code == 301 or code == 302 or code == 303 then
+                if method ~= "GET" and method ~= "HEAD" then
+                    method, body = "GET", nil
+                end
+            end
+            request_url = next_url
+            first_hop = false
+        else
+            if type(code) == "number" and code >= 200 and code < 400 then
+                return finish(response_body, nil, code, response_headers)
+            end
+            if code == 429 or code == 403 then
+                local retry_after = code == 429
+                    and tonumber(response_headers and response_headers["retry-after"])
+                local delay = math.max(60, retry_after or DEFAULT_BLOCK_SECONDS)
+                self.blocked_until = socket.gettime() + delay
+                self.blocked_code = challenged and "challenge" or code
+                return finish(nil, blockedMessage(self.blocked_code, delay), code, response_headers)
+            end
+            local message = httpErrorMessage(code, response_headers, status)
+            -- Form posts answer 422 with the reason in the body (a duplicate
+            -- kudos, a validation error). Callers that can use it ask for the
+            -- body; everything else still gets nil, as before.
+            if opts.return_error_body then
+                return finish(response_body, message, code, response_headers)
+            end
+            return finish(nil, message, code, response_headers)
+        end
     end
-    local body = table.concat(chunks)
-    if code == 200 then
-        return body
-    end
-    if code == 429 or code == 403 then
-        local retry_after = code == 429 and tonumber(headers and headers["retry-after"])
-        local delay = math.max(60, retry_after or DEFAULT_BLOCK_SECONDS)
-        self.blocked_until = socket.gettime() + delay
-        self.blocked_code = challenged and "challenge" or code
-        return nil, blockedMessage(self.blocked_code, delay)
-    end
-    return nil, httpErrorMessage(code, headers, status)
+end
+
+function Ao3:fetchHtml(url, timeout)
+    local body, err = self:httpRequest(url, nil, timeout)
+    return body, err
 end
 
 -- ---------------------------------------------------------------------------
 -- Listing parser
 -- ---------------------------------------------------------------------------
 
-local MAIN_SOURCE = debug.getinfo(1, "S").source:sub(2)
 local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
+local WorkPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "workpage.lua")))
 
 -- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
 -- same parser; listings, search results and bookmark pages share the markup.
@@ -352,7 +505,7 @@ end
 
 -- Fetch a page, run it through `parse`, and hand the result to `on_success`.
 -- Kept in one place so every screen shows the same spinner and error text.
-function Ao3:fetchPage(url, parse, label, on_success)
+function Ao3:fetchPage(url, parse, label, on_success, on_error)
     NetworkMgr:runWhenOnline(function()
         local Trapper = require("ui/trapper")
         local data, err
@@ -375,6 +528,7 @@ function Ao3:fetchPage(url, parse, label, on_success)
         if data then
             on_success(data)
         else
+            if on_error then pcall(on_error, err) end
             UIManager:show(InfoMessage:new{
                 text = T(_("Could not load AO3:\n%1"), err or _("unknown error")),
             })
@@ -530,7 +684,11 @@ function Ao3MenuItem:init()
     self.ao3_metrics = metrics
 
     local content
-    if self.entry.ao3_work then
+    if self.entry.ao3_panel then
+        -- A built panel (work page sections and actions). It carries its own
+        -- spacing; the menu only supplies the focus underline.
+        content = self.entry.ao3_panel
+    elseif self.entry.ao3_work then
         content = self:buildCard(metrics)
     else
         content = self:buildCompact(metrics)
@@ -542,7 +700,7 @@ function Ao3MenuItem:init()
     -- Cards keep the title at a consistent top edge. Compact rows stay
     -- left-aligned like native menu rows and centre vertically.
     local content_holder
-    if self.entry.ao3_work then
+    if self.entry.ao3_work or self.entry.ao3_panel then
         content_holder = WidgetContainer:new{
             dimen = content_dimen:copy(),
             content,
@@ -554,7 +712,7 @@ function Ao3MenuItem:init()
         }
     end
     self._underline_container = UnderlineContainer:new{
-        color = self.line_color,
+        color = self.entry.line_color or self.line_color,
         linesize = self.linesize,
         -- Older releases have no Size.line.focus_row, and debug builds raise
         -- on unknown Size.line keys; rawget keeps both cases safe.
@@ -634,7 +792,7 @@ function Ao3MenuItem:onFocus()
 end
 
 function Ao3MenuItem:onUnfocus()
-    self._underline_container.color = self.line_color
+    self._underline_container.color = self.entry.line_color or self.line_color
     self._underline_container.focused = false
     return true
 end
@@ -672,6 +830,13 @@ function Ao3WorkMenu:setupItemHeights()
         if item.ao3_tabs then
             -- The author tab strip is a row of its own above the content.
             item.height = item.ao3_tabs:getSize().h + Size.span.vertical_default
+        elseif item.ao3_static then
+            -- A prebuilt, non-selectable block (hero, stats, folded text).
+            item.height = item.ao3_static:getSize().h
+        elseif item.ao3_panel then
+            -- A selectable block (action bar, section header); the extra
+            -- line is the focus underline.
+            item.height = item.ao3_panel:getSize().h + self.linesize
         elseif item.ao3_work then
             item.height = item.summary and metrics.card_h or metrics.card_no_summary_h
         else
@@ -739,6 +904,10 @@ function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
                     h = item.height or strip:getSize().h,
                 }
                 table.insert(self.item_group, strip)
+            elseif item.ao3_static then
+                -- Static page content (hero, stats, folded text): painted,
+                -- never focused.
+                table.insert(self.item_group, item.ao3_static)
             else
                 local item_tmp = Ao3MenuItem:new{
                     idx = index,
@@ -828,6 +997,379 @@ end
 
 function Ao3:showListing(listing, fallback_title, replace)
     local rows, title = self:listingRows(listing, fallback_title)
+    if replace then
+        self:replaceRows(title, rows)
+    else
+        self:pushRows(title, rows)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Account
+-- ---------------------------------------------------------------------------
+--
+-- Signing in is optional. Out of the box the plugin browses public AO3 like
+-- before; after Sign in, the session cookie is attached to every request so
+-- the personal lists below can be opened. No request is made until the user
+-- taps a row.
+
+local ACCOUNT_LISTS = {
+    bookmarks = {
+        label = _("Bookmarks"),
+        path = "/bookmarks",
+        loading = _("Loading bookmarks…"),
+        empty = _("No bookmarks."),
+    },
+    marked = {
+        label = _("Marked for Later"),
+        path = "/marked_for_later",
+        loading = _("Loading marked works…"),
+        empty = _("Nothing marked for later."),
+    },
+    history = {
+        label = _("History"),
+        path = "/readings",
+        loading = _("Loading history…"),
+        empty = _("No reading history."),
+    },
+    subscriptions = {
+        label = _("Subscriptions"),
+        path = "/subscriptions",
+        loading = _("Loading subscriptions…"),
+        empty = _("No subscriptions."),
+    },
+}
+
+function Ao3:loginDialog()
+    local dialog
+    dialog = MultiInputDialog:new{
+        title = _("Sign in to AO3"),
+        fields = {
+            {
+                description = _("Username or email"),
+                hint = _("AO3 username"),
+            },
+            {
+                description = _("Password"),
+                text_type = "password",
+                hint = _("Password"),
+            },
+        },
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+                {
+                    text = _("Sign in"),
+                    is_enter_default = true,
+                    callback = function()
+                        local fields = dialog:getFields()
+                        UIManager:close(dialog)
+                        self:signIn(fields[1], fields[2])
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+    if dialog.onShowKeyboard then
+        dialog:onShowKeyboard()
+    end
+end
+
+-- Sign-in uses AO3's JSON token endpoint instead of loading /users/login.
+-- That page is challenged for this client; the token endpoint is not. The
+-- password lives only in this call and is never written to settings.
+function Ao3:performLogin(login, password)
+    local token_body, token_err, token_code, token_headers = self:httpRequest(
+        Account.TOKEN_URL, {
+            redirect = true,
+            headers = {
+                ["Accept"] = "application/json, text/javascript, */*; q=0.01",
+            },
+        }, 30)
+    if not token_body then return nil, token_err end
+
+    local token = Account.parseToken(token_body)
+    if not token then
+        return nil, _("Could not read AO3's sign-in token. Try again in a moment.")
+    end
+
+    local jar = Account.mergeCookies({}, token_headers and token_headers["set-cookie"])
+
+    local cookie = Account.cookieHeader(jar)
+    cookie = cookie and (cookie .. "; " .. REQUEST_COOKIE) or REQUEST_COOKIE
+    local body = Account.loginBody(token, login, password)
+    local response, post_err, code, post_headers = self:httpRequest(Account.LOGIN_URL, {
+        method = "POST",
+        body = body,
+        redirect = false,
+        retry_on_403 = false,
+        cookie = cookie,
+        headers = {
+            ["Content-Type"] = "application/x-www-form-urlencoded",
+            ["Referer"] = Account.LOGIN_URL,
+            ["Origin"] = Account.BASE_URL,
+            ["Content-Length"] = tostring(#body),
+        },
+    }, 30)
+    jar = Account.mergeCookies(jar, post_headers and post_headers["set-cookie"])
+
+    if code == 301 or code == 302 or code == 303 or code == 307 or code == 308 then
+        if not Account.isSignedIn({ cookies = jar }) then
+            return nil, _("AO3 accepted the form but returned no session. Check the username and password.")
+        end
+        -- A redirect alone is not proof: the anonymous form cookie is already
+        -- in the jar, so a failed sign-in can redirect back to the form. Load
+        -- the destination once and require AO3's logged-in greeting.
+        local location = post_headers and post_headers["location"]
+        if not location then
+            return nil, _("AO3 did not say where the sign-in went. Try again.")
+        end
+        local verify_url = socketurl.absolute(Account.LOGIN_URL, location)
+        local verified, verify_err = self:httpRequest(verify_url, {
+            cookie_jar = jar,
+            redirect = true,
+        }, 30)
+        if not verified then return nil, verify_err end
+        local name = Account.loggedInName(verified)
+        if not name and not verified:find('class="logged-in"', 1, true) then
+            return nil, _("AO3 did not confirm the sign-in. Check the username and password.")
+        end
+        return {
+            username = name or trim(login),
+            cookies = jar,
+            saved_at = os.time(),
+        }
+    end
+    if post_err then return nil, post_err end
+
+    -- A rejected sign-in re-renders the form with a flash error. Occasionally
+    -- a server answers 200 with the signed-in page instead.
+    local name = response and Account.loggedInName(response)
+    if name then
+        return { username = name, cookies = jar, saved_at = os.time() }
+    end
+    local message = response and Account.loginError(response)
+    if message then return nil, message end
+    return nil, T(_("Unexpected response from AO3 (HTTP %1)."), code or "?")
+end
+
+function Ao3:signIn(login, password)
+    login, password = trim(login), password or ""
+    if login == "" or password == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("Enter your AO3 username and password."),
+        })
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local Trapper = require("ui/trapper")
+        local session, err
+        Trapper:wrap(function()
+            Trapper:info(_("Signing in to AO3…"))
+            local ok, result, message = pcall(function()
+                return self:performLogin(login, password)
+            end)
+            if ok then
+                session, err = result, message
+            else
+                err = tostring(result)
+            end
+            Trapper:reset()
+        end)
+        NetworkMgr:afterWifiAction()
+
+        if session then
+            self.session = session
+            self:clearWorkActionCache()
+            Account.save(Account.settingsPath(), session)
+            self:showHome()
+            UIManager:show(InfoMessage:new{
+                text = T(_("Signed in as %1."), session.username),
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = T(_("Could not sign in:\n%1"), err or _("unknown error")),
+            })
+        end
+    end)
+end
+
+function Ao3:signOut()
+    self.session = nil
+    self:clearWorkActionCache()
+    Account.clear()
+    self:showHome()
+    UIManager:show(InfoMessage:new{
+        text = _("Signed out of AO3. Saved works are still available."),
+    })
+end
+
+function Ao3:showAccount()
+    if not Account.isSignedIn(self.session) then
+        self:loginDialog()
+        return
+    end
+    local name = self.session.username or _("your account")
+    self:pushRows(_("Account"), {
+        { text = T(_("Signed in as %1"), name), bold = true },
+        {
+            text = _("Bookmarks"),
+            mandatory = _("Works and series you saved"),
+            action = function() self:showAccountList("bookmarks") end,
+        },
+        {
+            text = _("Marked for Later"),
+            mandatory = _("Your reading queue"),
+            action = function() self:showAccountList("marked") end,
+        },
+        {
+            text = _("History"),
+            mandatory = _("Works you opened"),
+            action = function() self:showAccountList("history") end,
+        },
+        {
+            text = _("Subscriptions"),
+            mandatory = _("Updates you follow"),
+            action = function() self:showAccountList("subscriptions") end,
+        },
+        {
+            text = T(_("Works by %1"), name),
+            mandatory = _("Your author page"),
+            action = function()
+                self:showAuthor(name, BASE_URL .. "/users/" .. name)
+            end,
+        },
+        {
+            text = _("Log out"),
+            mandatory = _("Forget this session"),
+            action = function() self:signOut() end,
+        },
+    })
+end
+
+function Ao3:learnAccountName(html)
+    local name = Account.loggedInName(html)
+    if name and self.session and name ~= self.session.username then
+        self.session.username = name
+        Account.save(Account.settingsPath(), self.session)
+    end
+end
+
+function Ao3:accountParser(kind)
+    return function(html)
+        if Account.isLoginPage(html) then
+            -- The cookie is stale or revoked. Drop it so Home offers Sign in
+            -- instead of silently showing empty lists.
+            self.session = nil
+            self:clearWorkActionCache()
+            Account.clear()
+            return nil, _("Your AO3 session has expired. Sign in again from Account.")
+        end
+        self:learnAccountName(html)
+        if kind == "bookmarks" then
+            return AuthorPage.parseBookmarks(html)
+        elseif kind == "subscriptions" then
+            return AuthorPage.parseSubscriptions(html)
+        end
+        return self:parseListing(html)
+    end
+end
+
+function Ao3:loadAccountList(kind, url, replace)
+    local meta = ACCOUNT_LISTS[kind]
+    if not meta then return end
+    if not Account.isSignedIn(self.session) then
+        UIManager:show(InfoMessage:new{
+            text = _("Your AO3 session has expired. Sign in again."),
+        })
+        self:showHome()
+        self:loginDialog()
+        return
+    end
+    url = url or Account.listUrl(self.session.username, meta.path)
+    if not url then return end
+    self:fetchPage(url, self:accountParser(kind), meta.loading, function(data)
+        self:showAccountRows(kind, data, replace)
+    end, function()
+        -- accountParser drops the stale session, so return to a Home screen
+        -- that offers Sign in rather than leaving a dead Account page open.
+        if not Account.isSignedIn(self.session) then
+            self:showHome()
+        end
+    end)
+end
+
+function Ao3:showAccountList(kind)
+    self:loadAccountList(kind, nil, false)
+end
+
+function Ao3:accountRows(kind, data)
+    local meta = ACCOUNT_LISTS[kind]
+    -- Translate outside the loop: `for _, item` shadows gettext `_`.
+    local series_label = _("Series")
+    local author_label = _("Author")
+    local rows = {}
+    for _, item in ipairs(data.items) do
+        if item.kind == "series" then
+            rows[#rows + 1] = {
+                text = item.title,
+                mandatory = series_label,
+                action = function()
+                    self:loadListing(BASE_URL .. item.url, item.title)
+                end,
+            }
+        elseif item.kind == "user" then
+            rows[#rows + 1] = {
+                text = item.title,
+                mandatory = author_label,
+                action = function()
+                    self:showAuthor(item.name, BASE_URL .. "/users/" .. item.name)
+                end,
+            }
+        else
+            rows[#rows + 1] = self:workRow(item)
+        end
+    end
+    if #rows == 0 then
+        rows[1] = { text = meta.empty }
+    end
+
+    if data.next_url then
+        rows[#rows + 1] = {
+            text = _("Next page →"),
+            action = function()
+                self:loadAccountList(kind, data.next_url, true)
+            end,
+        }
+    end
+    if data.prev_url then
+        rows[#rows + 1] = {
+            text = _("← Previous page"),
+            action = function()
+                self:loadAccountList(kind, data.prev_url, true)
+            end,
+        }
+    end
+    return rows
+end
+
+function Ao3:showAccountRows(kind, data, replace)
+    local meta = ACCOUNT_LISTS[kind]
+    local name = self.session and self.session.username or _("Account")
+    local rows = self:accountRows(kind, data)
+
+    local title = T(_("%1 · %2"), meta.label, name)
+    if data.count then
+        title = T(_("%1 · %2"), title, data.count)
+    end
     if replace then
         self:replaceRows(title, rows)
     else
@@ -979,77 +1521,489 @@ function Ao3:showAuthorRows(tab_id, data, replace)
 end
 
 function Ao3:showWork(work)
-    local cached = findCachedWork(getDownloadDir(), work.id)
-    local rows = {
-        {
-            _("Read"),
-            cached and _("Open saved copy") or _("Fetch and open"),
-            callback = function(kv_page)
-                UIManager:close(kv_page)
-                self:readWork(work.id, work.title)
-            end,
-        },
-        {
-            _("Refresh"),
-            _("Download the latest version"),
-            callback = function(kv_page)
-                UIManager:close(kv_page)
-                self:readWork(work.id, work.title, true)
-            end,
-        },
-        "----------------------------",
+    self:showWorkPage(work, false)
+end
+
+-- Folded sections are rebuilt in place: the page keeps its position on the
+-- navigation stack, so Back still returns to the listing that opened it.
+-- `focus` names the section that was just toggled, so the page lands on the
+-- text that appeared (or on the header that hid it).
+function Ao3:showWorkPage(work, replace, focus)
+    local state = self.work_state
+    if not state or state.id ~= work.id then
+        state = { id = work.id, summary = false, tags = false }
+        self.work_state = state
+    end
+
+    local font_size = (self.menu and self.menu.font_size) or 20
+    local width = Screen:getWidth() - 2 * Size.padding.fullscreen
+    local rows = WorkPage.build{
+        work = work,
+        width = width,
+        font_size = font_size,
+        -- A menu row taller than a page is clipped, so the folded text is
+        -- bounded and the remainder opens in a scrollable TextViewer.
+        body_max_height = math.floor(Screen:getHeight() * 0.44),
+        cached = findCachedWork(getDownloadDir(), work.id),
+        state = state,
+        on_read = function() self:readWork(work.id, work.title) end,
+        on_refresh = function() self:readWork(work.id, work.title, true) end,
+        on_toggle = function(section)
+            state[section] = not state[section]
+            self:showWorkPage(work, true, section)
+        end,
+        on_full_text = function(title, text)
+            UIManager:show(TextViewer:new{ title = title, text = text })
+        end,
+        on_author = function(name, url) self:showAuthor(name, url) end,
     }
-    local details_top = {
-        { _("Summary"), work.summary },
-        { _("Rating"), work.rating },
-        { _("Warnings"), work.warnings },
-        { _("Status"), work.complete },
-    }
-    local details_rest = {
-        { _("Fandom"), work.fandoms },
-        { _("Category"), work.category },
-        { _("Tags"), work.tags },
-        { _("Words"), work.words },
-        { _("Chapters"), work.chapters },
-        { _("Updated"), work.updated },
-        { _("Kudos"), work.kudos },
-        { _("Hits"), work.hits },
-    }
-    local function add_details(list)
-        for _, detail in ipairs(list) do
-            if detail[2] and detail[2] ~= "" then
-                rows[#rows + 1] = detail
+
+    local title = _("Work details")
+    if replace then
+        -- Prefer the body that just appeared; fall back to its header.
+        local anchor = 1
+        if focus then
+            for i, row in ipairs(rows) do
+                if row.role == focus then anchor = i end
+                if row.role == focus .. "_body" then anchor = i end
             end
         end
-    end
-    add_details(details_top)
-
-    -- Author rows are tappable when the listing carried the author's own
-    -- page; Anonymous works, or a name/URL mismatch, stay plain text.
-    local names, urls = work.author_names or {}, work.author_urls or {}
-    if #names > 0 and #names == #urls then
-        for i = 1, #names do
-            local name, url = names[i], urls[i]
-            rows[#rows + 1] = {
-                _("Author"), name,
-                callback = function(kv_page)
-                    UIManager:close(kv_page)
-                    self:showAuthor(name, url)
-                end,
-            }
+        self:replaceRows(title, rows, anchor)
+        -- switchItemTable picks the page from the previous table's layout;
+        -- with the new layout in place, follow the anchor to its real page.
+        local menu = self.menu
+        if menu and menu.page_items then
+            for page, items in ipairs(menu.page_items) do
+                local found = false
+                for _, index in ipairs(items) do
+                    if index == anchor then
+                        found = true
+                        break
+                    end
+                end
+                if found then
+                    if menu.page ~= page then
+                        menu:onGotoPage(page)
+                    end
+                    break
+                end
+            end
         end
-    elseif work.authors and work.authors ~= "" then
-        rows[#rows + 1] = { _("Author"), work.authors }
+    else
+        self:pushRows(title, rows)
+    end
+end
+
+-- ---------------------------------------------------------------------------
+-- Work actions: kudos, bookmark, subscribe, Marked for Later
+-- ---------------------------------------------------------------------------
+--
+-- Everything below is the same form post the website makes. The work page
+-- carries the current state (bookmarked? subscribed? on the read-later list?)
+-- and the pseud a bookmark belongs to; one fetch of it fills those. The CSRF
+-- token comes from /token_dispenser.json, which is small and is cached until
+-- the session cookie changes. AO3's work-page tokens are form-scoped, so a
+-- token copied from one form can be rejected by another (a live kudos post
+-- proved that).
+--
+-- No UI lives here: `workAction` reports through `on_done(result, err)` and a
+-- short InfoMessage, so the work-page buttons can be drawn independently.
+
+local WORK_ACTION_DONE = {
+    kudos = _("Kudos left."),
+    bookmark = _("Bookmarked."),
+    unbookmark = _("Bookmark removed."),
+    subscribe = _("Subscribed."),
+    unsubscribe = _("Unsubscribed."),
+    mark_for_later = _("Added to Marked for Later."),
+    mark_as_read = _("Removed from Marked for Later."),
+}
+
+local REDIRECT_OK = {
+    [301] = true, [302] = true, [303] = true, [307] = true, [308] = true,
+}
+
+local function jsonField(body, key)
+    if not body then return nil end
+    local value = body:match('"' .. key .. '"%s*:%s*"([^"]*)"')
+    return value and value:gsub("\\(.)", "%1")
+end
+
+local function jsonNumber(body, key)
+    if not body then return nil end
+    return body:match('"' .. key .. '"%s*:%s*(%d+)')
+end
+
+local function jsonErrors(body)
+    if not body then return nil end
+    local list = body:match('"errors"%s*:%s*%[(.-)%]')
+    if not list then return jsonField(body, "error_message") end
+    local messages = {}
+    for message in list:gmatch('"([^"]*)"') do
+        messages[#messages + 1] = message:gsub("\\(.)", "%1")
+    end
+    return #messages > 0 and table.concat(messages, " ") or nil
+end
+
+function Ao3:workActionState(work)
+    if not work or not work.id or not self.work_actions then return nil end
+    return self.work_actions[tostring(work.id)]
+end
+
+-- Bookmark and subscription ids belong to one account. Drop them whenever
+-- the session changes, so logging out and in as someone else cannot reuse the
+-- previous user's ids.
+function Ao3:clearWorkActionCache()
+    self.work_actions = nil
+    self.csrf_token = nil
+    self.csrf_fingerprint = nil
+end
+
+function Ao3:rememberWorkState(work, state)
+    self.work_actions = self.work_actions or {}
+    self.work_actions[tostring(work.id)] = state
+end
+
+-- The token endpoint exists exactly for cached pages: it is small, and its
+-- token is valid for this session. Cache it; a changed session cookie means a
+-- new token is needed.
+function Ao3:csrfToken(force)
+    self.csrf_fingerprint = self.csrf_fingerprint or ""
+    local fingerprint = (self.session and self.session.cookies
+        and self.session.cookies._otwarchive_session) or ""
+    if not force and self.csrf_token and self.csrf_fingerprint == fingerprint then
+        return self.csrf_token
+    end
+    local body, err = self:httpRequest(Account.TOKEN_URL, {
+        headers = {
+            ["Accept"] = "application/json, text/javascript, */*; q=0.01",
+        },
+        redirect = true,
+    }, 30)
+    if not body then return nil, err end
+    local token = Account.parseToken(body)
+    if not token then
+        return nil, _("Could not read a form token from AO3. Try again in a moment.")
+    end
+    self.csrf_token = token
+    self.csrf_fingerprint = fingerprint
+    return token
+end
+
+-- One fetch of the work page, reused for every action on that work. `force`
+-- is for the rare case where a form id has gone stale.
+function Ao3:ensureWorkState(work, force)
+    local id = tostring(work and work.id or "")
+    if not id:match("^%d+$") then
+        return nil, _("This work has no AO3 id.")
+    end
+    if not force and self.work_actions and self.work_actions[id] then
+        return self.work_actions[id]
+    end
+    local html, err = self:fetchHtml(Account.workUrl(id), 25)
+    if not html then return nil, err end
+    local state = Account.parseWorkActions(html)
+    if not state then
+        return nil, _("Could not read the work's AO3 page.")
+    end
+    state.work_id = id
+    self:rememberWorkState(work, state)
+    return state
+end
+
+-- Exactly one form post, no UI. Returns a result table on success (with ids
+-- AO3 sent back) or nil, message, details.
+function Ao3:performWorkAction(work, action, opts)
+    opts = opts or {}
+    if not Account.isSignedIn(self.session) then
+        return nil, _("Sign in to AO3 first.")
+    end
+    local id = tostring(work and work.id or "")
+    if not id:match("^%d+$") then
+        return nil, _("This work has no AO3 id.")
     end
 
-    add_details(details_rest)
+    local state
+    if action == "bookmark" or action == "unbookmark" or action == "unsubscribe" then
+        local err
+        state, err = self:ensureWorkState(work)
+        if not state then return nil, err end
 
-    -- Sits on top of the list; closing it drops the reader back on the
-    -- results instead of the file manager.
-    UIManager:show(KeyValuePage:new{
-        title = work.title,
-        kv_pairs = rows,
-    })
+        if action == "bookmark" then
+            if state.bookmark.bookmarked then
+                return nil, _("You have already bookmarked this work."),
+                    { already = true }
+            end
+            if not state.bookmark.available then
+                return nil, _("AO3 did not show a bookmark form. Sign in again.")
+            end
+            -- A bookmark needs a pseud. AO3 renders the default one in the
+            -- form; use it unless the caller chose another.
+            opts.pseud_id = opts.pseud_id or state.bookmark.pseud_id
+            if not opts.pseud_id then
+                return nil, _("Could not read your AO3 pseud. Reload the work and try again.")
+            end
+        elseif action == "unbookmark" then
+            opts.bookmark_id = opts.bookmark_id or state.bookmark.id
+            if not opts.bookmark_id then
+                local refresh_err
+                state, refresh_err = self:ensureWorkState(work, true)
+                if not state then return nil, refresh_err end
+                opts.bookmark_id = state.bookmark.id
+            end
+            if not opts.bookmark_id then
+                return nil, _("This work is not bookmarked.")
+            end
+        elseif action == "unsubscribe" then
+            opts.subscription_id = opts.subscription_id or state.subscribe.id
+            if not opts.subscription_id then
+                local refresh_err
+                state, refresh_err = self:ensureWorkState(work, true)
+                if not state then return nil, refresh_err end
+                opts.subscription_id = state.subscribe.id
+            end
+            if not opts.subscription_id then
+                return nil, _("You are not subscribed to this work.")
+            end
+            opts.username = opts.username or state.subscribe.username
+        end
+    end
+
+    if action == "subscribe" or action == "unsubscribe" then
+        opts.username = opts.username or self.session.username
+        if not opts.username then
+            return nil, _("Could not read your AO3 name. Sign in again.")
+        end
+    end
+
+    local token, token_err = self:csrfToken()
+    if not token then return nil, token_err end
+
+    local url, body = Account.workActionRequest(action, id, token, opts)
+    if not url then return nil, _("AO3 did not offer that action for this work.") end
+
+    local accept = "text/html, */*;q=0.8"
+    if action == "kudos" then
+        accept = "text/javascript, application/javascript, */*;q=0.8"
+    elseif action == "subscribe" or action == "unsubscribe" then
+        accept = "application/json, */*;q=0.8"
+    end
+
+    local response, err, code, headers = self:httpRequest(url, {
+        method = "POST",
+        body = body,
+        -- Follow nothing: a redirect already says whether AO3 accepted the
+        -- form, and following it would fetch a whole work page for nothing.
+        redirect = false,
+        -- Never replay a form post. A retried 403 would leave duplicate kudos
+        -- or create the same bookmark twice.
+        retry_on_403 = false,
+        return_error_body = true,
+        headers = {
+            ["Accept"] = accept,
+            ["Content-Type"] = "application/x-www-form-urlencoded",
+            ["Referer"] = Account.workUrl(id),
+            ["Origin"] = Account.BASE_URL,
+        },
+    }, 30)
+
+    if not code then return nil, err end
+
+    -- A stale form token should not wedge every later action. Drop it so the
+    -- next tap fetches a fresh one; do not retry this post automatically.
+    if code == 422 and response then
+        local lower = response:lower()
+        if lower:find("csrf", 1, true)
+            or lower:find("authenticity", 1, true) then
+            self.csrf_token = nil
+            self.csrf_fingerprint = nil
+            return nil, _("AO3 rejected the form token. Tap again."),
+                { code = code }
+        end
+    end
+
+    local result
+    if action == "kudos" then
+        if code >= 200 and code < 300 then
+            result = { action = action, done = true }
+        elseif code == 422 then
+            local message = jsonField(response, "error_message")
+                or _("AO3 did not accept the kudos.")
+            if message:lower():find("already left kudos", 1, true) then
+                result = {
+                    action = action, done = true, already = true,
+                    message = message,
+                }
+            else
+                return nil, message, { code = code }
+            end
+        else
+            return nil, err or _("AO3 did not accept the kudos."), { code = code }
+        end
+    elseif action == "bookmark" then
+        if REDIRECT_OK[code] then
+            local location = (headers and headers["location"]) or ""
+            result = {
+                action = action, done = true,
+                bookmark_id = location:match("/bookmarks/(%d+)"),
+                pseud_id = opts.pseud_id,
+            }
+        else
+            return nil, Account.flashError(response)
+                or _("AO3 did not create the bookmark."), { code = code }
+        end
+    elseif action == "unbookmark" then
+        if REDIRECT_OK[code] or (code >= 200 and code < 300) then
+            result = { action = action, done = true, bookmark_id = opts.bookmark_id }
+        else
+            return nil, err or _("AO3 did not remove the bookmark."), { code = code }
+        end
+    elseif action == "subscribe" then
+        if code == 201 or code == 200 then
+            result = {
+                action = action, done = true,
+                subscription_id = jsonNumber(response, "item_id"),
+            }
+        elseif code == 422 then
+            local message = jsonErrors(response)
+                or _("AO3 did not create the subscription.")
+            if message:lower():find("already", 1, true) then
+                result = {
+                    action = action, done = true, already = true,
+                    message = message,
+                }
+            else
+                return nil, message, { code = code }
+            end
+        else
+            return nil, err or _("AO3 did not create the subscription."),
+                { code = code }
+        end
+    elseif action == "unsubscribe" then
+        if code >= 200 and code < 300 then
+            result = { action = action, done = true, subscription_id = opts.subscription_id }
+        elseif code == 422 then
+            return nil, jsonErrors(response) or _("AO3 did not remove the subscription."),
+                { code = code }
+        else
+            return nil, err or _("AO3 did not remove the subscription."), { code = code }
+        end
+    elseif action == "mark_for_later" or action == "mark_as_read" then
+        if REDIRECT_OK[code] or (code >= 200 and code < 300) then
+            result = { action = action, done = true }
+        else
+            return nil, err or _("AO3 did not update Marked for Later."), { code = code }
+        end
+    else
+        return nil, _("Unknown work action.")
+    end
+
+    self:applyWorkActionResult(work, action, result)
+    return result
+end
+
+-- Keep the cached work state in step with what just happened, so the next
+-- button press does not need another page load.
+function Ao3:applyWorkActionResult(work, action, result)
+    local state = self:workActionState(work)
+    if not state then return end
+    if action == "kudos" then
+        state.kudos_done = true
+    elseif action == "bookmark" then
+        state.bookmark.available = true
+        state.bookmark.bookmarked = true
+        state.bookmark.id = result.bookmark_id or state.bookmark.id
+        state.bookmark.pseud_id = result.pseud_id or state.bookmark.pseud_id
+    elseif action == "unbookmark" then
+        state.bookmark.bookmarked = false
+        state.bookmark.id = nil
+    elseif action == "subscribe" then
+        state.subscribe.available = true
+        state.subscribe.subscribed = true
+        state.subscribe.id = result.subscription_id or state.subscribe.id
+    elseif action == "unsubscribe" then
+        state.subscribe.subscribed = false
+        state.subscribe.id = nil
+    elseif action == "mark_for_later" then
+        state.marked_for_later = true
+    elseif action == "mark_as_read" then
+        state.marked_for_later = false
+    end
+end
+
+-- Async wrapper for UI: network check, spinner, one request, a short result.
+-- `on_done(result, err, details)` is called on the UI thread. `opts.label`
+-- replaces the spinner text; `opts.silent` suppresses the result InfoMessage
+-- when the caller wants to update its own row instead.
+function Ao3:workAction(work, action, opts, on_done)
+    if type(opts) == "function" then opts, on_done = {}, opts end
+    opts = opts or {}
+
+    if not Account.isSignedIn(self.session) then
+        UIManager:show(InfoMessage:new{
+            text = _("Sign in to AO3 to use kudos, bookmarks and subscriptions."),
+        })
+        if on_done then pcall(on_done, nil, _("Sign in to AO3 first.")) end
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local Trapper = require("ui/trapper")
+        local result, err, details
+        Trapper:wrap(function()
+            Trapper:info(opts.label or _("Sending to AO3…"))
+            local ok, r, e, d = pcall(function()
+                return self:performWorkAction(work, action, opts)
+            end)
+            if ok then
+                result, err, details = r, e, d
+            else
+                err = tostring(r)
+            end
+            Trapper:reset()
+        end)
+        NetworkMgr:afterWifiAction()
+
+        if result then
+            if on_done then pcall(on_done, result) end
+            if not opts.silent then
+                UIManager:show(InfoMessage:new{
+                    text = result.message or WORK_ACTION_DONE[action] or _("Done."),
+                })
+            end
+        else
+            if on_done then pcall(on_done, nil, err, details) end
+            if not opts.silent then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("AO3 refused:\n%1"), err or _("unknown error")),
+                })
+            end
+        end
+    end)
+end
+
+-- Load the work page once and cache its action state. The UI can call this
+-- when it needs to draw the buttons; the form token is fetched separately and
+-- cached for the session.
+function Ao3:loadWorkActionState(work, on_done)
+    if not Account.isSignedIn(self.session) then
+        UIManager:show(InfoMessage:new{
+            text = _("Sign in to AO3 to use kudos, bookmarks and subscriptions."),
+        })
+        if on_done then pcall(on_done, nil, _("Sign in to AO3 first.")) end
+        return
+    end
+    self:fetchPage(Account.workUrl(work.id), function(html)
+        local state = Account.parseWorkActions(html)
+        if not state then
+            return nil, _("Could not read the work's AO3 page.")
+        end
+        state.work_id = tostring(work.id)
+        self:rememberWorkState(work, state)
+        return state
+    end, _("Loading work actions…"), function(state)
+        if on_done then pcall(on_done, state) end
+    end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -1061,34 +2015,70 @@ function Ao3:downloadWork(id, title)
     local tmp = dir .. "/" .. id .. ".html.part"
     local old = findCachedWork(dir, id)
 
-    local file, file_err = io.open(tmp, "wb")
-    if not file then
+    local probe, file_err = io.open(tmp, "wb")
+    if not probe then
         return nil, T(_("Cannot write to %1: %2"), dir, tostring(file_err))
     end
+    probe:close()
 
     local url = DOWNLOAD_HOST .. "/downloads/" .. id .. "/work.html"
-    socketutil:set_timeout(30, 300)
-    local ok, code, headers, status = pcall(function()
-        return socket.skip(1, http.request{
-            url = url,
-            method = "GET",
-            headers = {
-                ["User-Agent"] = UA,
-                ["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                ["Accept-Language"] = "en-US,en;q=0.9",
-                ["Referer"] = BASE_URL .. "/works/" .. id,
-                ["Cookie"] = "view_adult=true",
-            },
-            sink = ltn12.sink.file(file),
-            redirect = true,
-        })
-    end)
-    socketutil:reset_timeout()
-    pcall(function() file:close() end)
+
+    -- Stream to disk, but follow redirects here so the session cookie is
+    -- recomputed for each host (LuaSocket would copy the original Cookie).
+    local function fetch(request_url)
+        local file = io.open(tmp, "wb")
+        if not file then
+            return false, T(_("Cannot write to %1"), dir)
+        end
+        socketutil:set_timeout(30, 300)
+        local ok, code, headers, status = pcall(function()
+            return socket.skip(1, http.request{
+                url = request_url,
+                method = "GET",
+                headers = {
+                    ["User-Agent"] = UA,
+                    ["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    ["Accept-Language"] = "en-US,en;q=0.9",
+                    ["Referer"] = BASE_URL .. "/works/" .. id,
+                    -- Restricted works need the signed-in session; AO3's
+                    -- FAQ says scripts must send the session cookies.
+                    ["Cookie"] = self:cookieHeader(request_url),
+                },
+                sink = ltn12.sink.file(file),
+                redirect = false,
+            })
+        end)
+        socketutil:reset_timeout()
+        pcall(function() file:close() end)
+        return ok, code, headers, status
+    end
+
+    local ok, code, headers, status
+    local request_url = url
+    for hop = 1, MAX_REDIRECTS + 1 do
+        ok, code, headers, status = fetch(request_url)
+        if not ok then break end
+        if REDIRECT_CODES[code] and headers and headers["location"]
+            and hop <= MAX_REDIRECTS then
+            local next_url = socketurl.absolute(request_url, headers["location"])
+            if not next_url
+                or (request_url:match("^https:") and next_url:match("^http:")) then
+                os.remove(tmp)
+                return nil, _("AO3 redirected the download to an unsafe address.")
+            end
+            request_url = next_url
+        else
+            break
+        end
+    end
 
     if not ok then
         os.remove(tmp)
         return nil, tostring(code)
+    end
+    if REDIRECT_CODES[code] then
+        os.remove(tmp)
+        return nil, _("AO3 redirected the download too many times.")
     end
     if code ~= 200 then
         os.remove(tmp)
@@ -1130,10 +2120,167 @@ function Ao3:downloadWork(id, title)
     return final
 end
 
+-- ---------------------------------------------------------------------------
+-- Opening a work in the reader
+-- ---------------------------------------------------------------------------
+--
+-- The plugin's menu stays in UIManager's stack underneath the reader, so
+-- closing the reader reveals the AO3 screen the user left. ReaderUI's own
+-- exit paths skip that and jump to the file manager, so they are hooked for
+-- works opened from here.
+
+function Ao3:openWorkReader(path, title)
+    local ReaderUI = require("apps/reader/readerui")
+    ReaderUI:showReader(path, nil, nil, nil, function()
+        -- ReaderUI.instance is assigned after after_open_callback returns.
+        UIManager:nextTick(function()
+            self:installReaderHooks(require("apps/reader/readerui").instance, title)
+        end)
+    end)
+end
+
+function Ao3:installReaderHooks(reader)
+    if not reader or not reader.document then return end
+    local doc = reader.document
+
+    -- Chapters-only, flat TOC (see AuthorPage.cleanToc).
+    if doc.getToc and not doc.ao3_toc_cleaned then
+        local get_toc = doc.getToc
+        doc.getToc = function(this)
+            return AuthorPage.cleanToc(get_toc(this))
+        end
+        doc.ao3_toc_cleaned = true
+        -- ReaderToc fills and caches its table on the first page update, which
+        -- happens before this callback. Drop that cache so the next build asks
+        -- the document again and gets the cleaned table.
+        if reader.toc and reader.toc.resetToc then
+            reader.toc:resetToc()
+        end
+    end
+
+    local function backToPlugin()
+        if not reader.document then return end
+        -- ReaderUI:onHome suspends repaints before closing; do the same here
+        -- so the revealed menu repaints normally.
+        if UIManager.setSuspendRepaints then
+            UIManager:setSuspendRepaints(false)
+        end
+        reader:onClose()
+        local menu = self.menu
+        if menu and UIManager.isWidgetShown and not UIManager:isWidgetShown(menu) then
+            UIManager:show(menu)
+        end
+    end
+
+    -- Back key / Back gesture (through Event "Home"): return to AO3.
+    reader.onHome = function()
+        backToPlugin()
+        return true
+    end
+
+    -- KOReader's TOC menu draws letter shortcut boxes when the device reports
+    -- a keyboard (the emulator does) and packs rows tightly. The TOC is for
+    -- touch, so hide the shortcuts and give the rows a little more air by
+    -- showing three fewer per page.
+    local toc = reader.toc
+    if toc and toc.onShowToc then
+        local on_show_toc = toc.onShowToc
+        toc.onShowToc = function(toc_self, ...)
+            local ret = on_show_toc(toc_self, ...)
+            local menu = toc_self.toc_menu
+            if menu then
+                local changed = false
+                if menu.is_enable_shortcut then
+                    menu.is_enable_shortcut = false
+                    changed = true
+                end
+                local per_page = menu.items_per_page or 14
+                local padded = math.max(7, per_page - 3)
+                if padded ~= per_page then
+                    menu.items_per_page = padded
+                    changed = true
+                end
+                if changed then
+                    menu:updateItems(menu.page or 1)
+                    if menu.dimen and UIManager.setDirty then
+                        UIManager:setDirty(menu, "ui")
+                    end
+                end
+            end
+            return ret
+        end
+    end
+
+    -- A visible entry in the reader menu's Navigation tab. It belongs at the
+    -- bottom of that tab's first page, so insert it into the menu order rather
+    -- than relying on the orphan fallback, which appends to the end.
+    local ok, order = pcall(require, "ui/elements/reader_menu_order")
+    if ok and type(order) == "table" and type(order.navi) == "table" then
+        local present = false
+        for _, key in ipairs(order.navi) do
+            if key == "ao3_back_to_browser" then present = true break end
+        end
+        if not present then
+            for index, key in ipairs(order.navi) do
+                if key == "skim_to" then
+                    table.insert(order.navi, index + 1, "ao3_back_to_browser")
+                    break
+                end
+            end
+        end
+    end
+
+    if reader.menu and reader.menu.registerToMainMenu then
+        reader.menu:registerToMainMenu{
+            name = "ao3_back_to_browser",
+            addToMainMenu = function(widget, menu_items)
+                menu_items.ao3_back_to_browser = {
+                    text = _("Back to AO3"),
+                    sorting_hint = "navi",
+                    callback = function()
+                        if reader.menu and reader.menu.onCloseReaderMenu then
+                            reader.menu:onCloseReaderMenu()
+                        end
+                        backToPlugin()
+                    end,
+                }
+            end,
+        }
+        reader.menu.tab_item_table = nil
+    end
+
+    -- The end-of-work dialog gains the same choice; the stock "File browser"
+    -- button keeps doing what it says.
+    local status = reader.status
+    if status and status.onEndOfBook then
+        local on_end = status.onEndOfBook
+        status.onEndOfBook = function(status_self)
+            on_end(status_self)
+            local dialog = UIManager.getTopmostVisibleWidget
+                and UIManager:getTopmostVisibleWidget()
+            if dialog and dialog.name == "end_document" and dialog.buttons
+                    and not dialog.ao3_back_added then
+                dialog.ao3_back_added = true
+                dialog.buttons[#dialog.buttons + 1] = {{
+                    text = _("Back to AO3"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        backToPlugin()
+                    end,
+                }}
+                if dialog.reinit then
+                    dialog:reinit()
+                    UIManager:setDirty(dialog, "ui")
+                end
+            end
+        end
+    end
+end
+
 function Ao3:readWork(id, title, refresh)
     local cached = findCachedWork(getDownloadDir(), id)
     if cached and not refresh then
-        require("apps/reader/readerui"):showReader(cached)
+        self:openWorkReader(cached, title)
         return
     end
 
@@ -1153,7 +2300,7 @@ function Ao3:readWork(id, title, refresh)
         NetworkMgr:afterWifiAction()
 
         if path then
-            require("apps/reader/readerui"):showReader(path)
+            self:openWorkReader(path, title)
         else
             UIManager:show(InfoMessage:new{
                 text = T(_("Could not open the work:\n%1"), err or _("unknown error")),
@@ -1282,16 +2429,16 @@ end
 
 -- Paging inside a listing or a long letter must not retain each previous
 -- window's item table on Menu's navigation stack.
-function Ao3:replaceRows(title, rows)
+function Ao3:replaceRows(title, rows, itemnumber)
     local menu = self.menu
     if not menu then return end
-    menu:switchItemTable(title, rows, 1)
+    menu:switchItemTable(title, rows, itemnumber or 1)
     menu.ao3_title = title
 end
 
 function Ao3:homeRows()
     local downloads = self:listDownloads()
-    return {
+    local rows = {
         { text = _("Browse"), bold = true },
         {
             text = _("Latest works"),
@@ -1328,22 +2475,43 @@ function Ao3:homeRows()
                 self:tagDialog()
             end,
         },
-        { text = _("Library"), bold = true },
-        {
-            text = _("Downloads"),
-            mandatory = #downloads > 0 and T(_("%1 saved"), #downloads) or _("None yet"),
-            action = function()
-                self:showDownloads()
-            end,
-        },
-        {
-            text = _("Open work"),
-            mandatory = _("URL or ID"),
-            action = function()
-                self:workDialog()
-            end,
-        },
+        { text = _("Account"), bold = true },
     }
+
+    if Account.isSignedIn(self.session) then
+        rows[#rows + 1] = {
+            text = T(_("Signed in as %1"), self.session.username),
+            mandatory = _("Bookmarks, history, subscriptions"),
+            action = function()
+                self:showAccount()
+            end,
+        }
+    else
+        rows[#rows + 1] = {
+            text = _("Sign in"),
+            mandatory = _("Bookmarks, history, subscriptions"),
+            action = function()
+                self:loginDialog()
+            end,
+        }
+    end
+
+    rows[#rows + 1] = { text = _("Library"), bold = true }
+    rows[#rows + 1] = {
+        text = _("Downloads"),
+        mandatory = #downloads > 0 and T(_("%1 saved"), #downloads) or _("None yet"),
+        action = function()
+            self:showDownloads()
+        end,
+    }
+    rows[#rows + 1] = {
+        text = _("Open work"),
+        mandatory = _("URL or ID"),
+        action = function()
+            self:workDialog()
+        end,
+    }
+    return rows
 end
 
 -- The complete fandom list ships with the plugin, so this screen opens
@@ -1485,7 +2653,7 @@ function Ao3:showDownloads()
             text = item.title,
             mandatory = item.id and ("#" .. item.id) or nil,
             action = function()
-                require("apps/reader/readerui"):showReader(item.path)
+                self:openWorkReader(item.path, item.title)
             end,
         }
     end
@@ -1690,6 +2858,9 @@ end
 -- ---------------------------------------------------------------------------
 
 function Ao3:init()
+    -- A saved session is read from disk, not verified online. Browsing works
+    -- as before when there is none.
+    self.session = Account.load()
     self.ui.menu:registerToMainMenu(self)
 end
 

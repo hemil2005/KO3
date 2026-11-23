@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+  <body class="logged-in">
+    <div id="greeting">
+      <a href="/users/testuser/pseuds/testuser">Hi, testuser!</a>
+    </div>
+
+    <ul class="work navigation actions">
+      <li class="bookmark">
+        <a class="bookmark_form_placement_open" href="#bookmark-form">Bookmark</a>
+      </li>
+      <li class="mark">
+        <form class="button_to" method="post" action="/works/123/mark_for_later">
+          <input type="hidden" name="_method" value="patch" autocomplete="off" />
+          <input type="hidden" name="authenticity_token" value="work-token-abc" autocomplete="off" />
+          <input type="submit" value="Mark for Later" />
+        </form>
+      </li>
+      <li class="subscribe">
+        <form class="ajax-create-destroy" id="new_subscription" action="/users/testuser/subscriptions" accept-charset="UTF-8" method="post">
+          <input type="hidden" name="subscription[subscribable_id]" value="123" />
+          <input type="hidden" name="subscription[subscribable_type]" value="Work" />
+          <input type="submit" name="commit" value="Subscribe" />
+        </form>
+      </li>
+    </ul>
+
+    <div id="feedback" class="feedback">
+      <form id="new_kudo" action="/kudos" method="post">
+        <input type="hidden" name="kudo[commentable_id]" value="123" />
+        <input type="hidden" name="kudo[commentable_type]" value="Work" />
+        <input type="hidden" name="authenticity_token" value="work-token-abc" />
+        <input type="submit" id="kudo_submit" value="Kudos" />
+      </form>
+
+      <div id="bookmark_form_placement" class="wrapper toggled">
+        <div class="post bookmark" id="bookmark-form">
+          <h3 class="landmark heading">Bookmark</h3>
+          <form id="new_bookmark" action="/works/123/bookmarks" accept-charset="UTF-8" method="post">
+            <input type="hidden" name="bookmark[pseud_id]" value="3" />
+            <textarea name="bookmark[bookmarker_notes]" id="bookmark_notes"></textarea>
+            <input type="text" name="bookmark[tag_string]" />
+          </form>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

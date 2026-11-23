@@ -181,6 +181,58 @@ function AuthorPage.parseWorkNode(node)
     }
 end
 
+--[[--
+AO3's download file itself contains the extra headings this clean-up removes.
+It hides `h2.toc-heading` elements for Calibre and puts the work title in an
+`h1`, so crengine builds a two-level TOC:
+
+    Preface
+    <work title>
+      Chapter 1
+      Chapter 2
+
+That is what the reader showed as two entries with subentries, collapsed by
+default. The useful index is just the chapters, so drop the Preface entry and
+the work-title wrapper, then flatten what is left. A flat TOC has no
+subentries, so KOReader shows every chapter without expanding anything.
+]]--
+function AuthorPage.cleanToc(toc)
+    if type(toc) ~= "table" then return toc end
+    -- AO3 marks the metadata block with hidden headings for Calibre. Depending
+    -- on the work they reach crengine as "Preface", nothing at all, or just a
+    -- dash, so treat all three as the same metadata entry.
+    local function is_metadata_title(label)
+        local text = trim(label)
+        if text == "" then return true end
+        if text:lower() == "preface" then return true end
+        return text:match("^[%-–—%s%.]+$") ~= nil
+    end
+
+    local cleaned = {}
+    for _, item in ipairs(toc) do
+        if type(item) == "table" then
+            if not is_metadata_title(item.title or "") then
+                local copy = {}
+                for key, value in pairs(item) do copy[key] = value end
+                cleaned[#cleaned + 1] = copy
+            end
+        end
+    end
+
+    -- After the Preface, the first entry that has children is the work title
+    -- wrapping the chapter list. Removing it promotes the chapters to the top
+    -- level. A single-entry TOC (a one-chapter work with no chapter heading)
+    -- has no children, so its title is kept.
+    if #cleaned >= 2 and (cleaned[2].depth or 0) > (cleaned[1].depth or 0) then
+        table.remove(cleaned, 1)
+    end
+
+    for _, item in ipairs(cleaned) do
+        item.depth = 0
+    end
+    return cleaned
+end
+
 -- Works and bookmark lists use pagy pagination; the series list still uses
 -- the legacy markup. Accept both.
 function AuthorPage.pagination(root)
@@ -256,6 +308,92 @@ end
 
 -- Bookmarks carry the bookmarked work's header directly, so the shared work
 -- parser reads them. Series bookmarks (series-NNN) become series entries.
+-- Subscriptions can point at a work, a series or a user. AO3 uses one
+-- `li.subscription` per entry; the first heading link is the subscribed
+-- thing. Work entries often carry the usual blurb header, so the shared work
+-- parser can fill title/author/summary when it can.
+function AuthorPage.parseSubscriptions(html)
+    local ok, root = pcall(htmlparser.parse, html, 5000)
+    if not ok or not root then
+        return nil, _("Could not parse the AO3 page.")
+    end
+    local items = {}
+    for _, li in ipairs(root:select("li.subscription")) do
+        local link
+        for _, heading in ipairs({ "h4.heading", "h3.heading", "h5.heading" }) do
+            for _, a in ipairs(li:select(heading .. " a")) do
+                local href = a.attributes.href or ""
+                if a.attributes.rel ~= "author"
+                    and (href:match("/works/%d+") or href:match("/series/%d+")
+                        or href:match("/users/")) then
+                    link = a
+                    break
+                end
+            end
+            if link then break end
+        end
+
+        if link then
+            local href = link.attributes.href or ""
+            local title = plain(link)
+            local work_id = href:match("/works/(%d+)")
+            local series_id = href:match("/series/(%d+)")
+            local user = href:match("/users/([^/%?#\"]+)")
+            local subscribed = plain(first(li:select("p.datetime")))
+                or plain(first(li:select("dd.subscribed")))
+
+            if work_id then
+                local work = AuthorPage.parseWorkNode(li) or {}
+                -- Subscription entries may keep the author link in h5 rather
+                -- than the usual h4, so fill it in from any rel=author link.
+                if not work.author_names then
+                    local names, urls = {}, {}
+                    for _, a in ipairs(li:select("a[rel='author']")) do
+                        local name = plain(a)
+                        if name ~= "" then
+                            names[#names + 1] = name
+                            local href = a.attributes.href or ""
+                            if href ~= "" then urls[#urls + 1] = href end
+                        end
+                    end
+                    if #names > 0 then
+                        work.authors = table.concat(names, ", ")
+                        work.author_names = names
+                        work.author_urls = #urls > 0 and urls or nil
+                    end
+                end
+                work.kind = "work"
+                work.id = work_id
+                work.title = title ~= "" and title or work.title
+                items[#items + 1] = work
+            elseif series_id then
+                items[#items + 1] = {
+                    kind = "series",
+                    id = series_id,
+                    title = title,
+                    url = "/series/" .. series_id,
+                    updated = subscribed,
+                }
+            elseif user then
+                items[#items + 1] = {
+                    kind = "user",
+                    name = util.htmlEntitiesToUtf8(user),
+                    title = title ~= "" and title or user,
+                    subscribed = subscribed,
+                }
+            end
+        end
+    end
+
+    local count
+    for _, h in ipairs(root:select("h2.heading")) do
+        count = plain(h):match("([%d,]+) Subscriptions?")
+        if count then break end
+    end
+    local pag = AuthorPage.pagination(root)
+    return { items = items, count = count, next_url = pag.next_url, prev_url = pag.prev_url }
+end
+
 function AuthorPage.parseBookmarks(html)
     local ok, root = pcall(htmlparser.parse, html, 5000)
     if not ok or not root then

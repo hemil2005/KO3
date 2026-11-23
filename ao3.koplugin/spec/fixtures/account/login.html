@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="csrf-param" content="authenticity_token" />
+    <meta name="csrf-token" content="meta-token-value" />
+    <title>Log In | Archive of Our Own</title>
+  </head>
+  <body class="logged-out">
+    <div id="login" class="dropdown">
+      <div id="small_login" class="simple login">
+        <form class="new_user" id="new_user_session_small" action="/users/login" accept-charset="UTF-8" method="post">
+          <input type="hidden" name="authenticity_token" value="form-token-123" autocomplete="off" />
+          <dl>
+            <dt><label for="user_session_login_small">Username or email:</label></dt>
+            <dd><input autocomplete="on" id="user_session_login_small" type="text" name="user[login]" /></dd>
+            <dt><label for="user_session_password_small">Password:</label></dt>
+            <dd><input id="user_session_password_small" type="password" name="user[password]" /></dd>
+          </dl>
+          <p class="submit actions">
+            <input type="submit" name="commit" value="Log In" />
+          </p>
+        </form>
+      </div>
+    </div>
+  </body>
+</html>

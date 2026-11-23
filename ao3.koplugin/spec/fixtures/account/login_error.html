@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+  <body class="logged-out">
+    <div id="flash">
+      <div class="flash error">Invalid username or password.</div>
+    </div>
+    <div id="small_login" class="simple login">
+      <form class="new_user" id="new_user_session_small" action="/users/login" accept-charset="UTF-8" method="post">
+        <input type="hidden" name="authenticity_token" value="form-token-456" autocomplete="off" />
+        <input id="user_session_login_small" type="text" name="user[login]" />
+        <input id="user_session_password_small" type="password" name="user[password]" />
+      </form>
+    </div>
+  </body>
+</html>
