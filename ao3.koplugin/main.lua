@@ -3418,10 +3418,12 @@ function Ao3:init()
 end
 
 -- KOReader appends plugin rows to the end of the tab they name. The Tools tab
--- is two pages on a 600px screen, so appending would hide AO3 on page 2. Put
--- it in the built-in order at the bottom of page 1, just before Profiles,
--- which moves to page 2. The order table is shared with MenuSorter, so
--- inserting here affects both the file manager and reader menus.
+-- is two pages on a 600px screen, so appending (or sitting before Profiles)
+-- hides KO3 on page 2. Insert it in the built-in order near the top instead:
+-- fourth row, before Statistics. The order table is shared with MenuSorter,
+-- so inserting here affects both the file manager and reader menus.
+local TOOLS_POSITION = 4
+
 local function placeOnToolsTab()
     for _, module in ipairs({
         "ui/elements/filemanager_menu_order",
@@ -3435,16 +3437,7 @@ local function placeOnToolsTab()
                     table.remove(tools, i)
                 end
             end
-            local at
-            for i, id in ipairs(tools) do
-                if id == "profiles" then at = i break end
-            end
-            if not at then
-                for i, id in ipairs(tools) do
-                    if id == "more_tools" then at = i break end
-                end
-            end
-            table.insert(tools, at or (#tools + 1), "ao3_browser")
+            table.insert(tools, math.min(TOOLS_POSITION, #tools + 1), "ao3_browser")
         end
     end
 end

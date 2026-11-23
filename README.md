@@ -39,7 +39,7 @@ details captured from a live work.
 | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) | ![Account page](screenshots/28-account.png) |
 | ![Chapter-only TOC](screenshots/14-reader-toc.png) | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) |
 | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) | ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) |
-| ![KO3 at the bottom of Tools](screenshots/34-tools-menu.png) | |
+| ![KO3 on the first Tools page](screenshots/34-tools-menu.png) | |
 
 ## Install
 
@@ -404,8 +404,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   writing, relay submission and token handling; the four screens render in
   the emulator (`screenshots/31`–`33`, `36`). The relay was tested live end
   to end from `bugreport.lua` (issues #1 and #2, then closed).
-- The KO3 entry is directly on the Tools tab, at the bottom of its first page
-  (`screenshots/34`), not nested under More tools.
+- The KO3 entry is directly on the Tools tab, fourth from the top so it stays
+  on page 1 even when later rows move to page 2 (`screenshots/34`), not nested
+  under More tools.
 - The author tabs: tapping **Bookmarks** opens the author's bookmarked works
   (`screenshots/35`). The title bar's close target is trimmed to the bar so it
   no longer covers the rightmost tab.

@@ -1484,17 +1484,14 @@ describe("AO3 browser", function()
             assert.is_truthy(menu.ao3_browser.callback)
             assert.is_nil(menu.ao3_browser.sub_item_table)
 
-            -- Directly on the Tools tab, at the bottom of its first page:
-            -- in the shared order just before Profiles.
+            -- Directly on the Tools tab, fourth from the top so it stays on
+            -- the first page instead of being pushed to page 2.
             local order = require("ui/elements/reader_menu_order")
-            local at, profiles
+            local at
             for i, id in ipairs(order.tools) do
                 if id == "ao3_browser" then at = i end
-                if id == "profiles" then profiles = i end
             end
-            assert.is_truthy(at)
-            assert.is_truthy(profiles)
-            assert.is_true(at < profiles)
+            assert.are.equal(4, at)
         end)
     end)
 end)
