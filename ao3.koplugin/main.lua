@@ -3238,7 +3238,9 @@ function Ao3:addToMainMenu(menu_items)
     -- One entry, one app. Everything else lives inside the AO3 screen.
     menu_items.ao3_browser = {
         text = _("AO3"),
-        sorting_hint = "more_tools",
+        -- Directly on the Tools tab, below the built-in rows. `more_tools`
+        -- would hide the only entry of the app one level down.
+        sorting_hint = "tools",
         callback = function()
             self:showHome()
         end,
