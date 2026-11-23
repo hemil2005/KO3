@@ -113,9 +113,8 @@ the offline book available.
 **No computer is needed after the first install.** Open
 **Tools → More tools → AO3 → Update plugin**:
 
-1. It reads `manifest.json` from the latest
-   [GitHub Release](https://github.com/hemil2005/KO3/releases/latest), and
-   shows the current version, the new version and the release notes.
+1. It asks GitHub for the latest release and shows the current version, the
+   new version and the release notes (`manifest.json` is the fallback).
 2. **Update** downloads the versioned zip, verifies its SHA-256, unpacks it
    next to the installed copy, and checks that the archive really contains
    the plugin and the version it claims.

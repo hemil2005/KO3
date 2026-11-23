@@ -303,28 +303,29 @@ local function getJson(url, timeout)
     return table.concat(chunks)
 end
 
--- Read the published manifest. The convenience asset URL is cached by
--- GitHub's CDN for a few minutes after a release, so fall back to the API
--- (no token: one small request, well inside the anonymous rate limit).
+-- Read the published manifest. The GitHub API is authoritative and not
+-- affected by the release-asset CDN, which can serve a stale manifest for
+-- minutes after a release. The asset URL is the fallback (it costs no API
+-- quota). Anonymous API use is one small request per check.
 function Updater.fetchManifest(timeout)
-    local body, fetch_err = getJson(Updater.MANIFEST_URL, timeout)
-    local parse_err
-    if body then
-        local manifest
-        manifest, parse_err = Updater.parseManifest(body)
-        if manifest then return manifest end
-    end
-
     local api_body, api_err = getJson(Updater.API_URL, timeout)
+    local parse_err
     if api_body then
         local ok, data = pcall(JSON.decode, api_body)
         if ok then
             local manifest, api_parse_err = Updater.manifestFromRelease(data)
             if manifest then return manifest end
-            parse_err = api_parse_err or parse_err
+            parse_err = api_parse_err
         end
     end
-    return nil, api_err or parse_err or fetch_err
+
+    local body, fetch_err = getJson(Updater.MANIFEST_URL, timeout)
+    if body then
+        local manifest, asset_parse_err = Updater.parseManifest(body)
+        if manifest then return manifest end
+        parse_err = asset_parse_err or parse_err
+    end
+    return nil, parse_err or api_err or fetch_err
 end
 
 -- Download an asset to `dest`. Verifies SHA-256 when the manifest has one.

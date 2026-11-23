@@ -146,19 +146,20 @@ describe("AO3 updater manifest", function()
         }))
     end)
 
-    it("falls back to the API when the asset URL is stale", function()
+    it("prefers the API over the cached asset manifest", function()
         local old_request = http.request
         local old_manifest, old_api = Updater.MANIFEST_URL, Updater.API_URL
         Updater.MANIFEST_URL = "https://example.test/manifest.json"
         Updater.API_URL = "https://example.test/api/latest"
         http.request = function(request)
-            if request.url == Updater.MANIFEST_URL then
-                return 1, 404, {}, "HTTP/1.1 404 Not Found"
+            if request.url == Updater.API_URL then
+                request.sink('{"tag_name":"v2.0.0","body":"From API",'
+                    .. '"assets":[{"name":"ao3.koplugin-2.0.0.zip",'
+                    .. '"browser_download_url":"https://example.test/ao3.zip",'
+                    .. '"digest":"sha256:' .. sha .. '"}]}')
+                return 1, 200, {}, "HTTP/1.1 200 OK"
             end
-            request.sink('{"tag_name":"v2.0.0","body":"From API",'
-                .. '"assets":[{"name":"ao3.koplugin-2.0.0.zip",'
-                .. '"browser_download_url":"https://example.test/ao3.zip",'
-                .. '"digest":"sha256:' .. sha .. '"}]}')
+            request.sink('{"version":"9.9.9","zip_url":"https://example.test/old.zip"}')
             return 1, 200, {}, "HTTP/1.1 200 OK"
         end
         local manifest, err = Updater.fetchManifest()
@@ -168,6 +169,25 @@ describe("AO3 updater manifest", function()
         assert.are.equal("2.0.0", manifest.version)
         assert.are.equal("https://example.test/ao3.zip", manifest.zip_url)
         assert.are.equal(sha, manifest.sha256)
+    end)
+
+    it("falls back to the asset manifest when the API fails", function()
+        local old_request = http.request
+        local old_manifest, old_api = Updater.MANIFEST_URL, Updater.API_URL
+        Updater.MANIFEST_URL = "https://example.test/manifest.json"
+        Updater.API_URL = "https://example.test/api/latest"
+        http.request = function(request)
+            if request.url == Updater.API_URL then
+                return 1, 403, {}, "HTTP/1.1 403 rate limited"
+            end
+            request.sink('{"version":"3.0.0","zip_url":"https://example.test/ao3-3.zip"}')
+            return 1, 200, {}, "HTTP/1.1 200 OK"
+        end
+        local manifest, err = Updater.fetchManifest()
+        http.request = old_request
+        Updater.MANIFEST_URL, Updater.API_URL = old_manifest, old_api
+        assert.is_truthy(manifest, err)
+        assert.are.equal("3.0.0", manifest.version)
     end)
 end)
 
