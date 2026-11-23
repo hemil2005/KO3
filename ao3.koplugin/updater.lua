@@ -403,38 +403,91 @@ end
 Updater.DOWNLOAD_ATTEMPTS = 3
 
 local function downloadOnce(url, dest, offset, timeout)
-    local mode = offset > 0 and "r+b" or "wb"
-    local file, err = io.open(dest, mode)
+    local file, err = io.open(dest, offset > 0 and "r+b" or "wb")
     if not file then
         return nil, "write", err
     end
     if offset > 0 then
         file:seek("set", offset)
     end
-    local headers = uaHeaders()
-    if offset > 0 then
-        headers["Range"] = "bytes=" .. offset .. "-"
-    end
-    local code, kind, detail, block, total = get(url, ltn12.sink.file(file),
-        timeout, headers, function()
-            -- Drop a redirect body written at the resume point; the next hop
-            -- overwrites it with the real bytes.
-            file:seek("set", offset)
-        end)
-    pcall(function() file:close() end)
 
-    if not code then
-        return nil, kind, detail, block, total
+    -- A redirect body is written at the current position, so drop it by
+    -- restoring the file to `offset` (the resume point) before the next hop.
+    -- ltn12.sink.file cannot be used here: it closes the handle at the end of
+    -- each response, and the next hop would write to a closed file.
+    local function truncate_to(n)
+        file:close()
+        if n == 0 then
+            file = assert(io.open(dest, "wb"))
+        else
+            local src = assert(io.open(dest, "rb"))
+            local keep = src:read(n)
+            src:close()
+            local out = assert(io.open(dest, "wb"))
+            out:write(keep)
+            out:close()
+            file = assert(io.open(dest, "r+b"))
+        end
+        file:seek("set", n)
     end
-    if offset > 0 and code == 200 then
-        -- The server ignored Range and sent the whole file, so the appended
-        -- copy is corrupt. Start over from zero.
-        return nil, "restart", "range ignored"
+
+    local current = url
+    local hops = 0
+    while true do
+        local headers = uaHeaders()
+        if offset > 0 then
+            headers["Range"] = "bytes=" .. offset .. "-"
+        end
+        socketutil:set_timeout(timeout or 20, (timeout or 20) * 3)
+        local ok, code, response_headers, status = pcall(function()
+            return socket.skip(1, http.request{
+                url = current,
+                method = "GET",
+                headers = headers,
+                sink = function(chunk)
+                    if chunk then
+                        return file:write(chunk) and 1 or nil
+                    end
+                    return 1
+                end,
+                redirect = false,
+            })
+        end)
+        socketutil:reset_timeout()
+
+        if not ok or type(code) ~= "number" then
+            file:close()
+            return nil, "network", tostring(code or status)
+        end
+
+        local location = response_headers and response_headers["location"]
+        if REDIRECT_CODES[code] and location then
+            hops = hops + 1
+            if hops > MAX_REDIRECTS then
+                file:close()
+                return nil, "redirect", _("The update server redirected too many times.")
+            end
+            local next_url = socketurl.absolute(current, location)
+            if not next_url
+                    or (current:match("^https:") and next_url:match("^http:")) then
+                file:close()
+                return nil, "redirect", _("The update server redirected to an unsafe address.")
+            end
+            truncate_to(offset)
+            current = next_url
+        else
+            file:close()
+            if offset > 0 and code == 200 then
+                -- The server ignored Range and sent the whole file, so the
+                -- appended copy is corrupt. Start over from zero.
+                return nil, "restart", "range ignored"
+            end
+            if code ~= 200 and code ~= 206 then
+                return nil, "http", code
+            end
+            return true
+        end
     end
-    if code ~= 200 and code ~= 206 then
-        return nil, "http", code
-    end
-    return true
 end
 
 function Updater.download(manifest, dest, timeout)
