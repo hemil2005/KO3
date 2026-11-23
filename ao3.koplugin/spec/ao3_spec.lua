@@ -136,6 +136,26 @@ describe("AO3 browser", function()
             local url = "https://archiveofourown.org/tags/Foo/works"
             assert.are.equal(url, plugin:tagUrl(url))
         end)
+
+        it("builds an author works URL from a name", function()
+            assert.are.equal(
+                "https://archiveofourown.org/users/An%20Author/works",
+                plugin:authorWorksUrl("An Author"))
+        end)
+
+        it("appends the works list to a pasted author page", function()
+            assert.are.equal(
+                "https://archiveofourown.org/users/foo/pseuds/bar/works",
+                plugin:authorWorksUrl("https://archiveofourown.org/users/foo/pseuds/bar"))
+            assert.are.equal(
+                "https://archiveofourown.org/users/foo/works",
+                plugin:authorWorksUrl("/users/foo"))
+        end)
+
+        it("keeps a pasted author works URL unchanged", function()
+            local url = "https://archiveofourown.org/users/foo/works"
+            assert.are.equal(url, plugin:authorWorksUrl(url))
+        end)
     end)
 
     describe("parseListing", function()
@@ -161,6 +181,18 @@ describe("AO3 browser", function()
             assert.is_nil(listing.next_url:find("&amp;", 1, true))
             assert.is_nil(listing.prev_url)
             assert.are.equal("317,737", listing.count)
+        end)
+
+        it("captures each author's page link", function()
+            local listing = plugin:parseListing(read_fixture("search.html"))
+            assert.are.same({ "/users/myreia/pseuds/myreia" },
+                listing.items[1].author_urls)
+            for _, item in ipairs(listing.items) do
+                if item.authors ~= "Anonymous" then
+                    assert.is_truthy(item.author_urls and #item.author_urls > 0)
+                    assert.is_truthy(item.author_urls[1]:match("^/users/"))
+                end
+            end
         end)
 
         it("detects a Cloudflare challenge page", function()
@@ -624,6 +656,7 @@ describe("AO3 browser", function()
             assert.is_truthy(joined:find("Latest works", 1, true))
             assert.is_truthy(joined:find("Fandoms", 1, true))
             assert.is_truthy(joined:find("Search", 1, true))
+            assert.is_truthy(joined:find("Author", 1, true))
             assert.is_truthy(joined:find("Downloads", 1, true))
             assert.is_truthy(joined:find("Open work", 1, true))
         end)
@@ -764,6 +797,93 @@ describe("AO3 browser", function()
             end
             assert.are.same({ "Read", "Refresh", "Summary", "Rating", "Warnings",
                 "Status", "Author", "Tags", "Words" }, names)
+        end)
+
+        it("opens an author's works from the work screen", function()
+            local UIManager = require("ui/uimanager")
+            local old_show, old_close = UIManager.show, UIManager.close
+            local shown
+            UIManager.show = function(_, widget) shown = widget end
+            UIManager.close = function() end
+            local opened_url, opened_title
+            plugin.loadListing = function(_, url, title)
+                opened_url, opened_title = url, title
+            end
+            local ok, err = pcall(function()
+                plugin:showWork({
+                    id = "9930", title = "A work",
+                    authors = "A Writer, B Writer",
+                    author_names = { "A Writer", "B Writer" },
+                    author_urls = { "/users/a/pseuds/A_Writer", "/users/b/pseuds/B_Writer" },
+                })
+                local author_rows = {}
+                for _, row in ipairs(shown.kv_pairs) do
+                    if type(row) == "table" and row[1] == "Author" then
+                        author_rows[#author_rows + 1] = row
+                    end
+                end
+                assert.are.equal(2, #author_rows)
+                assert.are.equal("A Writer", author_rows[1][2])
+                assert.are.equal("B Writer", author_rows[2][2])
+                author_rows[1].callback({})
+            end)
+            UIManager.show, UIManager.close = old_show, old_close
+            plugin.loadListing = nil
+            assert.is_true(ok, err)
+            assert.are.equal(
+                "https://archiveofourown.org/users/a/pseuds/A_Writer/works",
+                opened_url)
+            assert.is_truthy(opened_title:find("A Writer", 1, true))
+        end)
+
+        it("keeps an anonymous author as plain text", function()
+            local UIManager = require("ui/uimanager")
+            local old_show = UIManager.show
+            local shown
+            UIManager.show = function(_, widget) shown = widget end
+            local ok, err = pcall(function()
+                plugin:showWork({ id = "9931", title = "A work", authors = "Anonymous" })
+            end)
+            UIManager.show = old_show
+            assert.is_true(ok, err)
+            local author_row
+            for _, row in ipairs(shown.kv_pairs) do
+                if type(row) == "table" and row[1] == "Author" then
+                    author_row = row
+                    break
+                end
+            end
+            assert.are.equal("Anonymous", author_row[2])
+            assert.is_nil(author_row.callback)
+        end)
+
+        it("browses works by a typed author from home", function()
+            local UIManager = require("ui/uimanager")
+            local old_show, old_close = UIManager.show, UIManager.close
+            local shown
+            UIManager.show = function(_, widget) shown = widget end
+            UIManager.close = function() end
+            local opened_url
+            plugin.loadListing = function(_, url) opened_url = url end
+            local ok, err = pcall(function()
+                local author_row
+                for _, row in ipairs(plugin:homeRows()) do
+                    if type(row) == "table" and row.text == "Author" then
+                        author_row = row
+                        break
+                    end
+                end
+                assert.is_truthy(author_row)
+                author_row.action()
+                assert.is_truthy(shown)
+                shown.getInputValue = function() return "An Author" end
+                shown.buttons[1][2].callback()
+            end)
+            UIManager.show, UIManager.close = old_show, old_close
+            plugin.loadListing = nil
+            assert.is_true(ok, err)
+            assert.are.equal(
+                "https://archiveofourown.org/users/An%20Author/works", opened_url)
         end)
 
         it("labels Read as an offline action for a cached work", function()

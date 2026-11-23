@@ -55,6 +55,7 @@ One menu entry opens the whole app:
 | **Latest works** | Newest works across the archive (`/works`) |
 | **Fandoms** | Categorized fandom index, shipped with the plugin |
 | **Search** | Work title, author or keyword |
+| **Author** | An author's name or profile URL — their works list |
 | **Tag** | A tag name, or paste a full `/tags/.../works` URL |
 | **Downloads** | Works already saved on this device |
 | **Open work** | Paste `https://archiveofourown.org/works/1234567` or just `1234567` |
@@ -68,7 +69,10 @@ AO3 screens, the letter shortcut boxes are hidden so the text gets the full
 touchscreen width.
 
 Tap a result to drill in; tap a work for its tags, summary and stats; tap
-**Read** to fetch it and open it in the KOReader reader. Back (the footer
+**Read** to fetch it and open it in the KOReader reader. On the work
+screen each author's name opens that author's works as the same kind of
+card listing (co-authors each get a row; Anonymous stays plain text).
+Back (the footer
 arrow, the hardware Back key, the X, or a downward swipe) goes one level up
 instead of dropping you into the file manager.
 
@@ -129,8 +133,8 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   per work, without separate shortcut or description rows.
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
-- The offline `busted` suite: 77 tests passing across parser, navigation,
-  bounded-index and rendered-card interaction tests.
+- The offline `busted` suite: 90 tests passing across parser, navigation,
+  bounded-index, rendered-card interaction and old-build compatibility tests.
 
 **Current connectivity:** AO3 refused the emulator's listing request with
 `403`; independent Windows and WSL `curl` requests received `429` on this

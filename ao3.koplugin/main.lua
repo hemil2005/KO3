@@ -252,10 +252,14 @@ local function parseWork(node)
     end
     if not id then return nil end
 
-    local authors = {}
+    local authors, author_urls = {}, {}
     for _, a in ipairs(node:select("h4.heading a[rel='author']")) do
         local name = plain(a)
-        if name ~= "" then table.insert(authors, name) end
+        if name ~= "" then
+            table.insert(authors, name)
+            local href = a.attributes.href or ""
+            if href ~= "" then table.insert(author_urls, href) end
+        end
     end
 
     local fandoms = {}
@@ -284,6 +288,8 @@ local function parseWork(node)
         id = id,
         title = title_link and plain(title_link) or T(_("Work %1"), id),
         authors = #authors > 0 and table.concat(authors, ", ") or _("Anonymous"),
+        author_names = #authors > 0 and authors or nil,
+        author_urls = #author_urls > 0 and author_urls or nil,
         fandoms = table.concat(fandoms, ", "),
         tags = table.concat(tags, ", "),
         summary = plain(first(node:select("blockquote.summary"))),
@@ -891,12 +897,13 @@ function Ao3:showWork(work)
         },
         "----------------------------",
     }
-    local details = {
+    local details_top = {
         { _("Summary"), work.summary },
         { _("Rating"), work.rating },
         { _("Warnings"), work.warnings },
         { _("Status"), work.complete },
-        { _("Author"), work.authors },
+    }
+    local details_rest = {
         { _("Fandom"), work.fandoms },
         { _("Category"), work.category },
         { _("Tags"), work.tags },
@@ -906,11 +913,35 @@ function Ao3:showWork(work)
         { _("Kudos"), work.kudos },
         { _("Hits"), work.hits },
     }
-    for _, detail in ipairs(details) do
-        if detail[2] and detail[2] ~= "" then
-            rows[#rows + 1] = detail
+    local function add_details(list)
+        for _, detail in ipairs(list) do
+            if detail[2] and detail[2] ~= "" then
+                rows[#rows + 1] = detail
+            end
         end
     end
+    add_details(details_top)
+
+    -- Author rows are tappable when the listing carried the author's own
+    -- page; Anonymous works, or a name/URL mismatch, stay plain text.
+    local names, urls = work.author_names or {}, work.author_urls or {}
+    if #names > 0 and #names == #urls then
+        for i = 1, #names do
+            local name, url = names[i], urls[i]
+            rows[#rows + 1] = {
+                _("Author"), name,
+                callback = function(kv_page)
+                    UIManager:close(kv_page)
+                    self:loadListing(self:authorWorksUrl(url),
+                        T(_("Works by %1"), name))
+                end,
+            }
+        end
+    elseif work.authors and work.authors ~= "" then
+        rows[#rows + 1] = { _("Author"), work.authors }
+    end
+
+    add_details(details_rest)
 
     -- Sits on top of the list; closing it drops the reader back on the
     -- results instead of the file manager.
@@ -1183,6 +1214,13 @@ function Ao3:homeRows()
             end,
         },
         {
+            text = _("Author"),
+            mandatory = _("Works by a writer"),
+            action = function()
+                self:authorDialog()
+            end,
+        },
+        {
             text = _("Tag"),
             mandatory = _("Tag name or URL"),
             action = function()
@@ -1395,6 +1433,21 @@ function Ao3:tagUrl(input)
     return BASE_URL .. "/tags/" .. encoded .. "/works"
 end
 
+-- An author's works page reuses the work-card listing markup. Accept a
+-- bare name, a profile path, or a full URL; the result always points at
+-- the works list.
+function Ao3:authorWorksUrl(input)
+    input = trim(input)
+    if input == "" then return nil end
+    if input:match("^https?://") or input:sub(1, 1) == "/" then
+        local page = input:match("^https?://") and input or (BASE_URL .. input)
+        page = (page:gsub("/+$", ""))
+        if page:match("/works$") then return page end
+        return page .. "/works"
+    end
+    return BASE_URL .. "/users/" .. util.urlEncode(input) .. "/works"
+end
+
 function Ao3:parseWorkId(input)
     input = trim(input)
     local id = input:match("/works/(%d+)")
@@ -1454,6 +1507,39 @@ function Ao3:tagDialog()
                     UIManager:close(dialog)
                     if input ~= "" then
                         self:loadListing(self:tagUrl(input), input)
+                    end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function Ao3:authorDialog()
+    local dialog
+    dialog = InputDialog:new{
+        title = _("Browse an AO3 author"),
+        description = _("Author name or profile URL"),
+        buttons = {{
+            {
+                text = _("Cancel"),
+                id = "close",
+                callback = function()
+                    UIManager:close(dialog)
+                end,
+            },
+            {
+                text = _("Browse"),
+                is_enter_default = true,
+                callback = function()
+                    local input = trim(dialog:getInputValue())
+                    UIManager:close(dialog)
+                    if input ~= "" then
+                        local url = self:authorWorksUrl(input)
+                        if url then
+                            self:loadListing(url, T(_("Works by %1"), input))
+                        end
                     end
                 end,
             },
