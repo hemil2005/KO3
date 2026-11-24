@@ -452,6 +452,37 @@ describe("AO3 work-list cards", function()
         assert.are.equal(1, calls)
     end)
 
+    it("returns to the file manager when the plugin menu was the last window", function()
+        -- Opening a work closes KOReader's file manager while the plugin menu
+        -- stays beneath the reader. Closing that menu must not leave UIManager
+        -- with an empty stack, or KOReader quits with it.
+        local FileManager = require("apps/filemanager/filemanager")
+        local saved_show = FileManager.showFiles
+        local saved_stack = UIManager._window_stack
+        local shown = 0
+        FileManager.showFiles = function() shown = shown + 1 end
+        UIManager._window_stack = {}
+        local ok, err = pcall(function() plugin:onMenuClosed() end)
+        UIManager._window_stack = saved_stack
+        FileManager.showFiles = saved_show
+        assert.is_true(ok, err)
+        assert.are.equal(1, shown)
+    end)
+
+    it("leaves the window beneath alone when one is still open", function()
+        local FileManager = require("apps/filemanager/filemanager")
+        local saved_show = FileManager.showFiles
+        local saved_stack = UIManager._window_stack
+        local shown = 0
+        FileManager.showFiles = function() shown = shown + 1 end
+        UIManager._window_stack = { { widget = {} } }
+        local ok, err = pcall(function() plugin:onMenuClosed() end)
+        UIManager._window_stack = saved_stack
+        FileManager.showFiles = saved_show
+        assert.is_true(ok, err)
+        assert.are.equal(0, shown)
+    end)
+
     it("marks a work with AO3's symbols, fandoms, ships and numbers", function()
         local tagged = work("1", "Tagged", "Writer", "A summary.", {
             rating_key = "rating-teen",

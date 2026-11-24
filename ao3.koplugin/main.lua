@@ -3169,6 +3169,25 @@ function Ao3:listDownloads()
     return items
 end
 
+-- The plugin menu can be the last window left: opening a work closes
+-- KOReader's file manager (ReaderUI broadcasts ShowingReader), while the menu
+-- stays beneath the reader. Closing the menu then leaves no window, and
+-- UIManager quits. Put the file manager back so the X always lands in
+-- KOReader.
+function Ao3:onMenuClosed()
+    -- Drop the closed widget tree so nothing is retained on a memory-tight
+    -- device.
+    FandomPages.clearCache()
+    self.menu = nil
+    local stack = UIManager._window_stack
+    if stack and not stack[1] then
+        local FileManager = require("apps/filemanager/filemanager")
+        if FileManager and FileManager.showFiles then
+            FileManager:showFiles()
+        end
+    end
+end
+
 -- One full-screen Menu is the whole app. Drilling into a screen snapshots the
 -- current item table on Menu's own stack, so Back, the X and swipe-down all
 -- return to the previous screen without refetching a page.
@@ -3201,10 +3220,7 @@ function Ao3:ensureMenu()
             return true
         end,
         close_callback = function()
-            -- Drop the closed widget tree so nothing is retained on a
-            -- memory-tight device.
-            FandomPages.clearCache()
-            self.menu = nil
+            self:onMenuClosed()
         end,
     }
 

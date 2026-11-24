@@ -27,6 +27,10 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - The KO3 entry sits directly on the Tools tab, fourth from the top (before
   Statistics, `sorting_hint = "tools"`), so it stays on page 1. Not nested
   under More tools.
+- Closing the plugin always lands in KOReader. Opening a work closes
+  KOReader's file manager (`ShowingReader`), so after returning from the
+  reader the plugin menu can be the last window; show the file manager when
+  that menu closes rather than letting the stack empty, which quits KOReader.
 - After any user-visible change, demonstrate it in the local Kindle emulator
   and save a capture under `screenshots/`. Tests alone are not enough.
 
