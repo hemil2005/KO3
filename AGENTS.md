@@ -105,6 +105,11 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   own `_meta.lua` version both pass; the running code is never modified.
   Keep the previous tree as `ao3.koplugin.bak` for **Restore previous
   version**.
+- Never call a KOReader API that may postdate the reader's build without a
+  guard. `socketutil.describe_error` does not exist in v2026.07.2 and an
+  unguarded call there aborted updates; name the fallback case yourself. Wrap
+  each download attempt so an error raised inside it cannot end the retry
+  loop: keep the saved bytes and resume.
 - `Updater.currentVersion` reads `_meta.lua`; do not execute plugin code to
   find the version. Keep the manifest URLs on HTTPS and reject path traversal
   and absolute paths in archive entries.

@@ -390,6 +390,74 @@ describe("AO3 updater download", function()
         assert.are.equal("payload", Updater.readAll(dest))
     end)
 
+    it("explains a stalled transfer on a KOReader build without describe_error", function()
+        -- KOReader v2026.07.2 has no socketutil.describe_error. The updater
+        -- used to call it unguarded, so a single dropped packet raised inside
+        -- the retry loop and aborted the install instead of resuming.
+        local socketutil = require("socketutil")
+        local saved = socketutil.describe_error
+        socketutil.describe_error = nil
+        local calls = 0
+        http.request = function(request)
+            calls = calls + 1
+            if calls == 1 then
+                request.sink("pay")
+                return nil, "timeout"
+            end
+            request.sink("load")
+            return 1, 206, {}, "HTTP/1.1 206 Partial Content"
+        end
+        local dest = tmp_root .. "/old-build.zip"
+        local ran, ok, err = pcall(Updater.download,
+            { zip_url = "https://example.test/x.zip" }, dest)
+        socketutil.describe_error = saved
+        assert.is_true(ran, ok)
+        assert.is_true(ok, err)
+        assert.are.equal("payload", Updater.readAll(dest))
+        assert.are.equal(2, calls)
+    end)
+
+    it("gives up with the timeout explained on a build without describe_error", function()
+        local socketutil = require("socketutil")
+        local saved = socketutil.describe_error
+        socketutil.describe_error = nil
+        http.request = function()
+            return nil, "timeout"
+        end
+        local dest = tmp_root .. "/old-build-fail.zip"
+        local ran, ok, message = pcall(Updater.download,
+            { zip_url = "https://example.test/x.zip" }, dest)
+        socketutil.describe_error = saved
+        assert.is_true(ran, ok)
+        assert.is_nil(ok)
+        assert.is_truthy(message)
+        assert.is_truthy(message:find("timed out", 1, true))
+        assert.is_nil(lfs.attributes(dest, "mode"))
+    end)
+
+    it("survives an error raised inside one download attempt", function()
+        -- Whatever goes wrong in an attempt (a KOReader API that a newer build
+        -- has, a lousy header), the retry loop keeps its saved bytes and tries
+        -- again instead of ending the install.
+        local calls = 0
+        http.request = function(request)
+            calls = calls + 1
+            if calls == 1 then
+                request.sink("pay")
+                error("boom")
+            end
+            request.sink("load")
+            return 1, 206, {}, "HTTP/1.1 206 Partial Content"
+        end
+        local dest = tmp_root .. "/raised.zip"
+        local ran, ok, message = pcall(Updater.download,
+            { zip_url = "https://example.test/x.zip" }, dest)
+        assert.is_true(ran, ok)
+        assert.is_true(ok, message)
+        assert.are.equal("payload", Updater.readAll(dest))
+        assert.are.equal(2, calls)
+    end)
+
     it("follows the asset redirect itself", function()
         local urls = {}
         http.request = function(request)

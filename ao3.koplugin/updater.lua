@@ -438,7 +438,9 @@ local function downloadOnce(url, dest, offset, timeout)
         if offset > 0 then
             headers["Range"] = "bytes=" .. offset .. "-"
         end
-        socketutil:set_timeout(timeout or 20, (timeout or 20) * 3)
+        -- Newer builds return the timeouts in effect so a stalled transfer can
+        -- be explained with them; older ones return nothing, which is fine.
+        local block, total = socketutil:set_timeout(timeout or 20, (timeout or 20) * 3)
         local ok, code, response_headers, status = pcall(function()
             return socket.skip(1, http.request{
                 url = current,
@@ -457,7 +459,7 @@ local function downloadOnce(url, dest, offset, timeout)
 
         if not ok or type(code) ~= "number" then
             file:close()
-            return nil, "network", tostring(code or status)
+            return nil, "network", tostring(code or status), block, total
         end
 
         local location = response_headers and response_headers["location"]
@@ -490,12 +492,39 @@ local function downloadOnce(url, dest, offset, timeout)
     end
 end
 
+-- KOReader added `socketutil.describe_error` in late 2026; builds before it
+-- (v2026.07.2 is still current on devices) have no such field. Calling it
+-- unguarded raised inside the retry loop, which aborted the whole install and
+-- left the reader unable to update at all. Name the cases the updater can hit;
+-- the caller falls back to the raw code for anything else.
+local function describeDownloadError(detail, block, total)
+    if type(socketutil.describe_error) == "function" then
+        local ok, message = pcall(socketutil.describe_error, detail, block, total)
+        if ok and message then return message end
+    end
+    if detail == "timeout" then
+        return block
+            and T(_("Connection timed out: no response within %1 seconds."), block)
+            or _("Connection timed out: no response.")
+    end
+    if detail == "closed" then
+        return _("Connection closed by the server.")
+    end
+end
+
 function Updater.download(manifest, dest, timeout)
     local last_err
     for attempt = 1, Updater.DOWNLOAD_ATTEMPTS do
         local offset = lfs.attributes(dest, "size") or 0
-        local ok, kind, detail, block, total = downloadOnce(
+        local ran, ok, kind, detail, block, total = pcall(downloadOnce,
             manifest.zip_url, dest, offset, timeout)
+        if not ran then
+            -- An error raised inside an attempt must not end the install: keep
+            -- the bytes already saved so the next attempt can resume, and say
+            -- what happened if this was the last one. (A missing KOReader API
+            -- did exactly this and left readers unable to update.)
+            ok, kind, detail = nil, "network", tostring(ok)
+        end
         if ok then
             break
         end
@@ -515,7 +544,7 @@ function Updater.download(manifest, dest, timeout)
             os.remove(dest)
             last_err = _("The update server restarted the download.")
         else
-            last_err = socketutil.describe_error(detail, block, total)
+            last_err = describeDownloadError(detail, block, total)
                 or T(_("Download failed (%1)."), tostring(detail))
         end
         if attempt == Updater.DOWNLOAD_ATTEMPTS then
