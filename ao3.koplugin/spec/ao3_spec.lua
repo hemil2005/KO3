@@ -143,9 +143,16 @@ describe("AO3 browser", function()
                 plugin:authorWorksUrl("An Author"))
         end)
 
-        it("builds a people search URL", function()
+        it("builds a people search URL AO3 actually filters on", function()
+            -- The controller permits people_search[:query], [:name],
+            -- [:collection_id] and [:fandom] only. Anything else is dropped,
+            -- and the page then lists every pseud alphabetically - which is
+            -- what people_search[q] did.
             assert.are.equal(
-                "https://archiveofourown.org/people/search?people_search%5Bq%5D=Harbor%20Lights",
+                "https://archiveofourown.org/people/search?people_search%5Bquery%5D=kingsaxcul",
+                plugin:peopleSearchUrl("kingsaxcul"))
+            assert.are.equal(
+                "https://archiveofourown.org/people/search?people_search%5Bquery%5D=Harbor%20Lights",
                 plugin:peopleSearchUrl("Harbor Lights"))
         end)
 

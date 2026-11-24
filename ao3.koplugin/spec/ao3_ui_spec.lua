@@ -1217,6 +1217,33 @@ describe("AO3 author search", function()
             "https://archiveofourown.org/users/harborlight/works", opened.url)
     end)
 
+    it("ignores a result list that cannot have come from the query", function()
+        -- An unfiltered people-search page - what an unrecognised query
+        -- parameter renders - is every pseud in the archive, alphabetically.
+        -- Typing an exact name must open that author, not show this list.
+        local opened, listed = nil, false
+        plugin.showAuthor = function(_, name, url)
+            opened = { name = name, url = url }
+        end
+        local old_push = plugin.pushRows
+        plugin.pushRows = function() listed = true end
+
+        plugin:showAuthorMatches("kingsaxcul", {
+            items = {
+                { name = "catastropic", user = "catastropic",
+                  url = "https://archiveofourown.org/users/catastropic" },
+                { name = "cathartic", user = "cathartic",
+                  url = "https://archiveofourown.org/users/cathartic" },
+            },
+        }, query_url, false)
+
+        plugin.pushRows = old_push
+        assert.is_false(listed)
+        assert.are.equal("kingsaxcul", opened.name)
+        assert.are.equal(
+            "https://archiveofourown.org/users/kingsaxcul/works", opened.url)
+    end)
+
     it("searches a name and opens a pasted profile link", function()
         local searched, opened
         plugin.searchAuthors = function(_, query) searched = query end

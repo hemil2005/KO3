@@ -3858,10 +3858,14 @@ function Ao3:authorWorksUrl(input)
     return BASE_URL .. "/users/" .. util.urlEncode(input) .. "/works"
 end
 
--- AO3's people search is the only way to go from a name to an account: a
--- profile URL needs the exact login, which is what made a partial name fail.
+-- AO3's people search takes `people_search[query]` (its "Search all fields"
+-- box: byline, name, user_login, description). Any other key is dropped by
+-- the controller, which then renders the whole people index alphabetically;
+-- that is what `people_search[q]` did, so typing an exact name produced
+-- pages of unrelated authors.
 function Ao3:peopleSearchUrl(query)
-    return BASE_URL .. "/people/search?people_search%5Bq%5D=" .. util.urlEncode(query)
+    return BASE_URL .. "/people/search?people_search%5Bquery%5D="
+        .. util.urlEncode(query)
 end
 
 -- People search returns accounts and pseuds as `li.user` blurbs whose heading
@@ -4006,7 +4010,21 @@ function Ao3:searchAuthors(query)
 end
 
 function Ao3:showAuthorMatches(query, data, url, replace)
-    if #data.items == 0 then
+    local wanted = query:lower()
+    -- A real search must return at least one name that contains what was
+    -- typed. If none do, the filter did not apply and this is AO3's whole
+    -- people index (any unrecognised query parameter renders exactly that),
+    -- so listing it would be noise rather than matches.
+    local relevant = false
+    for _, item in ipairs(data.items) do
+        if item.name:lower():find(wanted, 1, true)
+                or item.user:lower():find(wanted, 1, true) then
+            relevant = true
+            break
+        end
+    end
+
+    if #data.items == 0 or not relevant then
         -- No list to choose from: open the name directly, the way browsing an
         -- author worked before search existed, so an exact name still opens
         -- even if AO3 changes the results markup.
@@ -4017,7 +4035,6 @@ function Ao3:showAuthorMatches(query, data, url, replace)
     -- Only the first page decides: paging through results must not bounce the
     -- reader into an author page.
     if not url:match("[?&]page=") then
-        local wanted = query:lower()
         for _, item in ipairs(data.items) do
             if item.name:lower() == wanted or item.user:lower() == wanted then
                 self:showAuthor(item.name, item.url)

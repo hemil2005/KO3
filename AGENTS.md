@@ -123,6 +123,10 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 
 - Do not send requests to AO3 unless the user asks. No probing, no retries
   after a 429, no crawling.
+- AO3 only filters people search on `people_search[query|name|collection_id|fandom]`.
+  Any other key is dropped and the page renders *every* pseud alphabetically, so
+  a wrong parameter looks like a fuzzy search that matched nothing; verify
+  against `app/controllers/people_controller.rb` rather than guessing.
 - The Firefox header set avoids the `403 cf-mitigated: challenge` observed on
   2026-11-23. It is not a rate-limit exemption: a genuine `429` still applies,
   and `Retry-After` is still honoured.
