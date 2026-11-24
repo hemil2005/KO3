@@ -271,36 +271,103 @@ function FandomPages.page(dir, category_index, letter, offset, page_size)
     }
 end
 
--- Find the first matching name without creating menu rows. The returned
--- zero-based offset can be rounded down to a window boundary by the UI.
-function FandomPages.find(dir, category_index, letter, query)
-    local args, err = parseArgs(dir, category_index, letter)
-    if not args then return nil, err end
-    if type(query) ~= "string" or query == "" then
-        return nil, "a fandom name is required"
+-- Every name in the letter that contains the term, ignoring case. The list is
+-- remembered against the decompressed letter, so paging through results scans
+-- the letter once instead of once per page. One search is cached at a time,
+-- like the letter itself: a new term replaces it.
+local search_cache
+
+local function searchMatches(data, term)
+    local needle = term:lower()
+    if search_cache and search_cache.data == data
+            and search_cache.needle == needle then
+        return search_cache.matches
     end
+
+    local matches = {}
+    local pos = 1
+    while true do
+        local name, url, count, next_pos = nextRow(data.text, pos)
+        if not name then break end
+        if name:lower():find(needle, 1, true) then
+            matches[#matches + 1] = { name = name, url = url, count = count }
+        end
+        pos = next_pos
+    end
+
+    search_cache = { data = data, needle = needle, matches = matches }
+    return matches
+end
+
+--[[--
+Search one letter for every name that contains `query`, ignoring case.
+
+A term anywhere in the name matches: "cyber" finds "Cyberpunk 2077" and
+"Cyberlinxxx". Results come back a window at a time, in the letter's own
+alphabetical order, so a broad term and a narrow one page the same way.
+
+@param dir            Category root, e.g. `<plugin>/data/fandoms`.
+@param category_index Category number from index.lua.
+@param letter         One of "A".."Z" or "#".
+@param query          Part of a fandom name (case-insensitive).
+@param offset         Zero-based match offset (default 0).
+@param page_size      Matches to return (default 100, capped at 100).
+
+@treturn table|nil Page `{ entries, total, offset, page_size, next_offset,
+                          has_more, query }`, where `total` is the number of
+                          matches in the whole letter. An empty result is a
+                          page with no entries, not an error.
+@treturn string|nil Error message when the file or arguments are unusable.
+]]
+function FandomPages.search(dir, category_index, letter, query, offset, page_size)
+    local args, err = parseArgs(dir, category_index, letter, offset, page_size)
+    if not args then return nil, err end
+    if type(query) ~= "string" then
+        return nil, "a search term is required"
+    end
+    query = query:match("^%s*(.-)%s*$")
+    if query == "" then
+        return nil, "a search term is required"
+    end
+
     local path = args.dir .. "/" .. category_index .. "/" .. letter .. ".tsv.z"
     local data, load_err = loadLetter(path)
     if not data then return nil, load_err end
 
-    local needle = query:lower()
-    local pos, offset = 1, 0
-    while true do
-        local name, _, _, next_pos = nextRow(data.text, pos)
-        if not name then break end
-        if name:lower():find(needle, 1, true) then
-            return offset
-        end
-        offset = offset + 1
-        pos = next_pos
+    local matches = searchMatches(data, query)
+    local entries = {}
+    local last = math.min(#matches, args.offset + args.page_size)
+    for i = args.offset + 1, last do
+        local match = matches[i]
+        -- A copy per page: the cached row stays private to this module.
+        entries[#entries + 1] = {
+            name = match.name, url = match.url, count = match.count,
+        }
     end
-    return nil
+
+    local after = args.offset + #entries
+    local next_offset
+    if after < #matches then
+        next_offset = after
+    end
+
+    return {
+        entries = entries,
+        total = #matches,
+        offset = args.offset,
+        page_size = args.page_size,
+        next_offset = next_offset,
+        has_more = next_offset ~= nil,
+        query = query,
+    }
 end
 
--- Release the one cached letter. Callers normally just open another letter;
--- this is for tests and for dropping memory before a long unrelated task.
+-- Release the one cached letter and any cached search. Callers normally just
+-- open another letter; this is for tests and for dropping memory before a long
+-- unrelated task.
 function FandomPages.clearCache()
     cache = nil
+    search_cache = nil
 end
 
 return FandomPages

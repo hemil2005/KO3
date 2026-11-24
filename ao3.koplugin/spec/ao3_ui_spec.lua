@@ -731,6 +731,15 @@ describe("AO3 fandom index", function()
         assert.is_truthy(first_row.entry.text:match("^Fandom %d+$"))
     end)
 
+    it("gives the search row a magnifier", function()
+        local menu = open_letter({ "Short Fandom" }, "A")
+        local row = menu.item_group[2]
+        assert.are.equal("Find in this letter…", row.entry.text)
+        assert.are.equal("search", row.entry.ao3_icon)
+        assert.is_truthy(row.icon_widget)
+        assert.is_true(row.icon_widget:getSize().w > 0)
+    end)
+
     it("gives a long fandom name two lines and then an ellipsis", function()
         local menu = open_letter({
             "Short Fandom",
@@ -753,6 +762,186 @@ describe("AO3 fandom index", function()
             <= menu.ao3_metrics.fandom_name_h)
         assert.is_truthy(row.fandom_name_widget.line_with_ellipsis)
         assert.are.equal("2", row.fandom_count_widget.text)
+    end)
+end)
+
+
+describe("AO3 fandom search", function()
+    local plugin
+
+    local category = { index = 1, name = "Test Media", letters = { "A", "C", "#" } }
+
+    local function records(count)
+        local rows = {}
+        for i = 1, count do
+            rows[i] = {
+                text = "Cyber Fandom " .. i,
+                mandatory = tostring(i),
+                ao3_fandom = true,
+                action = function() end,
+            }
+        end
+        return rows
+    end
+
+    -- The shipped letter files are not needed to test the presentation: the
+    -- search source is stubbed, so only the result rows and their paging are
+    -- built here.
+    local function open_search(count, extra)
+        extra = extra or {}
+        plugin.searchFandomLetter = function()
+            return records(count), {
+                entries = {},
+                total = extra.total or count,
+                offset = extra.offset or 0,
+                page_size = 100,
+                next_offset = extra.next_offset,
+                query = "cyber",
+            }
+        end
+        plugin.menu = nil
+        local old_show = UIManager.show
+        UIManager.show = function() end
+        local menu = plugin:ensureMenu()
+        plugin.menu = menu
+        plugin:showFandomSearch(category, "C", "cyber", extra.offset or 0, extra.replace)
+        UIManager.show = old_show
+        return menu
+    end
+
+    before_each(function()
+        plugin = setmetatable({}, { __index = Ao3 })
+    end)
+
+    after_each(function()
+        plugin.menu = nil
+    end)
+
+    it("lists every match under the letter strip instead of jumping to one hit", function()
+        local menu = open_search(3)
+
+        -- Strip, the search row, then the three records it found.
+        assert.is_true(menu.item_table[1].ao3_sticky)
+        local search_row = menu.item_table[2]
+        assert.are.equal("Find in this letter…", search_row.text)
+        assert.are.equal("“cyber”", search_row.mandatory)
+        assert.are.equal("search", search_row.ao3_icon)
+        for i = 1, 3 do
+            local row = menu.item_table[2 + i]
+            assert.are.equal("Cyber Fandom " .. i, row.text)
+            assert.is_true(row.ao3_fandom)
+        end
+        assert.are.equal("Test Media · 3 matches", menu.ao3_title)
+    end)
+
+    it("says one match rather than one matches", function()
+        local menu = open_search(1)
+        assert.are.equal("Test Media · 1 match", menu.ao3_title)
+    end)
+
+    it("draws the magnifier beside the search label", function()
+        local menu = open_search(2)
+        local row = menu.item_group[2]
+        assert.are.equal("search", row.entry.ao3_icon)
+        assert.is_truthy(row.icon_widget)
+        assert.is_true(row.icon_widget:getSize().w > 0)
+        -- The mark takes its space from the label, not from the count column.
+        assert.is_true(row.title_widget.max_width < row.content_width)
+    end)
+
+    it("offers the rest of the matches as pages of the same search", function()
+        local menu = open_search(100, { total = 250, offset = 100, next_offset = 200 })
+        local count = #menu.item_table
+        assert.are.equal("← Previous 100 matches", menu.item_table[count - 1].text)
+        assert.are.equal("Next 100 matches →", menu.item_table[count].text)
+
+        local asked
+        plugin.showFandomSearch = function(_, _, letter, query, offset, replace)
+            asked = { letter = letter, query = query, offset = offset, replace = replace }
+        end
+        menu.item_table[count].action()
+        assert.are.equal("C", asked.letter)
+        assert.are.equal("cyber", asked.query)
+        assert.are.equal(200, asked.offset)
+        assert.is_true(asked.replace)
+    end)
+
+    it("pushes a first search and replaces it when refining", function()
+        local menu = open_search(2)
+        assert.are.equal(1, #menu.item_table_stack)
+
+        plugin:showFandomSearch(category, "C", "cyber", 0, true)
+        assert.are.equal(1, #menu.item_table_stack)
+
+        plugin:showFandomSearch(category, "C", "cyber", 0, false)
+        assert.are.equal(2, #menu.item_table_stack)
+    end)
+
+    it("keeps the term in the search row when refining it", function()
+        local menu = open_search(2)
+        local asked
+        plugin.findFandomDialog = function(_, _, letter, replace, current)
+            asked = { letter = letter, replace = replace, current = current }
+        end
+        menu.item_table[2].action()
+        assert.are.equal("C", asked.letter)
+        assert.is_true(asked.replace)
+        assert.are.equal("cyber", asked.current)
+    end)
+
+    it("says so and stays put when nothing matches", function()
+        local InfoMessage = require("ui/widget/infomessage")
+        plugin.searchFandomLetter = function()
+            return {}, {
+                entries = {}, total = 0, offset = 0, page_size = 100, query = "zzz",
+            }
+        end
+        plugin.menu = nil
+        local menu = plugin:ensureMenu()
+        plugin.menu = menu
+
+        local shown
+        local old_show = UIManager.show
+        UIManager.show = function(_, widget) shown = widget end
+        local ok, err = pcall(function()
+            plugin:showFandomSearch(category, "C", "zzz", 0, false)
+        end)
+        UIManager.show = old_show
+
+        assert.is_true(ok, err)
+        assert.is_truthy(shown)
+        assert.are.equal(InfoMessage, getmetatable(shown).__index)
+        assert.is_truthy(shown.text:find("No fandom under C", 1, true))
+        -- Nothing was pushed or replaced: the reader stays where they were.
+        assert.are.equal(0, #menu.item_table_stack)
+        assert.are.equal("AO3", menu.ao3_title)
+    end)
+
+    it("searches the letter the dialog was opened from", function()
+        local opened
+        local old_show = UIManager.show
+        UIManager.show = function(_, widget) opened = widget end
+        plugin:findFandomDialog(category, "C")
+        UIManager.show = old_show
+
+        assert.is_truthy(opened)
+        assert.are.equal("", opened.input)
+        assert.is_nil(opened.description)
+
+        opened.getInputValue = function() return "  Cyber  " end
+        local asked
+        plugin.showFandomSearch = function(_, _, letter, query, offset, replace)
+            asked = { letter = letter, query = query, offset = offset, replace = replace }
+        end
+        local old_close = UIManager.close
+        UIManager.close = function() end
+        opened.buttons[1][2].callback()
+        UIManager.close = old_close
+
+        assert.are.equal("C", asked.letter)
+        assert.are.equal("Cyber", asked.query)
+        assert.are.equal(0, asked.offset)
+        assert.is_nil(asked.replace)
     end)
 end)
 

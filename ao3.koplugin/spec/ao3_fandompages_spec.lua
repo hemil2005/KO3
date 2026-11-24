@@ -91,6 +91,17 @@ local SAMPLE = table.concat({
     "Zeta Archive\t/tags/Zeta%20Archive/works\t42",
 }, "\n") .. "\n"
 
+-- A term may sit anywhere in the name, and the catalogue's own casing is not
+-- the reader's: mixed case, a space-joined name and a lower-case prefix all
+-- have to answer to "cyber".
+local SEARCH_SAMPLE = table.concat({
+    "Alpha Fandom\t/tags/Alpha%20Fandom/works\t10",
+    "Cyber Sled\t/tags/Cyber%20Sled/works\t1",
+    "Cyberpunk 2077\t/tags/Cyberpunk%202077/works\t10962",
+    "cyberpunkdreams\t/tags/cyberpunkdreams/works\t12",
+    "Zeta Archive\t/tags/Zeta%20Archive/works\t42",
+}, "\n") .. "\n"
+
 setup(function()
     tmp_root = os.tmpname()
     os.remove(tmp_root)
@@ -112,24 +123,6 @@ describe("fandom letter pages", function()
     end)
 
     describe("page windows", function()
-        it("finds a name beyond the first window without building rows", function()
-            local dir = make_letter("find_later", "A", many_entries(220))
-            assert.is_function(FandomPages.find)
-            local offset, err = FandomPages.find(dir, 1, "A", "fandom 207")
-            assert.is_nil(err)
-            assert.are.equal(206, offset)
-            local page = assert(FandomPages.page(dir, 1, "A", 200, 100))
-            assert.are.equal("Fandom 207", page.entries[7].name)
-        end)
-
-        it("reports when a name does not occur in the letter", function()
-            local dir = make_letter("find_missing", "A", SAMPLE)
-            assert.is_function(FandomPages.find)
-            local offset, err = FandomPages.find(dir, 1, "A", "Not in this letter")
-            assert.is_nil(offset)
-            assert.is_nil(err)
-        end)
-
         it("returns a bounded window with exact urls", function()
             local dir = make_letter("window", "A", SAMPLE)
             local page, err = FandomPages.page(dir, 1, "A", 0, 2)
@@ -235,6 +228,126 @@ describe("fandom letter pages", function()
 
             assert.are.equal(3, pages)
             assert.are.equal(25, seen_count)
+        end)
+    end)
+
+    describe("search", function()
+        before_each(function()
+            FandomPages.clearCache()
+        end)
+
+        it("lists every name that contains the term, ignoring case", function()
+            local dir = make_letter("search_sub", "C", SEARCH_SAMPLE)
+            assert.is_function(FandomPages.search)
+            local page, err = FandomPages.search(dir, 1, "C", "CYBER")
+
+            assert.is_nil(err)
+            assert.are.equal(3, page.total)
+            assert.are.equal(3, #page.entries)
+            assert.are.equal("CYBER", page.query:upper())
+            assert.are.equal("Cyber Sled", page.entries[1].name)
+            assert.are.equal("Cyberpunk 2077", page.entries[2].name)
+            assert.are.equal("cyberpunkdreams", page.entries[3].name)
+            assert.are.equal("10962", page.entries[2].count)
+            assert.are.equal(
+                "/tags/Cyberpunk%202077/works", page.entries[2].url)
+            assert.is_nil(page.next_offset)
+            assert.is_false(page.has_more)
+        end)
+
+        it("matches in the middle of a name, not only the start", function()
+            local dir = make_letter("search_middle", "C", SEARCH_SAMPLE)
+            local page, err = FandomPages.search(dir, 1, "C", "punk")
+
+            assert.is_nil(err)
+            assert.are.equal(2, page.total)
+            assert.are.equal("Cyberpunk 2077", page.entries[1].name)
+            assert.are.equal("cyberpunkdreams", page.entries[2].name)
+        end)
+
+        it("trims the term, so a stray space still finds the name", function()
+            local dir = make_letter("search_trim", "C", SEARCH_SAMPLE)
+            local page, err = FandomPages.search(dir, 1, "C", "  cyber  ")
+
+            assert.is_nil(err)
+            assert.are.equal("cyber", page.query)
+            assert.are.equal(3, page.total)
+        end)
+
+        it("returns an empty result, not an error, when nothing matches", function()
+            local dir = make_letter("search_empty", "C", SEARCH_SAMPLE)
+            local page, err = FandomPages.search(dir, 1, "C", "Battlestar")
+
+            assert.is_nil(err)
+            assert.are.equal(0, page.total)
+            assert.are.equal(0, #page.entries)
+            assert.is_nil(page.next_offset)
+            assert.is_false(page.has_more)
+        end)
+
+        it("pages through every match without overlap", function()
+            local dir = make_letter("search_walk", "A", many_entries(25))
+            local seen, seen_count = {}, 0
+            local offset, pages = 0, 0
+
+            while offset do
+                local page, err = FandomPages.search(dir, 1, "A", "fandom", offset, 10)
+                assert.is_nil(err)
+                assert.are.equal(25, page.total)
+                for _, entry in ipairs(page.entries) do
+                    assert.is_nil(seen[entry.name], entry.name .. " seen twice")
+                    seen[entry.name] = true
+                    seen_count = seen_count + 1
+                end
+                offset = page.next_offset
+                pages = pages + 1
+                assert.is_true(pages <= 3)
+            end
+
+            assert.are.equal(3, pages)
+            assert.are.equal(25, seen_count)
+        end)
+
+        it("keeps page size bounded and reports the remaining matches", function()
+            local dir = make_letter("search_cap", "A", many_entries(120))
+            local page, err = FandomPages.search(dir, 1, "A", "fandom", 100, 1000)
+
+            assert.is_nil(err)
+            assert.are.equal(120, page.total)
+            assert.are.equal(100, page.page_size)
+            assert.are.equal(20, #page.entries)
+            assert.are.equal("Fandom 101", page.entries[1].name)
+            assert.is_nil(page.next_offset)
+        end)
+
+        it("decompresses once while paging through results", function()
+            local dir = make_letter("search_cache", "A", many_entries(25))
+            with_uncompress_counter(function(calls)
+                local first = assert(FandomPages.search(dir, 1, "A", "fandom", 0, 10))
+                assert.are.equal(10, #first.entries)
+                local second, err = FandomPages.search(dir, 1, "A", "fandom", 10, 10)
+                assert.is_nil(err)
+                assert.are.equal(10, #second.entries)
+                assert.are.equal(1, calls())
+            end)
+        end)
+
+        it("rejects a missing, blank or non-string term", function()
+            local dir = make_letter("search_args", "C", SEARCH_SAMPLE)
+            local cases = { nil, "", "   ", 17 }
+
+            for i, term in ipairs(cases) do
+                local page, err = FandomPages.search(dir, 1, "C", term)
+                assert.is_nil(page, "case " .. i .. " should fail")
+                assert.is_truthy(err, "case " .. i .. " should explain")
+            end
+        end)
+
+        it("reports a letter file that cannot be read", function()
+            local dir = ensure_dir(tmp_root .. "/search_missing")
+            local page, err = FandomPages.search(dir, 1, "A", "cyber")
+            assert.is_nil(page)
+            assert.is_truthy(err)
         end)
     end)
 

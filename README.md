@@ -37,7 +37,7 @@ details captured from a live work.
 | ![Log consent](screenshots/33-report-consent.png) | ![Report sent](screenshots/36-report-sent.png) |
 | ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
 | ![Tag box open in the list](screenshots/40-work-list-tags.png) | ![Settings](screenshots/41-settings.png) |
-| ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | |
+| ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
 | ![Work account actions](screenshots/26-work-account-actions.png) | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) |
 | ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
@@ -113,7 +113,11 @@ open letter inverted. The index stays on screen while you page through a
 letter, so changing letters never means paging back. A fandom's name may run
 to two lines and is then elided; its work count keeps the right-hand column.
 Large letters load in local windows of up to 100 fandoms. **Find in this
-letter…** jumps to a matching name without going online; tapping a fandom
+letter…**, marked with a magnifier, lists every fandom in the letter whose name
+contains the term — any part of a name matches, in any case, and the list is
+navigable with the same paging rows. A search with no matches says so and leaves
+the reader where they were; a search that finds something sits on top of the
+letter page, so Back returns to the page being browsed. Tapping a fandom
 fetches only its 20-work page. On the AO3 screens, the letter shortcut boxes
 are hidden so the text gets the full touchscreen width.
 
