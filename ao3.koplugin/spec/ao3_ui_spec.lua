@@ -888,3 +888,122 @@ describe("AO3 account screen", function()
         assert.are.equal(1, logged_out)
     end)
 end)
+
+describe("AO3 listing navigation", function()
+    local plugin
+
+    -- Cards are taller than native rows, so a few dozen works is several pages.
+    local function listing_menu(count)
+        local items = {}
+        for i = 1, count do
+            items[i] = work(tostring(i), "Work " .. i, "Author " .. i,
+                "A summary.")
+        end
+        plugin.menu = nil
+        local old_show = UIManager.show
+        UIManager.show = function() end
+        local menu = plugin:ensureMenu()
+        plugin.menu = menu
+        plugin:showListing(listing_with(items), "Search: test")
+        UIManager.show = old_show
+        return menu
+    end
+
+    local function screen(rows)
+        local out = {}
+        for i = 1, rows do out[i] = { text = "Row " .. i } end
+        return out
+    end
+
+    before_each(function()
+        plugin = setmetatable({}, { __index = Ao3 })
+    end)
+
+    after_each(function()
+        plugin.menu = nil
+    end)
+
+    it("returns a listing to the page it was left on", function()
+        -- Regression: Menu:onClose reopens the parent table through
+        -- switchItemTable without an itemnumber, which sets page = 1, so
+        -- Back from a work always dropped the reader on the listing's first
+        -- page.
+        local menu = listing_menu(33)
+        assert.is_true(#menu.page_items >= 3)
+        menu:onGotoPage(3)
+
+        plugin:pushRows("Work details", screen(3))
+        assert.are.equal(1, menu.page)
+
+        menu:onClose()
+        assert.are.equal(3, menu.page)
+    end)
+
+    it("restores a page at every level of a nested drill-down", function()
+        local menu = listing_menu(33)
+        menu:onGotoPage(3)
+
+        -- Work details is several screens long on its own; the author screen
+        -- sits on top of the page the reader was reading.
+        plugin:pushRows("Work details", screen(25))
+        assert.is_true(#menu.page_items >= 2)
+        menu:onGotoPage(2)
+        plugin:pushRows("Author", screen(2))
+
+        menu:onClose()
+        assert.are.equal(2, menu.page)
+        menu:onClose()
+        assert.are.equal(3, menu.page)
+    end)
+
+    it("restores the page through the X as well as the Back key", function()
+        local menu = listing_menu(33)
+        menu:onGotoPage(3)
+        plugin:pushRows("Work details", screen(3))
+        assert.is_true(menu:onReturn())
+        assert.are.equal(3, menu.page)
+    end)
+
+    it("does not repaint page 1 when that is where the listing was", function()
+        local menu = listing_menu(9)
+        local followed = {}
+        local saved = menu.onGotoPage
+        menu.onGotoPage = function(menu_self, page)
+            followed[#followed + 1] = page
+            return saved(menu_self, page)
+        end
+
+        plugin:pushRows("Work details", screen(3))
+        menu:onClose()
+
+        assert.are.equal(1, menu.page)
+        assert.are.same({}, followed)
+    end)
+
+    it("does not jump past a listing that got shorter", function()
+        local menu = listing_menu(33)
+        menu:onGotoPage(3)
+        plugin:pushRows("Work details", screen(3))
+
+        -- The list that was page 3 long now fits on one page.
+        local parent = menu.item_table_stack[#menu.item_table_stack]
+        while #parent > 3 do table.remove(parent) end
+
+        local ok, err = pcall(function() menu:onClose() end)
+        assert.is_true(ok, err)
+        assert.are.equal(1, menu.page)
+    end)
+
+    it("keeps paging inside a listing off the navigation stack", function()
+        local menu = listing_menu(33)
+        menu:onGotoPage(2)
+        local depth = #menu.item_table_stack
+
+        -- Fetched pages replace the table in place; the stack (and so the
+        -- recorded page) belongs to the screen that was pushed, not the page.
+        plugin:replaceRows("Search: test", menu.item_table, 1)
+
+        assert.are.equal(depth, #menu.item_table_stack)
+        assert.are.equal(depth, #menu.ao3_page_stack)
+    end)
+end)

@@ -3226,6 +3226,7 @@ function Ao3:ensureMenu()
 
     menu.item_table_stack = menu.item_table_stack or {}
     menu.ao3_title_stack = {}
+    menu.ao3_page_stack = {}
     menu.ao3_title = _("AO3")
     -- The card symbols and the settings gear are authored SVGs beside the
     -- official logo; the menu carries the directory to every row.
@@ -3250,10 +3251,10 @@ function Ao3:ensureMenu()
         end
     end
 
-    -- Menu's own back logic pops `item_table_stack`; keep the title stack and
-    -- the footer arrow in sync with it. Closing the last menu hands the screen
-    -- back to KOReader, and some builds free the widget inside that call, so
-    -- nothing may touch the menu afterwards.
+    -- Menu's own back logic pops `item_table_stack`; keep the title stack, the
+    -- listing's page and the footer arrow in sync with it. Closing the last
+    -- menu hands the screen back to KOReader, and some builds free the widget
+    -- inside that call, so nothing may touch the menu afterwards.
     menu.onClose = function(menu_self)
         local stack = menu_self.item_table_stack
         if not stack or #stack == 0 then
@@ -3261,6 +3262,16 @@ function Ao3:ensureMenu()
         end
         local ret = Menu.onClose(menu_self)
         menu_self.ao3_title = table.remove(menu_self.ao3_title_stack) or _("AO3")
+        -- Menu:onClose reopens the parent table with switchItemTable and no
+        -- itemnumber, which resets it to page 1. The page the parent was left
+        -- on was recorded at push time; the parent's layout exists again by
+        -- now, so follow it back unless the table is shorter than it was.
+        local page = table.remove(menu_self.ao3_page_stack)
+        local page_items = menu_self.page_items
+        if page and page > 1 and page_items and page <= #page_items
+                and menu_self.page ~= page then
+            menu_self:onGotoPage(page)
+        end
         if menu_self.page_return_arrow then
             menu_self.page_return_arrow:enableDisable(#menu_self.item_table_stack > 0)
         end
@@ -3274,6 +3285,9 @@ end
 
 function Ao3:menuPush(menu, title, rows)
     table.insert(menu.ao3_title_stack, menu.ao3_title or _("AO3"))
+    -- Each push covers the screen beneath it: remember that screen's page so
+    -- the pop can put the list back where the reader left it, not on page 1.
+    table.insert(menu.ao3_page_stack, menu.page or 1)
     menu.item_table.title = menu.ao3_title or _("AO3")
     table.insert(menu.item_table_stack, menu.item_table)
     menu:switchItemTable(title, rows, 1)
@@ -3287,6 +3301,7 @@ function Ao3:showHome()
     if self.menu then
         self.menu.item_table_stack = {}
         self.menu.ao3_title_stack = {}
+        self.menu.ao3_page_stack = {}
         -- The logo lockup is the page header; the native bar keeps only the
         -- close button, so "AO3" is not written twice.
         self.menu.title = ""
