@@ -3762,6 +3762,67 @@ function Ao3:authorWorksUrl(input)
     return BASE_URL .. "/users/" .. util.urlEncode(input) .. "/works"
 end
 
+-- AO3's people search is the only way to go from a name to an account: a
+-- profile URL needs the exact login, which is what made a partial name fail.
+function Ao3:peopleSearchUrl(query)
+    return BASE_URL .. "/people/search?people_search%5Bq%5D=" .. util.urlEncode(query)
+end
+
+-- People search returns accounts and pseuds as `li.user` blurbs whose heading
+-- links at the profile. The wider /users/ scan is a safety net for markup
+-- drift: a changed class still lists names instead of nothing.
+function Ao3:parsePeopleSearch(html)
+    local ok, root = pcall(htmlparser.parse, html, 5000)
+    if not ok or not root then
+        return nil, _("Could not parse the AO3 page.")
+    end
+
+    local items, seen = {}, {}
+    local function addLink(link)
+        if not link or not link.attributes then return end
+        local href = util.htmlEntitiesToUtf8(link.attributes.href or "")
+        local user = href:match("^/users/([^/?#]+)")
+        if not user or seen[user] then return end
+        local name = plain(link)
+        if name == "" then return end
+        seen[user] = true
+        items[#items + 1] = {
+            name = name,
+            user = user,
+            url = absoluteUrl(href),
+        }
+    end
+
+    for _, node in ipairs(root:select("li.user")) do
+        addLink(first(node:select("h4.heading a"))
+            or first(node:select("a[href^='/users/']")))
+    end
+    if #items == 0 then
+        for _, link in ipairs(root:select("ol li a[href^='/users/']")) do
+            addLink(link)
+        end
+    end
+
+    -- AO3's bot page arrives as a 200 with this wording when it does not
+    -- return 429 itself; without it a blocked search would read as no matches.
+    if #items == 0 and html:find("may be a robot", 1, true) then
+        return nil, _("AO3 wants a browser check. Try again in a minute.")
+    end
+
+    local next_link = first(root:select("ol.pagination a[rel='next']"))
+        or first(root:select("ol.pagination li.next a"))
+    local prev_link = first(root:select("ol.pagination a[rel='prev']"))
+        or first(root:select("ol.pagination li.prev a"))
+
+    return {
+        items = items,
+        next_url = next_link and absoluteUrl(
+            util.htmlEntitiesToUtf8(next_link.attributes.href or "")),
+        prev_url = prev_link and absoluteUrl(
+            util.htmlEntitiesToUtf8(prev_link.attributes.href or "")),
+    }
+end
+
 function Ao3:parseWorkId(input)
     input = trim(input)
     local id = input:match("/works/(%d+)")
@@ -3830,11 +3891,96 @@ function Ao3:tagDialog()
     dialog:onShowKeyboard()
 end
 
-function Ao3:authorDialog()
+-- Author search: one people-search request answers both cases. An exact name
+-- is unambiguous and opens that author; anything else is a list of the
+-- accounts and pseuds AO3 matched, with the usual paging rows underneath.
+-- `url` is carried through paging so the reader stays in the same search.
+function Ao3:searchAuthorsAt(query, url, replace)
+    self:fetchPage(url, function(html)
+        return self:parsePeopleSearch(html)
+    end, _("Searching authors…"), function(data)
+        self:showAuthorMatches(query, data, url, replace)
+    end)
+end
+
+function Ao3:searchAuthors(query)
+    query = trim(query or "")
+    if query == "" then return end
+    self:searchAuthorsAt(query, self:peopleSearchUrl(query), false)
+end
+
+function Ao3:showAuthorMatches(query, data, url, replace)
+    if #data.items == 0 then
+        -- No list to choose from: open the name directly, the way browsing an
+        -- author worked before search existed, so an exact name still opens
+        -- even if AO3 changes the results markup.
+        self:showAuthor(query, self:authorWorksUrl(query))
+        return
+    end
+
+    -- Only the first page decides: paging through results must not bounce the
+    -- reader into an author page.
+    if not url:match("[?&]page=") then
+        local wanted = query:lower()
+        for _, item in ipairs(data.items) do
+            if item.name:lower() == wanted or item.user:lower() == wanted then
+                self:showAuthor(item.name, item.url)
+                return
+            end
+        end
+    end
+
+    local rows = {}
+    for _, item in ipairs(data.items) do
+        rows[#rows + 1] = {
+            text = item.name,
+            -- The login, when the account's name is a different pseud.
+            mandatory = item.user ~= item.name and item.user or nil,
+            action = function()
+                self:showAuthor(item.name, item.url)
+            end,
+        }
+    end
+    table.insert(rows, 1, {
+        text = _("Search authors…"),
+        mandatory = "“" .. query .. "”",
+        ao3_icon = "search",
+        action = function()
+            self:authorDialog(query)
+        end,
+    })
+    if data.prev_url then
+        rows[#rows + 1] = {
+            text = _("← Previous authors"),
+            action = function()
+                self:searchAuthorsAt(query, data.prev_url, true)
+            end,
+        }
+    end
+    if data.next_url then
+        rows[#rows + 1] = {
+            text = _("Next authors →"),
+            action = function()
+                self:searchAuthorsAt(query, data.next_url, true)
+            end,
+        }
+    end
+
+    local title = T(_("Authors matching “%1”"), query)
+    if replace then
+        self:replaceRows(title, rows)
+    else
+        self:pushRows(title, rows)
+    end
+end
+
+-- `current` pre-fills the field when the reader is refining a search.
+function Ao3:authorDialog(current)
     local dialog
     dialog = InputDialog:new{
         title = _("Browse an AO3 author"),
         description = _("Author name or profile URL"),
+        input = current or "",
         buttons = {{
             {
                 text = _("Cancel"),
@@ -3849,11 +3995,13 @@ function Ao3:authorDialog()
                 callback = function()
                     local input = trim(dialog:getInputValue())
                     UIManager:close(dialog)
-                    if input ~= "" then
+                    if input == "" then return end
+                    if input:match("^https?://") or input:sub(1, 1) == "/" then
+                        -- A pasted profile link is already unambiguous.
                         local url = self:authorWorksUrl(input)
-                        if url then
-                            self:showAuthor(input, url)
-                        end
+                        if url then self:showAuthor(input, url) end
+                    else
+                        self:searchAuthors(input)
                     end
                 end,
             },

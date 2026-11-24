@@ -143,6 +143,12 @@ describe("AO3 browser", function()
                 plugin:authorWorksUrl("An Author"))
         end)
 
+        it("builds a people search URL", function()
+            assert.are.equal(
+                "https://archiveofourown.org/people/search?people_search%5Bq%5D=Harbor%20Lights",
+                plugin:peopleSearchUrl("Harbor Lights"))
+        end)
+
         it("appends the works list to a pasted author page", function()
             assert.are.equal(
                 "https://archiveofourown.org/users/foo/pseuds/bar/works",
@@ -260,6 +266,72 @@ describe("AO3 browser", function()
             assert.are.equal(
                 "https://archiveofourown.org/tags/Foo/works?page=2",
                 listing.next_url)
+        end)
+    end)
+
+    describe("parsePeopleSearch", function()
+        it("lists the accounts and pseuds AO3 matched, once each", function()
+            local data, err = plugin:parsePeopleSearch(
+                read_fixture("people_search.html"))
+            assert.is_nil(err)
+            -- The third blurb repeats harborlight, and the header greeting is
+            -- not a result: three becomes two.
+            assert.are.equal(2, #data.items)
+
+            assert.are.equal("harborlight", data.items[1].name)
+            assert.are.equal("harborlight", data.items[1].user)
+            assert.are.equal(
+                "https://archiveofourown.org/users/harborlight", data.items[1].url)
+
+            -- A pseud whose display name differs from its account.
+            assert.are.equal("Harbor Lights", data.items[2].name)
+            assert.are.equal("harbor_lights", data.items[2].user)
+            assert.are.equal(
+                "https://archiveofourown.org/users/harbor_lights/pseuds/Harbor%20Lights",
+                data.items[2].url)
+        end)
+
+        it("carries the next page of results", function()
+            local data = assert(plugin:parsePeopleSearch(
+                read_fixture("people_search.html")))
+            assert.are.equal(
+                "https://archiveofourown.org/people/search?people_search%5Bq%5D=har&page=2",
+                data.next_url)
+            assert.is_nil(data.prev_url)
+        end)
+
+        it("reads a page whose blurbs lost their class", function()
+            -- Markup drift must still list names rather than nothing.
+            local html = [[
+                <html><body><div id="main">
+                <ol class="index group">
+                  <li><div class="header module">
+                    <h4><a href="/users/quiet_writer">quiet_writer</a></h4>
+                  </div></li>
+                </ol>
+                </div></body></html>
+            ]]
+            local data, err = plugin:parsePeopleSearch(html)
+            assert.is_nil(err)
+            assert.are.equal(1, #data.items)
+            assert.are.equal("quiet_writer", data.items[1].name)
+        end)
+
+        it("returns an empty list when nothing matches", function()
+            local data, err = plugin:parsePeopleSearch(
+                "<html><body><div id=\"main\"><h2>Search Results</h2>"
+                .. "<p>No results found.</p></div></body></html>")
+            assert.is_nil(err)
+            assert.are.equal(0, #data.items)
+        end)
+
+        it("turns AO3's robot page into an error, not an empty list", function()
+            local data, err = plugin:parsePeopleSearch(
+                "<html><body><p>The bot servers are currently overloaded. "
+                .. "Our systems think you may be a robot.</p></body></html>")
+            assert.is_nil(data)
+            assert.is_truthy(err)
+            assert.is_truthy(err:find("browser check", 1, true))
         end)
     end)
 
@@ -1330,15 +1402,15 @@ describe("AO3 browser", function()
             end
         end)
 
-        it("browses works by a typed author from home", function()
+        it("searches for a typed author from home", function()
             local UIManager = require("ui/uimanager")
             local old_show, old_close = UIManager.show, UIManager.close
             local shown
             UIManager.show = function(_, widget) shown = widget end
             UIManager.close = function() end
-            local opened_url, opened_title
-            plugin.showAuthor = function(_, name, profile)
-                opened_url, opened_title = name, profile
+            local searched
+            plugin.searchAuthors = function(_, query)
+                searched = query
             end
             local ok, err = pcall(function()
                 local author_tile
@@ -1356,11 +1428,11 @@ describe("AO3 browser", function()
                 shown.buttons[1][2].callback()
             end)
             UIManager.show, UIManager.close = old_show, old_close
-            plugin.showAuthor = nil
+            plugin.searchAuthors = nil
             assert.is_true(ok, err)
-            assert.are.equal("An Author", opened_url)
-            assert.are.equal(
-                "https://archiveofourown.org/users/An%20Author/works", opened_title)
+            -- A typed name is a search now: an exact one still lands on the
+            -- author, and a partial one lists the accounts AO3 matched.
+            assert.are.equal("An Author", searched)
         end)
 
         it("labels Read as an offline action for a cached work", function()
