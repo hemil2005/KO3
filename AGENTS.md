@@ -35,6 +35,11 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - The KO3 entry sits directly on the Tools tab, fourth from the top (before
   Statistics, `sorting_hint = "tools"`), so it stays on page 1. Not nested
   under More tools.
+- **Author** on the landing page searches AO3's people directory instead of
+  guessing a profile URL from a name: an exact account or pseud opens that
+  author, anything shorter lists the matches. A pasted profile URL opens
+  directly. A search with no readable results falls back to opening the name,
+  so an exact author never stops working.
 - Closing the plugin always lands in KOReader. Opening a work closes
   KOReader's file manager (`ShowingReader`), so after returning from the
   reader the plugin menu can be the last window; show the file manager when

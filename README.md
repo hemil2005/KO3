@@ -38,12 +38,12 @@ details captured from a live work.
 | ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
 | ![Tag box open in the list](screenshots/40-work-list-tags.png) | ![Settings](screenshots/41-settings.png) |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
-| ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Sign in on the landing page](screenshots/24-home-signed-out.png) |
-| ![Account on the landing page](screenshots/25-home-signed-in.png) | ![Work account actions](screenshots/26-work-account-actions.png) |
-| ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) | ![Account page](screenshots/28-account.png) |
-| ![Chapter-only TOC](screenshots/14-reader-toc.png) | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) |
-| ![Back to AO3 at end](screenshots/16-end-dialog-back.png) | ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) |
-| ![KO3 on the first Tools page](screenshots/34-tools-menu.png) | |
+| ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
+| ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
+| ![Work account actions](screenshots/26-work-account-actions.png) | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) |
+| ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
+| ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
+| ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![KO3 on the first Tools page](screenshots/34-tools-menu.png) |
 
 ## Install
 
@@ -99,7 +99,7 @@ name beside the icon, with a one-line hint underneath:
 | **Search works** (solid bar) | Work title, author or keyword |
 | **Latest works** | Newest works across the archive (`/works`) |
 | **Fandoms** | Categorized fandom index, shipped with the plugin |
-| **Author** | An author's name or profile URL — their works list |
+| **Author** | A name searches AO3's people directory: an exact name opens that author, a partial one lists the accounts it matched. A profile URL opens directly |
 | **Tag** | A tag name, or paste a full `/tags/.../works` URL |
 | **Account** | Sign in to AO3, then your bookmarks, marked-for-later, history and subscriptions |
 | **Downloads** | Works already saved on this device |
@@ -151,6 +151,14 @@ table for rating, warnings, category, status and date. **Summary** and
 **Tags** stay folded until tapped; a summary too long for one page is elided
 and opens in full from **Read full summary**. Each author's name opens the
 author page (co-authors each get a row; Anonymous stays plain text).
+
+**Author** on the landing page takes a profile URL or a name. A name is
+searched in AO3's people directory rather than guessed at: a name that is an
+exact account or pseud opens that author straight away, and anything shorter
+lists every account AO3 matched, with the same paging rows as the other
+shelves. The list sits over the landing page, so Back returns there, and the
+search row at its top repeats the term and reopens the dialog to refine it.
+A pasted profile URL skips the search.
 
 The author page has four tabs in one pill-shaped bar — a rounded strip split
 by three hairlines into equal options — and that bar is the page's whole
@@ -477,7 +485,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 296 tests passing across parser, navigation,
+- The offline `busted` suite: 310 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and

@@ -1068,6 +1068,183 @@ describe("AO3 fandom search", function()
 end)
 
 
+describe("AO3 author search", function()
+    local plugin
+
+    -- Results as parsePeopleSearch returns them; the URLs are the profile
+    -- links AO3 gives each hit.
+    local function matches(rows)
+        local data = { items = {} }
+        for i, row in ipairs(rows) do
+            data.items[i] = {
+                name = row[1],
+                user = row[2],
+                url = "https://archiveofourown.org/users/" .. row[2],
+            }
+        end
+        return data
+    end
+
+    local query_url = "https://archiveofourown.org/people/search?people_search%5Bq%5D=harbor"
+
+    local function open_matches(query, data, url, replace)
+        plugin.menu = nil
+        local old_show = UIManager.show
+        UIManager.show = function() end
+        local menu = plugin:ensureMenu()
+        plugin.menu = menu
+        plugin:showAuthorMatches(query, data, url or query_url, replace)
+        UIManager.show = old_show
+        return menu
+    end
+
+    before_each(function()
+        plugin = setmetatable({}, { __index = Ao3 })
+    end)
+
+    after_each(function()
+        plugin.menu = nil
+    end)
+
+    it("opens the author when the name is exact", function()
+        local opened
+        plugin.showAuthor = function(_, name, url)
+            opened = { name = name, url = url }
+        end
+
+        plugin:showAuthorMatches("harborlight", matches({
+            { "harborlight", "harborlight" },
+            { "harborlight_2", "harborlight_2" },
+        }), query_url, false)
+
+        assert.are.equal("harborlight", opened.name)
+        assert.are.equal(
+            "https://archiveofourown.org/users/harborlight", opened.url)
+    end)
+
+    it("recognises an exact login whose display name is a pseud", function()
+        local opened
+        plugin.showAuthor = function(_, name) opened = name end
+
+        plugin:showAuthorMatches("harbor_lights", matches({
+            { "Harbor Lights", "harbor_lights" },
+            { "harborlight", "harborlight" },
+        }), query_url, false)
+
+        assert.are.equal("Harbor Lights", opened)
+    end)
+
+    it("lists the matches when the name is only part of them", function()
+        local menu = open_matches("harbor", matches({
+            { "harborlight", "harborlight" },
+            { "Harbor Lights", "harbor_lights" },
+        }))
+
+        assert.are.equal("Authors matching “harbor”", menu.ao3_title)
+        local search_row = menu.item_table[1]
+        assert.are.equal("Search authors…", search_row.text)
+        assert.are.equal("“harbor”", search_row.mandatory)
+        assert.is_truthy(search_row.ao3_icon)
+
+        assert.are.equal("harborlight", menu.item_table[2].text)
+        assert.is_nil(menu.item_table[2].mandatory)
+        assert.are.equal("Harbor Lights", menu.item_table[3].text)
+        assert.are.equal("harbor_lights", menu.item_table[3].mandatory)
+    end)
+
+    it("opens the author tapped in the list", function()
+        local menu = open_matches("harbor", matches({
+            { "harborlight", "harborlight" },
+            { "Harbor Lights", "harbor_lights" },
+        }))
+        local opened
+        plugin.showAuthor = function(_, name, url)
+            opened = { name = name, url = url }
+        end
+
+        menu.item_table[3].action()
+        assert.are.equal("Harbor Lights", opened.name)
+        assert.are.equal(
+            "https://archiveofourown.org/users/harbor_lights", opened.url)
+    end)
+
+    it("does not jump into an author while paging the results", function()
+        local opened
+        plugin.showAuthor = function() opened = true end
+
+        local menu = open_matches("harborlight", matches({
+            { "harborlight", "harborlight" },
+        }), query_url .. "&page=2")
+
+        assert.is_nil(opened)
+        assert.are.equal("Authors matching “harborlight”", menu.ao3_title)
+    end)
+
+    it("pages the list with the next and previous links", function()
+        local asked
+        local menu = open_matches("harbor", {
+            items = {
+                { name = "harborlight", user = "harborlight",
+                  url = "https://archiveofourown.org/users/harborlight" },
+            },
+            next_url = query_url .. "&page=2",
+            prev_url = query_url,
+        })
+        plugin.searchAuthorsAt = function(_, query, url, replace)
+            asked = { query = query, url = url, replace = replace }
+        end
+
+        local count = #menu.item_table
+        assert.are.equal("← Previous authors", menu.item_table[count - 1].text)
+        assert.are.equal("Next authors →", menu.item_table[count].text)
+
+        menu.item_table[count].action()
+        assert.are.equal("harbor", asked.query)
+        assert.are.equal(query_url .. "&page=2", asked.url)
+        assert.is_true(asked.replace)
+    end)
+
+    it("falls back to opening the name when AO3 returns no matches", function()
+        local opened
+        plugin.showAuthor = function(_, name, url)
+            opened = { name = name, url = url }
+        end
+
+        plugin:showAuthorMatches("harborlight", { items = {} }, query_url, false)
+
+        assert.are.equal("harborlight", opened.name)
+        assert.are.equal(
+            "https://archiveofourown.org/users/harborlight/works", opened.url)
+    end)
+
+    it("searches a name and opens a pasted profile link", function()
+        local searched, opened
+        plugin.searchAuthors = function(_, query) searched = query end
+        plugin.showAuthor = function(_, name) opened = name end
+
+        local old_show, old_close = UIManager.show, UIManager.close
+        local dialog
+        UIManager.show = function(_, widget) dialog = widget end
+        UIManager.close = function() end
+        plugin:authorDialog("harbor")
+        assert.are.equal("harbor", dialog.input)
+
+        dialog.getInputValue = function() return "harborlight" end
+        dialog.buttons[1][2].callback()
+        assert.are.equal("harborlight", searched)
+        assert.is_nil(opened)
+
+        dialog.getInputValue = function()
+            return "https://archiveofourown.org/users/foo"
+        end
+        dialog.buttons[1][2].callback()
+        assert.are.equal("https://archiveofourown.org/users/foo", opened)
+
+        UIManager.show, UIManager.close = old_show, old_close
+    end)
+end)
+
+
 -- Work actions and the account screen are built by their own modules, so they
 -- are exercised as widgets: labels, tap targets and the marks that say a
 -- state is already on.
