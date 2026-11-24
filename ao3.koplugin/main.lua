@@ -495,27 +495,40 @@ function Ao3:loadFandomIndex()
     return index
 end
 
+-- One index record per fandom. The letter browser and its search results share
+-- the row, so a search hit looks exactly like the record it was found in.
+function Ao3:fandomRecordRow(entry)
+    return {
+        text = entry.name,
+        mandatory = entry.count ~= "" and entry.count or nil,
+        ao3_fandom = true,
+        action = function()
+            self:loadListing(BASE_URL .. entry.url, entry.name)
+        end,
+    }
+end
+
+function Ao3:fandomRecordRows(entries)
+    local rows = {}
+    for _, entry in ipairs(entries or {}) do
+        rows[#rows + 1] = self:fandomRecordRow(entry)
+    end
+    return rows
+end
+
 function Ao3:loadFandomLetter(category, letter, offset)
     local page = FandomPages.page(self:fandomDataDir(), category.index, letter, offset)
     if not page then return nil end
-    local rows = {}
-    for _, entry in ipairs(page.entries) do
-        rows[#rows + 1] = {
-            text = entry.name,
-            mandatory = entry.count ~= "" and entry.count or nil,
-            ao3_fandom = true,
-            action = function()
-                self:loadListing(BASE_URL .. entry.url, entry.name)
-            end,
-        }
-    end
-    return rows, page
+    return self:fandomRecordRows(page.entries), page
 end
 
-function Ao3:findFandomOffset(category, letter, query)
-    local offset, err = FandomPages.find(self:fandomDataDir(), category.index, letter, query)
-    if not offset then return nil, err end
-    return math.floor(offset / FandomPages.DEFAULT_PAGE_SIZE) * FandomPages.DEFAULT_PAGE_SIZE
+-- Results are pages of matches, in the letter's own order; the term may sit
+-- anywhere in the name, which is what `FandomPages.search` guarantees.
+function Ao3:searchFandomLetter(category, letter, query, offset)
+    local page = FandomPages.search(self:fandomDataDir(), category.index, letter,
+        query, offset)
+    if not page then return nil end
+    return self:fandomRecordRows(page.entries), page
 end
 
 -- ---------------------------------------------------------------------------
@@ -1368,6 +1381,22 @@ function Ao3MenuItem:buildIndex(metrics)
     return row
 end
 
+-- A quiet mark at the left of a compact row, for rows that are actions rather
+-- than records (the fandom search). Rendered at title size so it reads as part
+-- of the line, and skipped silently on a build without SVG support.
+function Ao3MenuItem:rowIcon(name, metrics)
+    if not name or not self.icons_dir then return nil end
+    local size = math.max(1, metrics.title_h)
+    local ok, widget = pcall(ImageWidget.new, ImageWidget, {
+        file = self.icons_dir .. name .. ".svg",
+        width = size,
+        height = size,
+        alpha = true,
+    })
+    if ok and widget then return widget end
+    return nil
+end
+
 function Ao3MenuItem:buildCompact(metrics)
     local title_face = Font:getFace("smallinfofont", metrics.title_size)
     local mandatory = self.entry.mandatory
@@ -1379,17 +1408,29 @@ function Ao3MenuItem:buildCompact(metrics)
     } or nil
     local mandatory_w = self.mandatory_widget and self.mandatory_widget:getWidth() or 0
     local gap = mandatory_w > 0 and Size.span.horizontal_default or 0
+
+    local icon = self:rowIcon(self.entry.ao3_icon, metrics)
+    self.icon_widget = icon
+    -- An image answers getSize(), not getWidth() the way a text widget does.
+    local icon_w = icon and icon:getSize().w or 0
+    local icon_gap = icon and Size.span.horizontal_default or 0
+
     self.title_widget = TextWidget:new{
         text = self.entry.text or "",
         face = title_face,
         bold = self.entry.bold == true,
-        max_width = math.max(1, self.content_width - mandatory_w - gap),
+        max_width = math.max(1, self.content_width - icon_w - icon_gap
+            - mandatory_w - gap),
     }
 
     local row = HorizontalGroup:new{ align = "center" }
+    if icon then
+        row[#row + 1] = icon
+        row[#row + 1] = HorizontalSpan:new{ width = icon_gap }
+    end
     row[#row + 1] = self.title_widget
     if self.mandatory_widget then
-        local spacer = math.max(0, self.content_width
+        local spacer = math.max(0, self.content_width - icon_w - icon_gap
             - self.title_widget:getWidth() - mandatory_w - gap)
         row[#row + 1] = HorizontalSpan:new{ width = gap + spacer }
         row[#row + 1] = self.mandatory_widget
@@ -3510,6 +3551,7 @@ function Ao3:showFandomLetterPage(category, letter, offset, replace)
     end
     table.insert(rows, strip and 2 or 1, {
         text = _("Find in this letter…"),
+        ao3_icon = "search",
         action = function()
             self:findFandomDialog(category, letter)
         end,
@@ -3552,11 +3594,85 @@ function Ao3:showFandomLetterPage(category, letter, offset, replace)
     end
 end
 
-function Ao3:findFandomDialog(category, letter)
+-- A search is a filtered list, not a jump: every fandom in the letter whose
+-- name contains the term is listed in the letter's order, a window at a time,
+-- with the letter index still pinned above so another letter is one tap away.
+-- It is pushed over the letter page, so Back returns the reader to the page
+-- they were browsing rather than to the category list.
+function Ao3:showFandomSearch(category, letter, query, offset, replace)
+    local rows, page = self:searchFandomLetter(category, letter, query, offset)
+    if not rows then
+        UIManager:show(InfoMessage:new{
+            text = _("Could not read that part of the fandom list."),
+        })
+        return
+    end
+    if page.total == 0 then
+        UIManager:show(InfoMessage:new{
+            text = T(_("No fandom under %1 contains “%2”."), letter, query),
+        })
+        return
+    end
+
+    local strip = self:fandomLetterIndex(category, letter, nil, function(selected)
+        self:showFandomLetterPage(category, selected, 0, true)
+    end)
+    if strip then
+        table.insert(rows, 1, { ao3_tabs = strip, ao3_sticky = true })
+    end
+    table.insert(rows, strip and 2 or 1, {
+        text = _("Find in this letter…"),
+        -- The term is the row's value, the way a count is a record's: one
+        -- glance says what this list is filtered by.
+        mandatory = "“" .. query .. "”",
+        ao3_icon = "search",
+        action = function()
+            -- Refining a search replaces the results rather than stacking a
+            -- second copy of the same list on top of the first.
+            self:findFandomDialog(category, letter, true, query)
+        end,
+    })
+
+    if page.offset > 0 then
+        rows[#rows + 1] = {
+            text = _("← Previous 100 matches"),
+            action = function()
+                self:showFandomSearch(category, letter, query,
+                    math.max(0, page.offset - page.page_size), true)
+            end,
+        }
+    end
+    if page.next_offset then
+        rows[#rows + 1] = {
+            text = _("Next 100 matches →"),
+            action = function()
+                self:showFandomSearch(category, letter, query,
+                    page.next_offset, true)
+            end,
+        }
+    end
+
+    local title
+    if page.total == 1 then
+        title = T(_("%1 · 1 match"), category.name)
+    else
+        title = T(_("%1 · %2 matches"), category.name, formatCount(page.total))
+    end
+    if replace then
+        self:replaceRows(title, rows)
+    else
+        self:pushRows(title, rows)
+    end
+end
+
+-- `replace` says where a new search lands: over the letter page it was asked
+-- from (the default), or in place when the reader is already looking at
+-- results. `current` pre-fills the field so a term can be refined.
+function Ao3:findFandomDialog(category, letter, replace, current)
     local dialog
     dialog = InputDialog:new{
         title = T(_("Find in %1 · %2"), category.name, letter),
-        description = _("Part of a fandom name"),
+        input = current or "",
         buttons = {{
             { text = _("Cancel"), id = "close", callback = function()
                 UIManager:close(dialog)
@@ -3565,14 +3681,7 @@ function Ao3:findFandomDialog(category, letter)
                 local query = trim(dialog:getInputValue())
                 UIManager:close(dialog)
                 if query == "" then return end
-                local offset, err = self:findFandomOffset(category, letter, query)
-                if offset then
-                    self:showFandomLetterPage(category, letter, offset, true)
-                else
-                    UIManager:show(InfoMessage:new{
-                        text = err or _("No matching fandom in this letter."),
-                    })
-                end
+                self:showFandomSearch(category, letter, query, 0, replace)
             end },
         }},
     }

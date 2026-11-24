@@ -628,7 +628,13 @@ describe("AO3 browser", function()
                 assert.are.equal(11, #rows)
                 assert.are.equal("Name 211", rows[11].text)
                 assert.is_nil(page.next_offset)
-                assert.are.equal(200, plugin:findFandomOffset(category, "N", "name 207"))
+                -- A search is a window too: one match out of 211 is one row,
+                -- wherever it sits in the letter.
+                local matches, found = plugin:searchFandomLetter(category, "N", "name 207")
+                assert.are.equal(1, found.total)
+                assert.are.equal(1, #matches)
+                assert.are.equal("Name 207", matches[1].text)
+                assert.are.equal("207", matches[1].mandatory)
             end)
             plugin.path = old_path
             assert.is_true(ok, err)
