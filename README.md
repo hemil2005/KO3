@@ -38,11 +38,12 @@ details captured from a live work.
 | ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
 | ![Tag box open in the list](screenshots/40-work-list-tags.png) | ![Settings](screenshots/41-settings.png) |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
-| ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
-| ![Work account actions](screenshots/26-work-account-actions.png) | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) |
-| ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
-| ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
-| ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![KO3 on the first Tools page](screenshots/34-tools-menu.png) |
+| ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Sign in on the landing page](screenshots/24-home-signed-out.png) |
+| ![Account on the landing page](screenshots/25-home-signed-in.png) | ![Work account actions](screenshots/26-work-account-actions.png) |
+| ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) | ![Account page](screenshots/28-account.png) |
+| ![Chapter-only TOC](screenshots/14-reader-toc.png) | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) |
+| ![Back to AO3 at end](screenshots/16-end-dialog-back.png) | ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) |
+| ![KO3 on the first Tools page](screenshots/34-tools-menu.png) | |
 
 ## Install
 
@@ -133,11 +134,14 @@ one line, ending in "+N more"; tapping it opens that work's tags in place (up
 to six lines) without opening the work. The work's details page still carries
 the complete tag list.
 
-**Settings** (the gear beside the AO3 name) has one option: **Expanded tags:**
-**On** or **Off**. Off is the default and keeps every tag box to one line; On
-starts each listing with the boxes open. The choice is stored in
-`settings/ao3_prefs.lua`, separately from the AO3 session, so Log out does not
-reset it.
+**Settings** (the gear beside the AO3 name) has two options. **Expanded tags:**
+**On** or **Off** — Off is the default and keeps every tag box to one line; On
+starts each listing with the boxes open. **Work cards:** **Modern** or
+**Legacy** — Modern is the default, with the AO3 symbols, fandom and
+relationships, the tag box and the word/chapter numbers; Legacy is the simpler
+card the plugin started with, a bold title, the author and the first three
+lines of the summary. Both choices are stored in `settings/ao3_prefs.lua`,
+separately from the AO3 session, so Log out does not reset them.
 
 Tap a result to drill in; tap a work for its details. The work screen leads
 with the title, author and fandom, then **Read** (the solid bar, which
@@ -380,10 +384,17 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   from their content, so an opened tag box moves the records below rather than
   clipping them. Three works fit on a 600×800 page with the tags folded.
   Captured in `screenshots/06` and `40`.
-- Settings has exactly one option — **Expanded tags:** On or Off — stored in
-  `settings/ao3_prefs.lua`, separately from the AO3 session. A tap flips it,
-  the row redraws with its new value, and the next listing follows it.
-  Captured in `screenshots/41`.
+- With **Work cards: Legacy**, the same lists render the 0.x card instead: a
+  bold title, the author's plain name and a three-line summary, with no
+  symbols, classifications, tags or numbers. They are measured and paged at
+  their own, shorter height, so a page of them neither clips the last card nor
+  leaves an empty band. Captured in `screenshots/44`.
+- Settings has two options, each a label and its value — **Expanded tags:** On
+  or Off and **Work cards:** Modern or Legacy — stored in
+  `settings/ao3_prefs.lua`, separately from the AO3 session. A tap flips the
+  choice, the row redraws with its new value, and every work list already on
+  the back stack is restyled from its own rows, so returning to it shows the
+  new design without fetching the page again. Captured in `screenshots/41`.
 - The work screen is one page, not a key/value list: title/author/fandom,
   Read and Refresh, a four-number strip, an aligned metadata table, four
   account actions (Kudos, Bookmark, Subscribe, Mark for later), and folded
@@ -466,7 +477,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 284 tests passing across parser, navigation,
+- The offline `busted` suite: 293 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and

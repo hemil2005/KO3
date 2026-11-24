@@ -11,15 +11,23 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   plugin customises, such as the table of contents. Do not rely on
   `Device:hasKeyboard()`: the emulator reports a keyboard and draws the
   Q/W/E shortcut column even though the target device is a touchscreen.
-- Work cards: AO3's rating, warning, category and completion marks as a 2×2
-  ink grid beside a bold title; the byline shares the title's line when both
-  fit; fandoms and relationships share one line when they fit; a one-line tag
-  box that opens in place on tap; up to three summary lines; one separator per
-  card; no per-row shortcut boxes. Three works fit a 600×800 page with the
-  tags folded.
-- Settings is one row, **Expanded tags:** On or Off, opened by the gear at the
-  right of the landing masthead. The choice lives in
-  `settings/ao3_prefs.lua`, separate from the AO3 session, so Log out keeps it.
+- Work cards come in two designs. **Modern** (the default) is AO3's rating,
+  warning, category and completion marks as a 2×2 ink grid beside a bold title;
+  the byline shares the title's line when both fit; fandoms and relationships
+  share one line when they fit; a one-line tag box that opens in place on tap;
+  up to three summary lines; words, chapters and the last update. **Legacy** is
+  the 0.x card: a bold title, the author's plain name and up to three summary
+  lines, with no marks, classifications, tags or numbers, measured and paged at
+  its own height. Both keep one separator per card and no per-row shortcut
+  boxes. Three modern works fit a 600×800 page with the tags folded.
+- Settings has two rows and no prose, opened by the gear at the right of the
+  landing masthead: **Expanded tags:** On/Off and **Work cards:**
+  Modern/Legacy. Both choices live in `settings/ao3_prefs.lua`, separate from
+  the AO3 session, so Log out keeps them. Flipping the card design restyles
+  work rows already on the back stack; never refetch a page to redraw it.
+- Card detail ink is `Uikit.CARD_DETAIL` (0x44), one tier darker than
+  `Uikit.SECONDARY`, for the byline, fandom, ships, tags, summary and stats
+  labels: the 0x66/0x88 greys wash out on e-ink under a bold black title.
 - The author page is one screen: the author's masthead, the pill of four tabs,
   then a count line and the shelf. Every tab keeps the masthead and the tab
   strip sits at the same height; the native title bar names the shelf, not the

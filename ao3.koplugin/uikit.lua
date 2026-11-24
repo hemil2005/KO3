@@ -26,6 +26,12 @@ local TextWidget = require("ui/widget/textwidget")
 local Uikit = {}
 
 Uikit.SECONDARY = Blitbuffer.COLOR_DARK_GRAY
+-- The work card's detail ink. Byline, fandom, ships, tags, summary and the
+-- stats labels all sit in this one tier: dark enough to read comfortably on
+-- e-ink, still clearly below the bold black title. It is deliberately darker
+-- than Uikit.SECONDARY, which is a quiet label above body text on the other
+-- screens, not the body itself.
+Uikit.CARD_DETAIL = Blitbuffer.COLOR_GRAY_4
 Uikit.RULE = Blitbuffer.COLOR_GRAY_5
 Uikit.RULE_H = rawget(Size.line, "thin") or 1
 

@@ -920,9 +920,22 @@ local function metadataSharesLine(entry, metrics, text_w)
         + measuredWidth(ships, face, false) <= text_w
 end
 
+-- The legacy card is a title, the author's plain name and the blurb, so it
+-- pays for neither the symbol margin nor the classifications. Measured from
+-- the same pieces it draws, so a short blurb leaves no blank band beneath it.
+local function ao3LegacyCardHeight(entry, metrics, content_width)
+    return metrics.title_h + Size.span.vertical_default + metrics.meta_h
+        + Size.span.vertical_large
+        + summaryHeight(entry, metrics, content_width)
+        + metrics.linesize
+end
+
 -- Exact height of a card, shared by the menu's height pass and the widget
 -- builder, so an opened tag box cannot clip the text below it.
 local function ao3CardHeight(entry, metrics, content_width)
+    if entry.card_style == "legacy" then
+        return ao3LegacyCardHeight(entry, metrics, content_width)
+    end
     local work = entry.ao3_work or {}
     local grid = hasSymbols(work)
     local text_w = grid
@@ -1054,9 +1067,9 @@ function Ao3MenuItem:buildSymbols(work, metrics)
     return grid
 end
 
--- Words, chapters, updated: the record's numbers, with the labels in Slate
--- and the values in bold ink. A trailing fact that will not fit is dropped
--- rather than wrapped onto a second line.
+-- Words, chapters, updated: the record's numbers, with the labels in the
+-- card's detail ink and the values in bold ink. A trailing fact that will not
+-- fit is dropped rather than wrapped onto a second line.
 function Ao3MenuItem:buildStats(work, metrics, width)
     local face = Font:getFace("smallinfofont", metrics.info_size)
     local items = {}
@@ -1077,7 +1090,7 @@ function Ao3MenuItem:buildStats(work, metrics, width)
         local label = TextWidget:new{
             text = item.label,
             face = face,
-            fgcolor = Uikit.SECONDARY,
+            fgcolor = Uikit.CARD_DETAIL,
         }
         local value = TextWidget:new{
             text = item.value,
@@ -1096,7 +1109,7 @@ function Ao3MenuItem:buildStats(work, metrics, width)
             row[#row + 1] = TextWidget:new{
                 text = "·",
                 face = face,
-                fgcolor = Uikit.SECONDARY,
+                fgcolor = Uikit.CARD_DETAIL,
             }
             row[#row + 1] = HorizontalSpan:new{ width = Size.span.horizontal_small }
         end
@@ -1124,7 +1137,7 @@ function Ao3MenuItem:buildTagBox(work, metrics, width)
         text = expanded and "-" or "+",
         face = Font:getFace("cfont", metrics.info_size),
         bold = true,
-        fgcolor = Uikit.SECONDARY,
+        fgcolor = Uikit.CARD_DETAIL,
     }
 
     local text
@@ -1137,13 +1150,13 @@ function Ao3MenuItem:buildTagBox(work, metrics, width)
             height_adjust = true,
             height_overflow_show_ellipsis = true,
             alignment = "left",
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
         }
     else
         text = TextWidget:new{
             text = fittedTags(tags, face, text_w),
             face = face,
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
             max_width = text_w,
         }
     end
@@ -1194,7 +1207,7 @@ function Ao3MenuItem:buildCard(metrics)
     local author_widget = TextWidget:new{
         text = T(_("by %1"), author ~= "" and author or _("Anonymous")),
         face = Font:getFace("smallinfofont", metrics.info_size),
-        fgcolor = Blitbuffer.COLOR_GRAY_6,
+        fgcolor = Uikit.CARD_DETAIL,
         max_width = text_w,
     }
     self.title_widget = title_widget
@@ -1249,13 +1262,13 @@ function Ao3MenuItem:buildCard(metrics)
         self.fandom_widget = TextWidget:new{
             text = work.fandoms,
             face = Font:getFace("smallinfofont", metrics.info_size),
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
             max_width = text_w,
         }
         self.ships_widget = TextWidget:new{
             text = work.relationships,
             face = Font:getFace("smallinfofont", metrics.info_size),
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
             max_width = text_w,
         }
         local meta = HorizontalGroup:new{ align = "center" }
@@ -1263,7 +1276,7 @@ function Ao3MenuItem:buildCard(metrics)
         meta[#meta + 1] = TextWidget:new{
             text = " · ",
             face = Font:getFace("smallinfofont", metrics.info_size),
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
         }
         meta[#meta + 1] = self.ships_widget
         addBlock(meta, Size.span.vertical_default)
@@ -1272,7 +1285,7 @@ function Ao3MenuItem:buildCard(metrics)
             self.fandom_widget = TextWidget:new{
                 text = work.fandoms,
                 face = Font:getFace("smallinfofont", metrics.info_size),
-                fgcolor = Blitbuffer.COLOR_GRAY_6,
+                fgcolor = Uikit.CARD_DETAIL,
                 max_width = text_w,
             }
             addBlock(self.fandom_widget, Size.span.vertical_default)
@@ -1281,7 +1294,7 @@ function Ao3MenuItem:buildCard(metrics)
             self.ships_widget = TextWidget:new{
                 text = work.relationships,
                 face = Font:getFace("smallinfofont", metrics.info_size),
-                fgcolor = Blitbuffer.COLOR_GRAY_6,
+                fgcolor = Uikit.CARD_DETAIL,
                 max_width = text_w,
             }
             addBlock(self.ships_widget, Size.span.vertical_default)
@@ -1301,7 +1314,7 @@ function Ao3MenuItem:buildCard(metrics)
             height_adjust = true,
             height_overflow_show_ellipsis = true,
             alignment = "left",
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
         }
         addBlock(self.summary_widget, Size.span.vertical_large)
     end
@@ -1325,6 +1338,48 @@ function Ao3MenuItem:buildCard(metrics)
     else
         content[#content + 1] = body
     end
+    return content
+end
+
+-- The card as it was before the redesign: a bold title, the author's plain
+-- name and a three-line blurb. No symbols, classifications, tags or numbers,
+-- and no air reserved for any of them.
+function Ao3MenuItem:buildLegacyCard(metrics)
+    local width = self.content_width
+    local author = trim(self.entry.mandatory or "")
+    local summary = trim(self.entry.summary or "")
+
+    self.title_widget = TextWidget:new{
+        text = trim(self.entry.text or "") ~= "" and self.entry.text or _("Untitled"),
+        face = Font:getFace("smallinfofont", metrics.title_size),
+        bold = true,
+        max_width = width,
+    }
+    self.author_widget = TextWidget:new{
+        text = author ~= "" and author or _("Anonymous"),
+        face = Font:getFace("smallinfofont", metrics.info_size),
+        -- Legacy means the simpler layout, not paler ink: the same readable
+        -- detail tier as the modern card's byline.
+        fgcolor = Uikit.CARD_DETAIL,
+        max_width = width,
+    }
+    self.summary_widget = TextBoxWidget:new{
+        text = summary,
+        face = Font:getFace("smallinfofont", metrics.summary_size),
+        width = width,
+        height = metrics.summary_h,
+        height_adjust = true,
+        height_overflow_show_ellipsis = true,
+        alignment = "left",
+        fgcolor = Uikit.CARD_DETAIL,
+    }
+
+    local content = VerticalGroup:new{ align = "left" }
+    content[#content + 1] = self.title_widget
+    content[#content + 1] = VerticalSpan:new{ width = Size.span.vertical_default }
+    content[#content + 1] = self.author_widget
+    content[#content + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+    content[#content + 1] = self.summary_widget
     return content
 end
 
@@ -1451,7 +1506,11 @@ function Ao3MenuItem:init()
         -- spacing; the menu only supplies the focus underline.
         content = self.entry.ao3_panel
     elseif self.entry.ao3_work then
-        content = self:buildCard(metrics)
+        if self.entry.card_style == "legacy" then
+            content = self:buildLegacyCard(metrics)
+        else
+            content = self:buildCard(metrics)
+        end
     elseif self.entry.ao3_fandom or self.entry.ao3_series then
         content = self:buildIndex(metrics)
     else
@@ -1762,6 +1821,7 @@ function Ao3:workRow(work)
         -- The setting is the default; a tap on this card's tag box changes
         -- only this row, until the listing is fetched again.
         tags_expanded = self.prefs and self.prefs.tags_expanded == true or false,
+        card_style = Preferences.cardStyle(self.prefs and self.prefs.card_style),
         action = function()
             self:showWork(work)
         end,
@@ -2044,7 +2104,9 @@ end
 function Ao3:settingsRows()
     return SettingsPage.build{
         tags_expanded = self.prefs and self.prefs.tags_expanded == true,
+        card_style = Preferences.cardStyle(self.prefs and self.prefs.card_style),
         on_toggle = function() self:toggleTagsDefault() end,
+        on_toggle_card_style = function() self:toggleCardStyle() end,
     }
 end
 
@@ -2057,6 +2119,40 @@ function Ao3:toggleTagsDefault()
     if self.menu then
         self:replaceRows(_("Settings"), self:settingsRows())
     end
+end
+
+-- The card design is stored the moment it changes too. Work lists already on
+-- Menu's navigation stack carry the design they were built with, so stamp the
+-- new one on their rows: returning to a list rebuilds its widgets from those
+-- rows, in the new design, without fetching the page again.
+function Ao3:toggleCardStyle()
+    self.prefs = self.prefs or Preferences.load()
+    local style = Preferences.cardStyle(self.prefs.card_style) == "legacy"
+        and "modern" or "legacy"
+    self.prefs.card_style = style
+    Preferences.save(self.prefs)
+    self:restyleWorkRows(style)
+    if self.menu then
+        self:replaceRows(_("Settings"), self:settingsRows())
+    end
+end
+
+function Ao3:restyleWorkRows(style)
+    local menu = self.menu
+    if not menu then return end
+    local function restyle(rows)
+        for _, row in ipairs(rows or {}) do
+            if row.ao3_work then
+                row.card_style = style
+                -- The blurb and the tag box are measured against the text
+                -- column, which only the modern card's symbol grid narrows.
+                row.ao3_summary_height = nil
+                row.ao3_tag_height = nil
+            end
+        end
+    end
+    restyle(menu.item_table)
+    for _, rows in ipairs(menu.item_table_stack or {}) do restyle(rows) end
 end
 
 function Ao3:showSettings()
