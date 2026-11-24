@@ -24,6 +24,7 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InfoMessage = require("ui/widget/infomessage")
+local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
 local LeftContainer = require("ui/widget/container/leftcontainer")
@@ -399,6 +400,8 @@ local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
 local WorkPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "workpage.lua")))
 local HomePage = dofile((MAIN_SOURCE:gsub("main%.lua$", "homepage.lua")))
 local AccountPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "accountpage.lua")))
+local SettingsPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "settingspage.lua")))
+local Preferences = dofile((MAIN_SOURCE:gsub("main%.lua$", "preferences.lua")))
 local Uikit = dofile((MAIN_SOURCE:gsub("main%.lua$", "uikit.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
 BugReport = dofile((MAIN_SOURCE:gsub("main%.lua$", "bugreport.lua")))
@@ -573,6 +576,35 @@ end
 
 local AO3_CARD_SUMMARY_LINES = 3
 local AO3_CARD_SUMMARY_CHARS = 320
+-- An expanded tag box stops at six lines: a listing is for choosing a work,
+-- and a card taller than the page would be clipped by the menu. The details
+-- page still carries the complete tag list.
+local AO3_CARD_TAG_LINES = 6
+
+-- AO3's required-tag symbols, redrawn in the catalogue's own ink. The shapes
+-- are AO3's (a lettered rating square, a warning mark, a gender symbol and a
+-- completion mark); the colour is not, because the device is grayscale and
+-- the design has no hue. The symbol grid is the letter index of a work.
+local RATING_LETTERS = {
+    ["rating-general-audience"] = "G",
+    ["rating-teen"] = "T",
+    ["rating-mature"] = "M",
+    ["rating-explicit"] = "E",
+    ["rating-notrated"] = "?",
+}
+local WARNING_GLYPHS = {
+    ["warning-yes"] = "!",
+    ["warning-choosenotto"] = "!?",
+    ["warning-external-work"] = "↗",
+}
+local CATEGORY_ICONS = {
+    ["category-gen"] = "category-gen",
+    ["category-slash"] = "category-slash",
+    ["category-het"] = "category-het",
+    ["category-femslash"] = "category-femslash",
+    ["category-multi"] = "category-multi",
+    ["category-other"] = "category-other",
+}
 
 local function ao3CardSizes(font_size, infont_size)
     local title_size = math.max(12, math.floor(font_size or 20))
@@ -601,6 +633,10 @@ local function lineHeight(face, bold)
     return h
 end
 
+-- Forward declaration: the card metrics need text measurement, and the
+-- measurement cache is defined below for the fandom index.
+local measuredWidth
+
 local function ao3CardMetrics(font_size, infont_size, linesize)
     local title_size, info_size, summary_size = ao3CardSizes(font_size, infont_size)
     local title_face = Font:getFace("smallinfofont", title_size)
@@ -614,20 +650,47 @@ local function ao3CardMetrics(font_size, infont_size, linesize)
     -- keeps two records apart; the second line is only paid when used.
     local fandom_line_h = math.floor((1 + 0.3) * title_size + 0.5)
     local fandom_pad = 2 * Size.span.vertical_large
-    local card_content_h = title_h + author_h + summary_h
-        + Size.span.vertical_default + Size.span.vertical_large
+
+    -- The symbol grid is two cells square with a hairline gap; the card's
+    -- text column starts after it. A cell is sized from the type, not from a
+    -- frozen pixel value, so the grid grows with the reader's font setting.
+    local symbol = Screen:scaleBySize(22)
+    local symbol_gap = Screen:scaleBySize(3)
+    local symbol_w = 2 * symbol + symbol_gap
+    local symbol_glyph = math.max(9, math.floor(symbol * 0.66))
+
+    local tag_glyph_w = measuredWidth("+", Font:getFace("cfont", info_size), true)
+    local tag_glyph_h = lineHeight(Font:getFace("cfont", info_size), true)
+    local tag_line_h = math.floor((1 + 0.3) * info_size + 0.5)
+
     return {
         title_size = title_size,
         info_size = info_size,
         summary_size = summary_size,
+        title_h = title_h,
+        meta_h = author_h,
         summary_h = summary_h,
+        summary_line_h = summary_line_h,
+        symbol = symbol,
+        symbol_gap = symbol_gap,
+        symbol_w = symbol_w,
+        symbol_glyph = symbol_glyph,
+        -- Air above the first line, so a symbol cell never touches the
+        -- separator of the card above it.
+        top_pad = Size.span.vertical_large,
+        -- With the grid present the title and byline sit beside it; without
+        -- one the top block is just the two lines of type.
+        top_h = math.max(symbol_w, title_h + Size.span.vertical_default + author_h),
+        tag_border = Size.border.default,
+        tag_pad = Size.padding.default,
+        tag_glyph_w = tag_glyph_w,
+        tag_glyph_h = tag_glyph_h,
+        tag_line_h = tag_line_h,
+        linesize = linesize,
         fandom_name_h = 2 * fandom_line_h,
         fandom_line_h = fandom_line_h,
         fandom_one_line_h = fandom_line_h + fandom_pad + linesize,
         fandom_two_line_h = 2 * fandom_line_h + fandom_pad + linesize,
-        card_h = card_content_h + linesize,
-        card_no_summary_h = title_h + author_h
-            + Size.span.vertical_default + Size.span.vertical_large + linesize,
         compact_h = title_h + 2 * Size.span.vertical_default + linesize,
     }
 end
@@ -639,7 +702,7 @@ local measured_width_cache = {}
 local measured_width_count = 0
 local MEASURED_WIDTH_CACHE_MAX = 2000
 
-local function measuredWidth(text, face, bold)
+measuredWidth = function(text, face, bold)
     local key = tostring(face.size or 0) .. (bold and "b" or "n") .. "\1" .. text
     local width = measured_width_cache[key]
     if width then return width end
@@ -681,46 +744,560 @@ local function fandomNameLines(entry, content_width, metrics)
     return 1
 end
 
-local Ao3MenuItem = InputContainer:extend{
-    linesize = Size.line.medium,
-    line_color = Blitbuffer.COLOR_DARK_GRAY,
-}
+-- The tag box is the one control inside a work card: a paper fold with one
+-- line of tags closed and up to six lines open. The section headers' +/−
+-- glyph sits in its corner, so the tap has a visible affordance.
+local function tagTextWidth(width, metrics)
+    return math.max(1, width - 2 * (metrics.tag_border + metrics.tag_pad)
+        - metrics.tag_glyph_w - Size.span.horizontal_small)
+end
 
-function Ao3MenuItem:buildCard(metrics)
-    local width = self.content_width
-    local author = trim(self.entry.mandatory or "")
-    local summary = trim(self.entry.summary or "")
+-- Fit as many whole tags as one line allows, then say how many are left.
+-- A tag is never cut in half: a half-tag is worse than a count.
+local function fittedTags(tags, face, width)
+    local all = table.concat(tags, ", ")
+    if measuredWidth(all, face, false) <= width then return all end
 
-    self.title_widget = TextWidget:new{
-        text = trim(self.entry.text or "") ~= "" and self.entry.text or _("Untitled"),
-        face = Font:getFace("smallinfofont", metrics.title_size),
-        bold = true,
-        max_width = width,
-    }
-    self.author_widget = TextWidget:new{
-        text = author ~= "" and author or _("Anonymous"),
-        face = Font:getFace("smallinfofont", metrics.info_size),
-        fgcolor = Blitbuffer.COLOR_GRAY_6,
-        max_width = width,
-    }
-    self.summary_widget = TextBoxWidget:new{
-        text = summary,
+    local prefix, count = "", 0
+    for i = 1, #tags do
+        local candidate = count == 0 and tags[i] or (prefix .. ", " .. tags[i])
+        if measuredWidth(candidate, face, false) <= width then
+            prefix, count = candidate, i
+        else
+            break
+        end
+    end
+
+    local more = #tags - count
+    local suffix = " " .. T(_("+%1 more"), more)
+    while count > 0 and measuredWidth(prefix .. suffix, face, false) > width do
+        count = count - 1
+        prefix = count > 0 and table.concat(tags, ", ", 1, count) or ""
+    end
+    if count == 0 then return T(_("+%1 more"), more) end
+    return prefix .. suffix
+end
+
+local function tagBoxHeight(tags, metrics, width, expanded, entry)
+    local text_h = metrics.meta_h
+    if expanded then
+        -- Build the same TextBox the card will show and take its height: a
+        -- line count alone would miss the glyph allowance the widget adds.
+        -- The height is cached on the row so paging does not lay the tags out
+        -- again; only an open box pays for it.
+        local key = tostring(metrics.info_size) .. ":" .. tostring(width)
+        local cached = entry and entry.ao3_tag_height
+        if cached and cached.key == key then
+            text_h = cached.h
+        else
+            local box = TextBoxWidget:new{
+                text = table.concat(tags, ", "),
+                face = Font:getFace("smallinfofont", metrics.info_size),
+                width = tagTextWidth(width, metrics),
+                height = AO3_CARD_TAG_LINES * metrics.tag_line_h,
+                height_adjust = true,
+                height_overflow_show_ellipsis = true,
+                alignment = "left",
+            }
+            text_h = box:getSize().h
+            box:free()
+            if entry then
+                entry.ao3_tag_height = { key = key, h = text_h }
+            end
+        end
+    end
+    return 2 * (metrics.tag_border + metrics.tag_pad)
+        + math.max(text_h, metrics.tag_glyph_h)
+end
+
+local function hasSymbols(work)
+    return work.rating_key or work.warning_key
+        or work.category_key or work.complete_key
+end
+
+local function hasStats(work)
+    return trim(work.words or "") ~= "" or trim(work.chapters or "") ~= ""
+        or trim(work.updated or "") ~= ""
+end
+
+-- A blurb is paid for by the lines it actually uses, not by the three-line
+-- ceiling: a two-line summary must not leave a blank line under the card.
+-- The box is built exactly as the card will show it and measured, because a
+-- line whose glyph overflows its nominal height is a pixel taller than the
+-- line count suggests. The measurement is cached on the row, since the menu
+-- re-runs its height pass on every page turn.
+local function summaryHeight(entry, metrics, width)
+    local text = trim(entry.summary or "")
+    if text == "" then return 0 end
+    local key = tostring(metrics.summary_size) .. ":" .. tostring(width)
+    local cached = entry.ao3_summary_height
+    if cached and cached.key == key then return cached.h end
+
+    local box = TextBoxWidget:new{
+        text = text,
         face = Font:getFace("smallinfofont", metrics.summary_size),
         width = width,
         height = metrics.summary_h,
         height_adjust = true,
         height_overflow_show_ellipsis = true,
         alignment = "left",
-        fgcolor = Blitbuffer.COLOR_GRAY_6,
+    }
+    local h = box:getSize().h
+    box:free()
+    entry.ao3_summary_height = { key = key, h = h }
+    return h
+end
+
+-- The title and its byline share one line when both fit: the catalogue reads
+-- "title ... by author" across the row instead of paying a second line for a
+-- short name. A title too long to leave room keeps the byline beneath it, and
+-- the same measurement drives the height pass and the widget builder so a card
+-- is never measured for fewer lines than it draws.
+local function titleSharesByline(entry, metrics, text_w)
+    local title = trim(entry.text or "")
+    local author = trim(entry.mandatory or "")
+    local title_w = title ~= "" and measuredWidth(title,
+        Font:getFace("smallinfofont", metrics.title_size), true) or 0
+    local author_w = measuredWidth(T(_("by %1"),
+        author ~= "" and author or _("Anonymous")),
+        Font:getFace("smallinfofont", metrics.info_size), false)
+    return title_w + Size.span.horizontal_default + author_w <= text_w
+end
+
+-- Fandom and relationships are both classification, so they share a line when
+-- they fit and keep a line each when they do not.
+local function metadataSharesLine(entry, metrics, text_w)
+    local work = entry.ao3_work or {}
+    local fandom = trim(work.fandoms or "")
+    local ships = trim(work.relationships or "")
+    if fandom == "" or ships == "" then return true end
+    local face = Font:getFace("smallinfofont", metrics.info_size)
+    return measuredWidth(fandom, face, false)
+        + measuredWidth(" · ", face, false)
+        + measuredWidth(ships, face, false) <= text_w
+end
+
+-- Exact height of a card, shared by the menu's height pass and the widget
+-- builder, so an opened tag box cannot clip the text below it.
+local function ao3CardHeight(entry, metrics, content_width)
+    local work = entry.ao3_work or {}
+    local grid = hasSymbols(work)
+    local text_w = grid
+        and math.max(1, content_width - metrics.symbol_w - Size.padding.large)
+        or content_width
+    local type_h = metrics.title_h
+    if not titleSharesByline(entry, metrics, text_w) then
+        type_h = type_h + Size.span.vertical_default + metrics.meta_h
+    end
+    local h = metrics.top_pad
+        + (grid and math.max(metrics.symbol_w, type_h) or type_h)
+
+    local first = true
+    local function add(gap, block_h)
+        h = h + (first and Size.span.vertical_large or gap) + block_h
+        first = false
+    end
+    local has_fandom = trim(work.fandoms or "") ~= ""
+    local has_ships = trim(work.relationships or "") ~= ""
+    if has_fandom or has_ships then
+        local meta_h = metrics.meta_h
+        if has_fandom and has_ships
+                and not metadataSharesLine(entry, metrics, text_w) then
+            meta_h = 2 * meta_h + Size.span.vertical_default
+        end
+        add(0, meta_h)
+    end
+    if work.tag_list and #work.tag_list > 0 then
+        add(Size.span.vertical_large, tagBoxHeight(work.tag_list, metrics,
+            text_w, entry.tags_expanded == true, entry))
+    end
+    local summary_h = summaryHeight(entry, metrics, text_w)
+    if summary_h > 0 then
+        add(Size.span.vertical_large, summary_h)
+    end
+    if hasStats(work) then add(Size.span.vertical_large, metrics.meta_h) end
+    return h + metrics.top_pad + metrics.linesize
+end
+
+-- A square cell with one mark. A blank cell is AO3's symbol for "none", so
+-- it stays a square rather than disappearing from the grid.
+local function symbolCell(content, metrics)
+    local border = Size.border.default
+    local inner = metrics.symbol - 2 * border
+    return FrameContainer:new{
+        bordersize = border,
+        color = Blitbuffer.COLOR_BLACK,
+        background = Blitbuffer.COLOR_WHITE,
+        margin = 0,
+        padding = 0,
+        CenterContainer:new{
+            dimen = Geom:new{ w = inner, h = inner },
+            content,
+        },
+    }
+end
+
+local function blankCell(metrics)
+    return symbolCell(VerticalSpan:new{ width = 0 }, metrics)
+end
+
+local Ao3MenuItem = InputContainer:extend{
+    linesize = Size.line.medium,
+    line_color = Blitbuffer.COLOR_DARK_GRAY,
+}
+
+-- The AO3 symbols are vector files rendered at cell size, so they stay sharp
+-- on every screen and fall back to a blank cell on a build without SVG.
+function Ao3MenuItem:symbolImage(name, metrics)
+    if not self.icons_dir then return nil end
+    local ok, widget = pcall(ImageWidget.new, ImageWidget, {
+        file = self.icons_dir .. name .. ".svg",
+        width = metrics.symbol_glyph,
+        height = metrics.symbol_glyph,
+        alpha = true,
+    })
+    if ok and widget then return widget end
+    return nil
+end
+
+-- Rating, warnings, category, completion: a 2x2 grid beside the title. It is
+-- the card's classification mark, the way a catalogue entry carries its
+-- subject code before the title.
+function Ao3MenuItem:buildSymbols(work, metrics)
+    if not hasSymbols(work) then return nil end
+
+    local function textCell(glyph)
+        if not glyph or glyph == "" then return blankCell(metrics) end
+        return symbolCell(TextWidget:new{
+            text = glyph,
+            face = Font:getFace("smallinfofont", metrics.symbol_glyph),
+            bold = true,
+            max_width = metrics.symbol,
+        }, metrics)
+    end
+    local function imageCell(name)
+        local image = name and self:symbolImage(name, metrics)
+        if not image then return blankCell(metrics) end
+        return symbolCell(image, metrics)
+    end
+
+    local rating = textCell(RATING_LETTERS[work.rating_key or ""])
+    local warning = textCell(WARNING_GLYPHS[work.warning_key or ""])
+    local category = imageCell(CATEGORY_ICONS[work.category_key or ""])
+    local complete
+    if work.complete_key == "complete-yes" then
+        complete = textCell("✓")
+    elseif work.complete_key == "complete-no" then
+        complete = imageCell("complete-no")
+    else
+        complete = blankCell(metrics)
+    end
+
+    local top = HorizontalGroup:new{ align = "center" }
+    top[#top + 1] = rating
+    top[#top + 1] = HorizontalSpan:new{ width = metrics.symbol_gap }
+    top[#top + 1] = warning
+
+    local bottom = HorizontalGroup:new{ align = "center" }
+    bottom[#bottom + 1] = category
+    bottom[#bottom + 1] = HorizontalSpan:new{ width = metrics.symbol_gap }
+    bottom[#bottom + 1] = complete
+
+    local grid = VerticalGroup:new{ align = "left" }
+    grid[#grid + 1] = top
+    grid[#grid + 1] = VerticalSpan:new{ width = metrics.symbol_gap }
+    grid[#grid + 1] = bottom
+    self.symbol_grid = grid
+    return grid
+end
+
+-- Words, chapters, updated: the record's numbers, with the labels in Slate
+-- and the values in bold ink. A trailing fact that will not fit is dropped
+-- rather than wrapped onto a second line.
+function Ao3MenuItem:buildStats(work, metrics, width)
+    local face = Font:getFace("smallinfofont", metrics.info_size)
+    local items = {}
+    local function add(label, value)
+        value = trim(value or "")
+        if value ~= "" then
+            items[#items + 1] = { label = label, value = value }
+        end
+    end
+    add(_("Words"), work.words)
+    add(_("Chapters"), work.chapters)
+    add(_("Updated"), work.updated)
+    if #items == 0 then return nil end
+
+    local row = HorizontalGroup:new{ align = "center" }
+    local used = 0
+    for i, item in ipairs(items) do
+        local label = TextWidget:new{
+            text = item.label,
+            face = face,
+            fgcolor = Uikit.SECONDARY,
+        }
+        local value = TextWidget:new{
+            text = item.value,
+            face = face,
+            bold = true,
+        }
+        local piece = label:getWidth() + Size.padding.small + value:getWidth()
+        local gap = 0
+        if i > 1 then
+            gap = 2 * Size.span.horizontal_small + measuredWidth("·", face, false)
+        end
+        if used + gap + piece > width then break end
+
+        if i > 1 then
+            row[#row + 1] = HorizontalSpan:new{ width = Size.span.horizontal_small }
+            row[#row + 1] = TextWidget:new{
+                text = "·",
+                face = face,
+                fgcolor = Uikit.SECONDARY,
+            }
+            row[#row + 1] = HorizontalSpan:new{ width = Size.span.horizontal_small }
+        end
+        row[#row + 1] = label
+        row[#row + 1] = HorizontalSpan:new{ width = Size.padding.small }
+        row[#row + 1] = value
+        used = used + gap + piece
+    end
+    if used == 0 then return nil end
+    return row
+end
+
+-- The tag fold. Closed, it shows the tags that fit plus a count of the rest;
+-- open, the whole list up to the card's limit. Tapping it toggles in place
+-- without opening the work: the tap area is a child of the card, so it
+-- consumes the tap before the menu row does.
+function Ao3MenuItem:buildTagBox(work, metrics, width)
+    local tags = work.tag_list
+    if not tags or #tags == 0 then return nil end
+
+    local expanded = self.entry.tags_expanded == true
+    local face = Font:getFace("smallinfofont", metrics.info_size)
+    local text_w = tagTextWidth(width, metrics)
+    local glyph = TextWidget:new{
+        text = expanded and "-" or "+",
+        face = Font:getFace("cfont", metrics.info_size),
+        bold = true,
+        fgcolor = Uikit.SECONDARY,
     }
 
+    local text
+    if expanded then
+        text = TextBoxWidget:new{
+            text = table.concat(tags, ", "),
+            face = face,
+            width = text_w,
+            height = AO3_CARD_TAG_LINES * metrics.tag_line_h,
+            height_adjust = true,
+            height_overflow_show_ellipsis = true,
+            alignment = "left",
+            fgcolor = Blitbuffer.COLOR_GRAY_6,
+        }
+    else
+        text = TextWidget:new{
+            text = fittedTags(tags, face, text_w),
+            face = face,
+            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            max_width = text_w,
+        }
+    end
+
+    local inner_w = width - 2 * (metrics.tag_border + metrics.tag_pad)
+    local row = HorizontalGroup:new{ align = "top" }
+    row[#row + 1] = text
+    row[#row + 1] = HorizontalSpan:new{
+        width = math.max(0, inner_w - text:getSize().w - glyph:getWidth()),
+    }
+    row[#row + 1] = glyph
+
+    local frame = FrameContainer:new{
+        bordersize = metrics.tag_border,
+        color = Blitbuffer.COLOR_DARK_GRAY,
+        background = Blitbuffer.COLOR_WHITE,
+        margin = 0,
+        padding = metrics.tag_pad,
+        row,
+    }
+    self.tags_text_widget = text
+    return Uikit.tapArea(frame, width, frame:getSize().h, function()
+        self:toggleTags()
+    end)
+end
+
+function Ao3MenuItem:buildCard(metrics)
+    local width = self.content_width
+    local work = self.entry.ao3_work or {}
+    local author = trim(self.entry.mandatory or "")
+    local summary = trim(self.entry.summary or "")
+
+    local grid = self:buildSymbols(work, metrics)
+    local text_w = width
+    if grid then
+        text_w = math.max(1, width - metrics.symbol_w - Size.padding.large)
+    end
+
+    local title = trim(self.entry.text or "")
+    local title_widget = TextWidget:new{
+        text = title ~= "" and title or _("Untitled"),
+        face = Font:getFace("smallinfofont", metrics.title_size),
+        bold = true,
+        max_width = text_w,
+    }
+    -- "by" is the catalogue's word for it, and the byline keeps the right
+    -- edge of the card even when the title stops early.
+    local author_widget = TextWidget:new{
+        text = T(_("by %1"), author ~= "" and author or _("Anonymous")),
+        face = Font:getFace("smallinfofont", metrics.info_size),
+        fgcolor = Blitbuffer.COLOR_GRAY_6,
+        max_width = text_w,
+    }
+    self.title_widget = title_widget
+    self.author_widget = author_widget
+
+    local title_block
+    if titleSharesByline(self.entry, metrics, text_w) then
+        -- One line: the title on the left, the byline flush right, with the
+        -- remaining width as the gap between them.
+        title_widget.max_width = math.max(1, text_w
+            - author_widget:getWidth() - Size.span.horizontal_default)
+        title_block = HorizontalGroup:new{ align = "center" }
+        title_block[#title_block + 1] = title_widget
+        title_block[#title_block + 1] = HorizontalSpan:new{
+            width = math.max(0, text_w - title_widget:getWidth()
+                - author_widget:getWidth()),
+        }
+        title_block[#title_block + 1] = author_widget
+    else
+        local byline = HorizontalGroup:new{ align = "center" }
+        byline[#byline + 1] = HorizontalSpan:new{
+            width = math.max(0, text_w - author_widget:getWidth()),
+        }
+        byline[#byline + 1] = author_widget
+        title_block = VerticalGroup:new{ align = "left" }
+        title_block[#title_block + 1] = title_widget
+        title_block[#title_block + 1] = VerticalSpan:new{ width = Size.span.vertical_default }
+        title_block[#title_block + 1] = byline
+    end
+
+    local top = HorizontalGroup:new{ align = "top" }
+    if grid then
+        top[#top + 1] = grid
+        top[#top + 1] = HorizontalSpan:new{ width = Size.padding.large }
+    end
+    top[#top + 1] = title_block
+
+    -- The body hangs from the title's left edge, under the symbol margin.
+    local body = VerticalGroup:new{ align = "left" }
+    local function addBlock(widget, gap)
+        body[#body + 1] = VerticalSpan:new{
+            width = #body == 0 and Size.span.vertical_large or gap,
+        }
+        body[#body + 1] = widget
+    end
+
+    local fandom = trim(work.fandoms or "")
+    local ships = trim(work.relationships or "")
+    if fandom ~= "" and ships ~= "" and metadataSharesLine(self.entry, metrics, text_w) then
+        -- Both classifications on one line, separated by the same dot the
+        -- relationships themselves use.
+        self.fandom_widget = TextWidget:new{
+            text = work.fandoms,
+            face = Font:getFace("smallinfofont", metrics.info_size),
+            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            max_width = text_w,
+        }
+        self.ships_widget = TextWidget:new{
+            text = work.relationships,
+            face = Font:getFace("smallinfofont", metrics.info_size),
+            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            max_width = text_w,
+        }
+        local meta = HorizontalGroup:new{ align = "center" }
+        meta[#meta + 1] = self.fandom_widget
+        meta[#meta + 1] = TextWidget:new{
+            text = " · ",
+            face = Font:getFace("smallinfofont", metrics.info_size),
+            fgcolor = Blitbuffer.COLOR_GRAY_6,
+        }
+        meta[#meta + 1] = self.ships_widget
+        addBlock(meta, Size.span.vertical_default)
+    else
+        if fandom ~= "" then
+            self.fandom_widget = TextWidget:new{
+                text = work.fandoms,
+                face = Font:getFace("smallinfofont", metrics.info_size),
+                fgcolor = Blitbuffer.COLOR_GRAY_6,
+                max_width = text_w,
+            }
+            addBlock(self.fandom_widget, Size.span.vertical_default)
+        end
+        if ships ~= "" then
+            self.ships_widget = TextWidget:new{
+                text = work.relationships,
+                face = Font:getFace("smallinfofont", metrics.info_size),
+                fgcolor = Blitbuffer.COLOR_GRAY_6,
+                max_width = text_w,
+            }
+            addBlock(self.ships_widget, Size.span.vertical_default)
+        end
+    end
+    local tag_box = self:buildTagBox(work, metrics, text_w)
+    if tag_box then
+        self.tags_widget = tag_box
+        addBlock(tag_box, Size.span.vertical_large)
+    end
+    if summary ~= "" then
+        self.summary_widget = TextBoxWidget:new{
+            text = summary,
+            face = Font:getFace("smallinfofont", metrics.summary_size),
+            width = text_w,
+            height = metrics.summary_h,
+            height_adjust = true,
+            height_overflow_show_ellipsis = true,
+            alignment = "left",
+            fgcolor = Blitbuffer.COLOR_GRAY_6,
+        }
+        addBlock(self.summary_widget, Size.span.vertical_large)
+    end
+    local stats = self:buildStats(work, metrics, text_w)
+    if stats then
+        self.stats_widget = stats
+        addBlock(stats, Size.span.vertical_large)
+    end
+    body[#body + 1] = VerticalSpan:new{ width = metrics.top_pad }
+
     local content = VerticalGroup:new{ align = "left" }
-    content[#content + 1] = self.title_widget
-    content[#content + 1] = VerticalSpan:new{ width = Size.span.vertical_default }
-    content[#content + 1] = self.author_widget
-    content[#content + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
-    content[#content + 1] = self.summary_widget
+    content[#content + 1] = VerticalSpan:new{ width = metrics.top_pad }
+    content[#content + 1] = top
+    if grid then
+        local indented = HorizontalGroup:new{ align = "top" }
+        indented[#indented + 1] = HorizontalSpan:new{
+            width = metrics.symbol_w + Size.padding.large,
+        }
+        indented[#indented + 1] = body
+        content[#content + 1] = indented
+    else
+        content[#content + 1] = body
+    end
     return content
+end
+
+-- Open or close the tags in place. The menu owns paging, so its heights are
+-- recomputed and the page that now holds this card is redrawn; the work is
+-- not opened and Back still returns to the screen that opened the listing.
+function Ao3MenuItem:toggleTags()
+    local entry, menu = self.entry, self.menu
+    if not entry or not menu then return end
+    entry.tags_expanded = not entry.tags_expanded
+
+    if menu.setupItemHeights then menu:setupItemHeights() end
+    if menu.getPageNumber and entry.idx then
+        menu.page = menu:getPageNumber(entry.idx)
+    end
+    menu:updateItems()
 end
 
 -- A fandom index record: the name in bold, allowed to run to two lines and
@@ -788,6 +1365,8 @@ end
 
 function Ao3MenuItem:init()
     self.content_width = math.max(1, self.dimen.w - 2 * Size.padding.fullscreen)
+    self.icons_dir = (self.menu and self.menu.ao3_icons_dir)
+        or "plugins/ao3.koplugin/assets/icons/"
     local metrics = ao3CardMetrics(self.font_size, self.infont_size, self.linesize)
     self.ao3_metrics = metrics
 
@@ -959,7 +1538,7 @@ function Ao3WorkMenu:setupItemHeights()
             -- line is the focus underline.
             item.height = item.ao3_panel:getSize().h + self.linesize
         elseif item.ao3_work then
-            item.height = item.summary and metrics.card_h or metrics.card_no_summary_h
+            item.height = ao3CardHeight(item, metrics, self:fandomContentWidth())
         elseif item.ao3_fandom then
             -- An index record: one line for most names, two when the name
             -- needs it, never more.
@@ -1105,6 +1684,9 @@ function Ao3:workRow(work)
         mandatory = work.authors,
         ao3_work = work,
         summary = summary ~= "" and shorten(summary, AO3_CARD_SUMMARY_CHARS) or nil,
+        -- The setting is the default; a tap on this card's tag box changes
+        -- only this row, until the listing is fetched again.
+        tags_expanded = self.prefs and self.prefs.tags_expanded == true or false,
         action = function()
             self:showWork(work)
         end,
@@ -1382,6 +1964,28 @@ function Ao3:showAccount()
         end,
         on_logout = function() self:signOut() end,
     })
+end
+
+function Ao3:settingsRows()
+    return SettingsPage.build{
+        tags_expanded = self.prefs and self.prefs.tags_expanded == true,
+        on_toggle = function() self:toggleTagsDefault() end,
+    }
+end
+
+-- The default is stored the moment it changes; the settings row is rebuilt in
+-- place so its On/Off value follows the tap.
+function Ao3:toggleTagsDefault()
+    self.prefs = self.prefs or Preferences.load()
+    self.prefs.tags_expanded = not self.prefs.tags_expanded
+    Preferences.save(self.prefs)
+    if self.menu then
+        self:replaceRows(_("Settings"), self:settingsRows())
+    end
+end
+
+function Ao3:showSettings()
+    self:pushRows(_("Settings"), self:settingsRows())
 end
 
 function Ao3:learnAccountName(html)
@@ -2602,6 +3206,9 @@ function Ao3:ensureMenu()
     menu.item_table_stack = menu.item_table_stack or {}
     menu.ao3_title_stack = {}
     menu.ao3_title = _("AO3")
+    -- The card symbols and the settings gear are authored SVGs beside the
+    -- official logo; the menu carries the directory to every row.
+    menu.ao3_icons_dir = self:pluginDir() .. "/assets/icons/"
 
     -- The title bar's close button pads its tap zone one icon-height below a
     -- 49px bar, so its target covers the top half of the first content row.
@@ -2713,6 +3320,7 @@ function Ao3:homeRows()
         signed_in = self.session ~= nil,
         account_name = self.session and self.session.username or nil,
         on_account = function() self:showAccount() end,
+        on_settings = function() self:showSettings() end,
         on_search = function() self:searchDialog() end,
         on_latest = function()
             self:loadListing(self:recentUrl(), _("Latest works"))
@@ -3411,6 +4019,8 @@ function Ao3:init()
     -- A saved session is read from disk, not verified online. Browsing works
     -- as before when there is none.
     self.session = Account.load()
+    -- Display choices live in their own file, so Log out keeps them.
+    self.prefs = Preferences.load()
     self.ui.menu:registerToMainMenu(self)
     BugReport.log("session", table.concat(BugReport.environment(), " | "))
 end

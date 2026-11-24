@@ -13,16 +13,19 @@ require("commonrequire")
 local UIManager = require("ui/uimanager")
 local Screen = require("device").screen
 local Blitbuffer = require("ffi/blitbuffer")
+local Size = require("ui/size")
 
 local Ao3 = dofile("plugins/ao3.koplugin/main.lua")
 
-local function work(id, title, authors, summary)
-    return {
+local function work(id, title, authors, summary, extra)
+    local item = {
         id = id,
         title = title,
         authors = authors,
         summary = summary,
     }
+    for key, value in pairs(extra or {}) do item[key] = value end
+    return item
 end
 
 local function listing_with(items, extra)
@@ -244,7 +247,8 @@ describe("AO3 work-list cards", function()
         local menu = open_listing(listing_with({ with_summary, without_summary }))
 
         assert.is_true(menu.item_table[2].height < menu.item_table[1].height)
-        assert.is_true(menu.item_group[2].summary_widget:getSize().h <= 1)
+        -- No summary means no summary widget at all, not an empty one.
+        assert.is_nil(menu.item_group[2].summary_widget)
     end)
 
     it("pages cards without dropping or splitting a work", function()
@@ -331,7 +335,7 @@ describe("AO3 work-list cards", function()
         local card = menu.item_group[1]
         assert.are.equal(menu.item_table[1], card.entry)
         assert.are.equal("Test Work", card.title_widget.text)
-        assert.are.equal("Test Author", card.author_widget.text)
+        assert.are.equal("by Test Author", card.author_widget.text)
         assert.is_truthy(card.summary_widget)
         assert.is_true(card.title_widget.bold)
         assert.is_true(card.summary_widget.face.size < card.title_widget.face.size)
@@ -349,6 +353,197 @@ describe("AO3 work-list cards", function()
         assert.is_truthy(card.summary_widget.line_with_ellipsis)
     end)
 
+    it("puts the byline beside a short title and under a long one", function()
+        local short = work("1", "Short", "Writer", "A summary.")
+        local long = work("2", string.rep("A very long title ", 6), "Writer",
+            "A summary.")
+        local menu = open_listing(listing_with({ short, long }))
+
+        -- Same author and summary: the only difference is whether the byline
+        -- shared the title's line or paid for one of its own.
+        local metrics = menu.item_group[1].ao3_metrics
+        assert.are.equal(menu.item_table[1].height + metrics.meta_h
+            + Size.span.vertical_default, menu.item_table[2].height)
+    end)
+
+    it("shares a line between fandom and relationships when they fit", function()
+        local compact = work("1", "Compact", "Writer", "A summary.", {
+            fandoms = "Fandom",
+            relationships = "A/B",
+        })
+        local wide = work("2", "Wide", "Writer", "A summary.", {
+            fandoms = string.rep("Fandom name ", 8),
+            relationships = string.rep("Someone/Someone ", 8),
+        })
+        local menu = open_listing(listing_with({ compact, wide }))
+
+        assert.is_true(menu.item_table[2].height > menu.item_table[1].height)
+    end)
+
+    it("leaves air above the first line of every card", function()
+        local menu = open_listing(listing_with({ work("1", "Padded", "Writer",
+            "A summary.") }))
+        local card = menu.item_group[1]
+        -- The card begins with a spacer, so neither the title nor the symbol
+        -- grid sits flush against the separator of the card above.
+        local spacer = card.content_group[1]
+        assert.is_truthy(spacer.width)
+        assert.is_true(spacer.width > 0)
+    end)
+
+    it("measures each card for exactly the height it draws", function()
+        local menu = open_listing(listing_with({
+            work("1", "Short", "Writer", "A summary."),
+            work("2", "Long", "Writer", string.rep("word ", 100)),
+            work("3", "Tagged", "Writer", "A summary.", {
+                fandoms = "Fandom One, Fandom Two",
+                relationships = "A/B",
+                tag_list = { "One", "Two", "Three", "Four" },
+                rating_key = "rating-teen",
+                words = "4,913",
+                chapters = "1/1",
+                updated = "4 Jul 2020",
+            }),
+        }))
+        menu:paintTo(Screen.bb, 0, 0)
+        for _, card in ipairs(menu.item_group) do
+            assert.are.equal(card.content_group:getSize().h + card.linesize,
+                card.entry.height)
+        end
+    end)
+
+    it("fits at least three works on a page with the tags folded", function()
+        local items = {}
+        for i = 1, 5 do
+            items[i] = work(tostring(i), "Work " .. i, "Author " .. i,
+                "A summary.")
+        end
+        local menu = open_listing(listing_with(items))
+        assert.is_true(#menu.page_items[1] >= 3)
+    end)
+
+    it("marks a work with AO3's symbols, fandoms, ships and numbers", function()
+        local tagged = work("1", "Tagged", "Writer", "A summary.", {
+            rating_key = "rating-teen",
+            warning_key = "warning-yes",
+            category_key = "category-slash",
+            complete_key = "complete-yes",
+            fandoms = "Fandom One, Fandom Two",
+            relationships = "A/B",
+            words = "4,913",
+            chapters = "1/1",
+            updated = "4 Jul 2020",
+        })
+        local menu = open_listing(listing_with({ tagged }))
+        local card = menu.item_group[1]
+
+        -- Two cells square, drawn in ink: rating, warning, category, state.
+        assert.is_truthy(card.symbol_grid)
+        assert.are.equal(3, #card.symbol_grid)
+        local texts = {}
+        local function walk(widget)
+            if widget.text and widget.text ~= "" then texts[#texts + 1] = widget.text end
+            for _, child in ipairs(widget) do walk(child) end
+        end
+        walk(card.symbol_grid)
+        assert.is_truthy(table.concat(texts, "|"):find("T", 1, true))
+        assert.is_truthy(table.concat(texts, "|"):find("!", 1, true))
+        assert.is_truthy(table.concat(texts, "|"):find("✓", 1, true))
+
+        assert.are.equal("Fandom One, Fandom Two", card.fandom_widget.text)
+        assert.are.equal("A/B", card.ships_widget.text)
+        assert.are.same(Blitbuffer.COLOR_GRAY_6, card.fandom_widget.fgcolor)
+
+        -- Labels in Slate, values in bold ink.
+        local labels, values = {}, {}
+        for _, child in ipairs(card.stats_widget) do
+            if child.text == "Words" or child.text == "Chapters"
+                    or child.text == "Updated" then
+                labels[#labels + 1] = child.text
+                assert.are.same(Blitbuffer.COLOR_DARK_GRAY, child.fgcolor)
+            elseif child.text and child.bold then
+                values[#values + 1] = child.text
+            end
+        end
+        assert.are.same({ "Words", "Chapters", "Updated" }, labels)
+        assert.are.same({ "4,913", "1/1", "4 Jul 2020" }, values)
+    end)
+
+    it("folds the tags to one line and opens them on a tap without opening the work", function()
+        local Event = require("ui/event")
+        local Geom = require("ui/geometry")
+        local tags = {}
+        for i = 1, 12 do tags[i] = "Tag number " .. i end
+        local tagged = work("1", "Tagged", "Writer", "A summary.", {
+            tag_list = tags,
+            rating_key = "rating-general-audience",
+            warning_key = "warning-no",
+            category_key = "category-gen",
+            complete_key = "complete-yes",
+        })
+        local opened
+        plugin.showWork = function(_, selected) opened = selected end
+        local menu = open_listing(listing_with({ tagged }))
+        menu:paintTo(Screen.bb, 0, 0)
+
+        local card = menu.item_group[1]
+        assert.is_truthy(card.tags_widget)
+        -- The closed box is one line of whole tags plus the count of the rest.
+        local closed = card.tags_text_widget.text
+        assert.is_truthy(closed:find("more", 1, true))
+        assert.is_true(#closed < 120)
+
+        local height = menu.item_table[1].height
+        local depth = #menu.item_table_stack
+        local tag_area = card.tags_widget
+        local pos = Geom:new{
+            x = tag_area.dimen.x + 5,
+            y = tag_area.dimen.y + 5,
+        }
+        -- The real gesture path: the tap reaches the tag box through the
+        -- card's widget tree, so the box consumes it before the row does.
+        assert.is_true(card:handleEvent(Event:new("Gesture",
+            { ges = "tap", pos = pos, time = 0 })))
+        assert.is_true(menu.item_table[1].tags_expanded)
+        assert.is_nil(opened)
+        assert.is_true(menu.item_table[1].height > height)
+        assert.are.equal(table.concat(tags, ", "),
+            menu.item_group[1].tags_text_widget.text)
+
+        -- The menu still holds one card and one page: the tap did not push a
+        -- screen, so Back still returns to the listing that opened the work.
+        assert.are.equal(1, #menu.item_table)
+        assert.are.equal(depth, #menu.item_table_stack)
+
+        -- A second tap on the box folds it again.
+        menu:paintTo(Screen.bb, 0, 0)
+        local open_area = menu.item_group[1].tags_widget
+        assert.is_true(menu.item_group[1]:handleEvent(Event:new("Gesture",
+            { ges = "tap", time = 0,
+                pos = Geom:new{ x = open_area.dimen.x + 5,
+                    y = open_area.dimen.y + 5 } })))
+        assert.is_false(menu.item_table[1].tags_expanded)
+
+        -- A tap outside the box still opens the work.
+        menu:paintTo(Screen.bb, 0, 0)
+        assert.is_true(menu.item_group[1]:handleEvent(Event:new("Gesture",
+            { ges = "tap", pos = Geom:new{ x = 150, y = 75 }, time = 0 })))
+        assert.are.equal(tagged, opened)
+    end)
+
+    it("starts the tag box open when the setting says so", function()
+        local tagged = work("1", "Tagged", "Writer", "A summary.", {
+            tag_list = { "friendship", "slow burn", "fix-it" },
+            rating_key = "rating-general-audience",
+        })
+        plugin.prefs = { tags_expanded = true }
+        local menu = open_listing(listing_with({ tagged }))
+        assert.is_true(menu.item_table[1].tags_expanded)
+        local text = menu.item_group[1].tags_text_widget
+        assert.are.equal("friendship, slow burn, fix-it", text.text)
+        assert.is_nil(menu.item_group[1].tags_text_widget.line_with_ellipsis)
+    end)
+
     it("keeps title and summary inside one content group with no inner divider", function()
         local menu = open_listing(listing_with(
             { work("1", "Test Work", "Test Author", "A summary.") }
@@ -357,7 +552,7 @@ describe("AO3 work-list cards", function()
         local card = menu.item_group[1]
         assert.are.equal(card._underline_container, card._focus_indicator)
         assert.is_truthy(card.content_group)
-        assert.is_true(#card.content_group >= 3)
+        assert.is_true(#card.content_group >= 2)
         -- Only the card's bottom underline is present: every child of the
         -- content group is text or spacing, never a LineWidget.
         for _, child in ipairs(card.content_group) do

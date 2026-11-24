@@ -152,14 +152,45 @@ function AuthorPage.parseWorkNode(node)
         if name ~= "" then table.insert(fandoms, name) end
     end
 
-    local tags = {}
-    for _, a in ipairs(node:select("ul.tags.commas a.tag")) do
-        local name = plain(a)
-        if name ~= "" then table.insert(tags, name) end
+    -- The tags list mixes four kinds in one `ul`; the `li` class says which.
+    -- Warnings and relationships already have a place of their own on a work
+    -- card (the symbol grid and the ships line), so the card's tag box keeps
+    -- the characters and freeform tags without repeating them.
+    local tags, tag_list, relationships = {}, {}, {}
+    local tag_kinds = { warnings = true, relationships = true,
+        characters = true, freeforms = true }
+    for _, li in ipairs(node:select("ul.tags.commas li")) do
+        local a = first(li:select("a.tag"))
+        local name = a and plain(a) or ""
+        if name ~= "" then
+            table.insert(tags, name)
+            local kind
+            for _, class_name in ipairs(li.classes or {}) do
+                if tag_kinds[class_name] then kind = class_name break end
+            end
+            if kind == "relationships" then
+                table.insert(relationships, name)
+            elseif kind ~= "warnings" then
+                table.insert(tag_list, name)
+            end
+        end
     end
 
     local function stat(class_name)
         return plain(first(node:select("dd." .. class_name)))
+    end
+
+    -- The required-tags strip carries the symbol state in its classes
+    -- (`rating-teen`, `warning-choosenotto`, `category-slash`, ...). The
+    -- human text is still read for the facts table.
+    local function requiredKey(prefix)
+        for _, span in ipairs(node:select("ul.required-tags span")) do
+            for _, class_name in ipairs(span.classes or {}) do
+                if class_name:sub(1, #prefix + 1) == prefix .. "-" then
+                    return class_name
+                end
+            end
+        end
     end
 
     local rating = plain(first(node:select("ul.required-tags span.rating")))
@@ -176,11 +207,19 @@ function AuthorPage.parseWorkNode(node)
         author_urls = #author_urls > 0 and author_urls or nil,
         fandoms = table.concat(fandoms, ", "),
         tags = table.concat(tags, ", "),
+        tag_list = #tag_list > 0 and tag_list or nil,
+        relationships = table.concat(relationships, " · "),
+        relationship_list = #relationships > 0 and relationships or nil,
         summary = plain(first(node:select("blockquote.summary"))),
         rating = rating,
+        rating_key = requiredKey("rating"),
         warnings = warnings,
+        warning_key = requiredKey("warning"),
         category = category,
+        category_key = requiredKey("category"),
         complete = complete,
+        complete_key = first(node:select("ul.required-tags span.complete-yes")) and "complete-yes"
+            or (first(node:select("ul.required-tags span.complete-no")) and "complete-no" or nil),
         updated = plain(first(node:select("p.datetime"))),
         words = stat("words"),
         chapters = stat("chapters"),

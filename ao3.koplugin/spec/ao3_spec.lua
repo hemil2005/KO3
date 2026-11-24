@@ -176,6 +176,32 @@ describe("AO3 browser", function()
             assert.is_truthy(first.summary:find(
                 "When Athelas finds a baby dragon", 1, true))
 
+            -- The card's own fields: AO3's symbol state, the tag kinds kept
+            -- apart, and the numbers on the record line.
+            assert.are.equal("rating-general-audience", first.rating_key)
+            assert.are.equal("warning-no", first.warning_key)
+            assert.are.equal("category-gen", first.category_key)
+            assert.are.equal("complete-yes", first.complete_key)
+            assert.are.same({ "Female Lavellan", "Cassandra Pentaghast",
+                "Humour", "Fluff" },
+                { first.tag_list[1], first.tag_list[2], first.tag_list[3],
+                    first.tag_list[4] })
+            for _, tag in ipairs(first.tag_list) do
+                assert.are_not.equal("No Archive Warnings Apply", tag)
+            end
+            assert.are.equal("", first.relationships)
+
+            local shipped = listing.items[2]
+            assert.is_truthy(shipped.relationships:find("Aizawa Shouta", 1, true))
+            assert.is_truthy(shipped.relationship_list and #shipped.relationship_list > 0)
+            -- A relationship is shown on its own line, not repeated in the
+            -- tag box.
+            for _, tag in ipairs(shipped.tag_list) do
+                for _, ship in ipairs(shipped.relationship_list) do
+                    assert.are_not.equal(ship, tag)
+                end
+            end
+
             assert.is_truthy(listing.next_url)
             assert.is_truthy(listing.next_url:find("page=2", 1, true))
             assert.is_nil(listing.next_url:find("&amp;", 1, true))
@@ -788,6 +814,66 @@ describe("AO3 browser", function()
                 assert.is_false(last.keep_with_next == true,
                     "page ends alone on " .. tostring(last.role))
             end
+        end)
+
+        it("opens Settings from the gear and stores the tag default", function()
+            local DataStorage = require("datastorage")
+            local lfs = require("libs/libkoreader-lfs")
+            local Preferences = dofile("plugins/ao3.koplugin/preferences.lua")
+            local dir = DataStorage:getFullDataDir() .. "/ao3_prefs_test"
+            if lfs.attributes(dir, "mode") ~= "directory" then lfs.mkdir(dir) end
+            local prefs_path = dir .. "/ao3_prefs.lua"
+            os.remove(prefs_path)
+            os.remove(prefs_path .. ".old")
+            local old_dir = DataStorage.getSettingsDir
+            DataStorage.getSettingsDir = function() return dir end
+            plugin.prefs = { tags_expanded = false }
+
+            local ok, err = pcall(function()
+                local menu = open_home()
+
+                -- The gear sits in the masthead row, at the right edge.
+                local gear
+                local function walk(widget)
+                    if widget.onTap then gear = gear or widget end
+                    for _, child in ipairs(widget) do walk(child) end
+                end
+                walk(menu.item_group[1])
+                assert.is_truthy(gear)
+
+                gear.onTap()
+                assert.are.equal("Settings", menu.ao3_title)
+
+                -- Exactly one option: the label and its On/Off state.
+                assert.are.equal(1, #menu.item_table)
+                local row = menu.item_table[1]
+                assert.are.equal("tags_default", row.role)
+                assert.are.equal("Expanded tags:", row.text)
+                assert.are.equal("Off", row.mandatory)
+
+                row.action()
+                assert.is_true(plugin.prefs.tags_expanded)
+                assert.are.equal("On", menu.item_table[1].mandatory)
+
+                -- The choice is on disk, and a new listing follows it.
+                assert.is_true(Preferences.load(prefs_path).tags_expanded)
+                local work_row = plugin:workRow({
+                    id = "1", title = "A work", authors = "A writer",
+                    tag_list = { "friendship" },
+                })
+                assert.is_true(work_row.tags_expanded)
+
+                -- A second tap turns it off again.
+                menu.item_table[1].action()
+                assert.is_false(plugin.prefs.tags_expanded)
+                assert.are.equal("Off", menu.item_table[1].mandatory)
+                assert.is_false(Preferences.load(prefs_path).tags_expanded)
+            end)
+
+            DataStorage.getSettingsDir = old_dir
+            os.remove(prefs_path)
+            os.remove(prefs_path .. ".old")
+            assert.is_true(ok, err)
         end)
 
         it("ships the official logo, its traced SVG and the tile icons", function()

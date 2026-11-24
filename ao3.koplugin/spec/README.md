@@ -35,6 +35,12 @@ The tests are offline:
   restore-previous and checksum verification, with no network or real zip.
 - `ao3_bugreport_spec.lua` covers URL sanitising, log tails, consent-gated
   report bodies, bundle writing and token handling.
+- `ao3_ui_spec.lua` builds the real work cards and checks their anatomy: the
+  AO3 symbol grid, the right-aligned byline, fandoms and ships, the numbers,
+  and the tag fold — including the gesture path that lets a tap on the box
+  open it without opening the work.
+- `ao3_preferences_spec.lua` covers the reader-preferences file: defaults, a
+  round-trip, a non-boolean value, and its separation from the session file.
 - The report flow is also exercised through the UI: the home row, the
   editor, the log-consent dialog and the saved bundle.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and
