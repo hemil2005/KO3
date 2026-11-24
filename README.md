@@ -26,7 +26,7 @@ details captured from a live work.
 |---|---|
 | ![KO3 in the Tools menu](screenshots/01-menu.png) | ![Home](screenshots/02-home.png) |
 | ![Fandoms by media](screenshots/03-fandoms.png) | ![Fandom index](screenshots/04-letters.png) |
-| ![A letter's fandoms](screenshots/05-fandom-list.png) | ![Works with summaries](screenshots/06-works.png) |
+| ![A letter's fandoms](screenshots/05-fandom-list.png) | ![Works with symbols, tags and numbers](screenshots/06-works.png) |
 | ![Work details](screenshots/07-work-details.png) | ![Reading a work](screenshots/08-reading.png) |
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
 | ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
@@ -36,6 +36,7 @@ details captured from a live work.
 | ![Report row](screenshots/31-report-home.png) | ![Report editor](screenshots/32-report-editor.png) |
 | ![Log consent](screenshots/33-report-consent.png) | ![Report sent](screenshots/36-report-sent.png) |
 | ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
+| ![Tag box open in the list](screenshots/40-work-list-tags.png) | ![Settings](screenshots/41-settings.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
 | ![Work account actions](screenshots/26-work-account-actions.png) | ![Work actions while signed out](screenshots/27-work-actions-signed-out.png) |
 | ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
@@ -65,6 +66,8 @@ koreader/
       accountpage.lua
       authorpage.lua
       homepage.lua
+      settingspage.lua
+      preferences.lua
       workpage.lua
       uikit.lua
       updater.lua
@@ -84,7 +87,8 @@ the zip only has to be copied once.
 
 One menu entry opens the whole app. The landing page leads with the AO3 mark
 and name (the native title bar is left empty, so the wordmark is the only
-identity), then one solid **Search works** bar. Everything else is an icon
+identity), with a settings gear at the right edge of that line, then one solid
+**Search works** bar. Everything else is an icon
 tile grouped under **Browse**, **Library** and **Plugin**. Each tile keeps its
 name beside the icon, with a one-line hint underneath:
 
@@ -109,9 +113,26 @@ letter, so changing letters never means paging back. A fandom's name may run
 to two lines and is then elided; its work count keeps the right-hand column.
 Large letters load in local windows of up to 100 fandoms. **Find in this
 letter…** jumps to a matching name without going online; tapping a fandom
-fetches only its 20-work page. Each work is one selectable card with title,
-author and up to three lines of summary. On the AO3 screens, the letter
-shortcut boxes are hidden so the text gets the full touchscreen width.
+fetches only its 20-work page. On the AO3 screens, the letter shortcut boxes
+are hidden so the text gets the full touchscreen width.
+
+Each work is one selectable card. Beside the title sits AO3's own required-tag
+strip as a 2×2 grid of ink symbols: the rating letter (G/T/M/E), a warning
+mark, the category's symbol, and a check for a finished work. The bold title
+shares its line with the byline ("by …") when both fit; a title that needs the
+whole width keeps its line and the byline drops beneath it. Fandoms and
+relationships share one grey line when they fit, and take a line each when
+they do not. Then come the tag box, up to three lines of summary, and the
+record's numbers — words, chapters and the last update. The tag box stays to
+one line, ending in "+N more"; tapping it opens that work's tags in place (up
+to six lines) without opening the work. The work's details page still carries
+the complete tag list.
+
+**Settings** (the gear beside the AO3 name) has one option: **Expanded tags:**
+**On** or **Off**. Off is the default and keeps every tag box to one line; On
+starts each listing with the boxes open. The choice is stored in
+`settings/ao3_prefs.lua`, separately from the AO3 session, so Log out does not
+reset it.
 
 Tap a result to drill in; tap a work for its details. The work screen leads
 with the title, author and fandom, then **Read** (the solid bar, which
@@ -346,22 +367,32 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   browsable offline as category → letter → bounded 100-entry windows.
 - A live fandom listing (`/tags/Harry Potter .../works`) returned a full
   page with the count and working page navigation.
-- Work lists render a single selectable title/author/three-line summary card
-  per work, without separate shortcut or description rows.
-- The work screen is one page, not a key/value list: title/author/fandom,
+- Work lists render one selectable card per work: AO3's rating, warning,
+  category and completion symbols in a 2×2 ink grid; the bold title sharing
+  its line with the byline; fandoms and relationships sharing a line when they
+  fit; a one-line tag box that opens in place on a tap; the blurb clamped to
+  three lines; and words, chapters and the last update. Cards are measured
+  from their content, so an opened tag box moves the records below rather than
+  clipping them. Three works fit on a 600×800 page with the tags folded.
+  Captured in `screenshots/06` and `40`.
+- Settings has exactly one option — **Expanded tags:** On or Off — stored in
+  `settings/ao3_prefs.lua`, separately from the AO3 session. A tap flips it,
+  the row redraws with its new value, and the next listing follows it.
+  Captured in `screenshots/41`.
 - The work screen is one page, not a key/value list: title/author/fandom,
   Read and Refresh, a four-number strip, an aligned metadata table, four
   account actions (Kudos, Bookmark, Subscribe, Mark for later), and folded
   Summary and Tags sections. A summary longer than a page is elided and opens
   in full; expanding lands on the text it revealed. Captured in
   `screenshots/07`, `18`–`19` and `26`–`27`.
-- The landing page: AO3 logo lockup, one solid Search bar, then Browse,
-  Account, Library and Plugin groups of icon tiles (clock, grid, person, tag,
-  login, download, file, refresh). The Account tile is the login symbol while
-  signed out and becomes the reader's own name with the user symbol once
-  signed in. The logo is OTW's official PNG plus a traced SVG; the tile
-  symbols are authored 24x24 SVGs, so no build falls back to a missing-icon
-  glyph. Captured in `screenshots/02`, `24` and `25`.
+- The landing page: AO3 logo lockup with the settings gear at the right edge
+  of the masthead line, one solid Search bar, then Browse, Account, Library
+  and Plugin groups of icon tiles (clock, grid, person, tag, login, download,
+  file, refresh). The Account tile is the login symbol while signed out and
+  becomes the reader's own name with the user symbol once signed in. The logo
+  is OTW's official PNG plus a traced SVG; the tile symbols and the gear are
+  authored 24x24 SVGs, so no build falls back to a missing-icon glyph.
+  Captured in `screenshots/02`, `24` and `25`.
 - The account page is a contents page for AO3's four lists (Bookmarks,
   Marked for later, History, Subscriptions), the reader's author page, and
   an outlined Log out with the note that saved works stay on the device.
@@ -430,8 +461,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 246 tests passing across parser, navigation,
-  bounded-index, rendered-card interaction, old-build compatibility,
+- The offline `busted` suite: 259 tests passing across parser, navigation,
+  bounded-index, rendered-card interaction (including the symbol grid, the tag
+  fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and
   bug-report tests, including 51 account tests across token parsing, the
   three-request sign-in, cookie scoping/rotation, session persistence/logout,
@@ -479,7 +511,11 @@ what made the 403 stick for the plugin while `curl` could still fetch pages.
 - **The session cookie is stored locally.** It lives in plain text in
   `settings/ao3.lua`, like KOReader's other service settings. The password is
   never written. **Log out** deletes the session and its backup file; delete
-  that file by hand if you want to be certain.
+  that file by hand if you want to be certain. Reader preferences (the tag
+  default) live in `settings/ao3_prefs.lua` and are kept by Log out.
+- **The list's tag box opens to six lines.** A work with more tags than that
+  shows the first six in the list; the work's details page carries the
+  complete tag list.
 - **No images.** AO3's HTML download references images remotely, and the
   plugin does not fetch them.
 - **Snapshot, not live.** The fandom list is a point-in-time copy; tag names
@@ -574,4 +610,8 @@ broken book.
   `assets/ao3-logo.svg` is a vector trace of it. Both identify the service
   this plugin reads; this plugin is unofficial and is not affiliated with or
   endorsed by the OTW.
+- AO3's required-tag symbols (rating, warnings, category, completion) are
+  redrawn in monochrome in `assets/icons/`; the shapes follow AO3's own symbol
+  set (also collected in `gin7uro/koreader-ao3-plus/icons`), and the colour is
+  dropped for the e-ink palette.
 - KOReader is made by the KOReader contributors.

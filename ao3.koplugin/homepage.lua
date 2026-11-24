@@ -53,9 +53,41 @@ local function icon(o, name, size)
     if ok and widget then return widget end
 end
 
--- Logo lockup: mark on the left, name and one honest subtitle beside it.
+-- The settings control: a quiet gear at the far right of the masthead line.
+-- It is a tap area rather than a button, because a second outlined control
+-- beside the solid Search bar would compete with it.
+function HomePage.settingsButton(o)
+    local size = Screen:scaleBySize(44)
+    local mark_size = Screen:scaleBySize(24)
+    local mark = icon(o, "settings", mark_size)
+    local line = HorizontalGroup:new{ align = "center" }
+    if mark then
+        line[#line + 1] = HorizontalSpan:new{
+            width = math.max(0, math.floor((size - mark_size) / 2)),
+        }
+        line[#line + 1] = mark
+    else
+        -- A build without SVG still needs a way into Settings.
+        line[#line + 1] = TextWidget:new{
+            text = _("Settings"),
+            face = Font:getFace("smallinfofont", HomePage.hint_size(o) - 2),
+            fgcolor = Uikit.SECONDARY,
+            max_width = size,
+        }
+    end
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_default }
+    group[#group + 1] = line
+    return Uikit.tapArea(group, size, size, o.on_settings)
+end
+
+-- Logo lockup: mark on the left, name and one honest subtitle beside it, and
+-- the settings gear at the right edge of the same line.
 function HomePage.hero(o)
+    local gap = Size.padding.large
+    local gear_w = o.on_settings and Screen:scaleBySize(44) or 0
     local text_width = o.width
+    local logo_used = 0
     local row = HorizontalGroup:new{ align = "top" }
 
     if o.logo_path then
@@ -69,9 +101,13 @@ function HomePage.hero(o)
         })
         if ok and logo then
             row[#row + 1] = logo
-            row[#row + 1] = HorizontalSpan:new{ width = Size.padding.large }
-            text_width = math.max(1, o.width - logo_w - Size.padding.large)
+            row[#row + 1] = HorizontalSpan:new{ width = gap }
+            logo_used = logo_w + gap
+            text_width = math.max(1, text_width - logo_used)
         end
+    end
+    if gear_w > 0 then
+        text_width = math.max(1, text_width - gear_w - gap)
     end
 
     local text = VerticalGroup:new{ align = "left" }
@@ -89,6 +125,14 @@ function HomePage.hero(o)
         max_width = text_width,
     }
     row[#row + 1] = text
+
+    if gear_w > 0 then
+        local used = logo_used + text:getSize().w
+        row[#row + 1] = HorizontalSpan:new{
+            width = math.max(gap, o.width - used - gear_w),
+        }
+        row[#row + 1] = HomePage.settingsButton(o)
+    end
 
     local group = VerticalGroup:new{ align = "left" }
     -- Equal air above and below the lockup: the gap to the top is the gap

@@ -131,6 +131,7 @@ It is a native surface: stock KOReader widgets, KOReader's own fonts and scaling
 - Flat: depth from hairlines, 1px borders and inverted bars, never from shadow.
 - Square controls, gently rounded cards.
 - Icon tiles and a logo lockup carry the warmth; grey rules carry the calm.
+- AO3's required tags become a 2×2 symbol grid beside each work title.
 
 ## Colors
 
@@ -150,7 +151,7 @@ A two-ink press: pure black and pure white, with three greys separating chrome f
 
 **The One Inverted Bar Rule.** Exactly one solid ink bar per screen, for the action the screen exists for: "Search works" on the landing page, "Read" (or "Open saved copy") on a work. Everything else is outlined or plain text. Two black bars on one screen is a bug. A screen that is itself a contents page — the account screen, the author page — carries none: its rows or its tab strip are the action, and a bar added beside them would be a second control for one destination.
 
-**The Two Greys Rule.** Slate is for the frame and Graphite is for the record. A work card's author and blurb are Graphite; a section label, stat caption or row separator is Slate. Never swap them, and never lighten text past Graphite.
+**The Two Greys Rule.** Slate is for the frame and Graphite is for the record. A work card's byline, fandoms, ships, tag text and blurb are Graphite; the tag fold's border and its +/− glyph, a section label, stat caption or row separator is Slate. Never swap them, and never lighten text past Graphite.
 
 ## Typography
 
@@ -166,7 +167,7 @@ A two-ink press: pure black and pure white, with three greys separating chrome f
 - **Title** (bold, 0 → 19px, 1.2): card titles, section headers, tile names, stat values.
 - **Body** (regular, −2 → 17px, 1.15): facts-table values and the folded Summary and Tags body.
 - **Action** (bold, 0 → 19px, 1.2, `cfont`): primary bar labels; **Action Small** (bold, −2 → 17px, `cfont`): the secondary button's label.
-- **Meta** (regular, −4 → 15px, 1.2): work-card author and blurb, facts-table labels, section labels, right-aligned row counts.
+- **Meta** (regular, −4 → 15px, 1.2): work-card byline, fandoms, ships, tag box and blurb, facts-table labels, section labels, right-aligned row counts. A record's numbers use the same size in bold (Words, Chapters, Updated).
 - **Hint** (regular, −5 → 14px, 1.2): the single grey hint under a tile's name ("Newest on AO3", "8 saved") — one step below the name, not a footnote.
 - **Micro** (regular, −8 → 11px): the four stat captions (Words, Chapters, Kudos, Hits).
 
@@ -183,15 +184,15 @@ One column, one left edge. The reference canvas is 600×800; content is inset 15
 
 Vertical rhythm is three steps: **20px** above a group label (two gutters), **5px** below it, **10px** between entries. Inside a card, title → byline is 2px, byline → blurb is 5px. Inside the details page, the hero opens with 5px, title → byline is 5px, byline → fandom is 2px, and a hairline closes the block.
 
-- **Landing page:** logo lockup (84px-wide mark + name + subtitle), then the full-width solid Search bar, then four labelled groups: Browse, Account, Library, Plugin. Browse and Library are two-up tile grids: two 280px tiles with a 10px gutter. Account and Plugin each use one full-width tile of the same construction; Account swaps its symbol and name with the session (login → Sign in, user → the reader's name). A label always travels with the first row of its group, so paging never leaves a label alone at the foot of a page.
-- **Work listings:** full-width records, not a grid. Each card is as tall as its content needs (title line + byline + up to three blurb lines), closed by a 1px Slate separator inset to the gutter.
+- **Landing page:** logo lockup (84px-wide mark + name + subtitle), with the settings gear as a 44px tap target at the right edge of that masthead line; then the full-width solid Search bar, then four labelled groups: Browse, Account, Library, Plugin. Browse and Library are two-up tile grids: two 280px tiles with a 10px gutter. Account and Plugin each use one full-width tile of the same construction; Account swaps its symbol and name with the session (login → Sign in, user → the reader's name). A label always travels with the first row of its group, so paging never leaves a label alone at the foot of a page.
+- **Work listings:** full-width records, not a grid. Each card is as tall as its content needs (title block + fandoms + ships + tag fold + up to three blurb lines + numbers), closed by a 1px Slate separator inset to the gutter.
 - **Fandom list:** the letter index band (about 135px, three shelves) is pinned above a full-width index: a bold name of one or two lines and a right-aligned count, closed by the same 1px Slate separator. The search row follows the band; paging rows close the list.
 - **Work details:** hero, then an action row split 60/40 with a 10px gap (Read / Refresh), then a four-cell stats strip with 10px gaps, then a two-column facts table whose label column is 23% of the width, then the four account actions in a 2×2 grid, then folded Summary and Tags sections.
 - **Paging is per item, not scroll.** The native menu header carries the screen title on one line (no subtitle band); the footer carries page arrows and "Page N of M". A page never clips a row.
 - **No keyboard-shortcut columns** (`is_enable_shortcut = false`): the title, byline and blurb own the full width on a touchscreen.
 
 ### Named Rules
-**The One Left Edge Rule.** Titles, bylines, labels, rules and separators all start at the 15px gutter. Nothing floats or centres except the title bar and the paging footer.
+**The One Left Edge Rule.** Titles, bylines, labels, rules and separators all start at the 15px gutter. The one inset is the work card's symbol margin: its title and body hang from a second left edge at 72px (15px gutter + 47px grid + 10px gap), so the grid reads as a classification mark before the record. Nothing else floats or centres; the title bar and the paging footer are the only centred text.
 
 **The Open-Between Rule.** Groups are separated by air (20px + a quiet label); entries inside a group are separated by tightness first and a hairline second.
 
@@ -206,7 +207,7 @@ There are **no shadows, no gradients and no translucency** anywhere in the syste
 
 The form language is a printed page, not a card app. Controls are **square** (0 radius): the primary bar, secondary buttons, the action row, every row. Exactly two rounded forms exist: the two-up content tiles at 7px with a 1px ink border (catalogue cards, not buttons), and the author page's tab strip as a full pill whose ends are half its own height, so the shape scales with the reader's font (see "Tab Strip"). The pill is a switching control — one bar divided into the views it holds — and nothing else may take the rounded form. Nothing has a coloured left border, nothing is clipped at an angle.
 
-Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's own `mdlight` set; the AO3 mark is the official OTW artwork at 84px wide (57px tall). Both are the only graphics the system allows.
+Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's own `mdlight` set: the row icons at 26px, the settings gear at 24px, and the category symbols at 14px inside their 22px cells (drawn with a heavier stroke so they keep the same optical weight when shrunk). The AO3 mark is the official OTW artwork at 84px wide (57px tall). These are the only graphics the system allows.
 
 ### Named Rules
 **The Square Control, Rounded Card Rule.** A thing you press is square, and a thing you read is a card — with one documented exception, the author page's tab strip, which is a single pill. Tabs are the one control that reports which view you are in rather than doing something to the page, so the pill is a selection device, not an action: every button, bar, row and card stays square or 7px, and never round an action bar or square an icon tile.
@@ -239,8 +240,25 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 
 ### Work Cards (signature component)
 - **Shape:** no box, no border. A record on paper, closed by a 1px Slate rule inset to the gutter.
-- **Content:** bold 19px title on one line; 2px; 15px Graphite author (or "Anonymous"); 5px; a 15px Graphite blurb clamped to three lines with 1.3 line spacing and an ellipsis. Title, author and blurb are three separately styled widgets because a native Menu row only offers one font.
-- **Behaviour:** the whole card is one tap target; the focus underline sits under the record, not under the text.
+- **Top block:** a 2×2 symbol grid in the left margin (22px cells, 3px apart), then the text column: bold 19px title on one line, 2px, a 15px Graphite "by <author>" flush right. The grid sets the block's height, so the title and byline cost no extra air.
+- **Record lines:** 5px under the block, the fandoms in 15px Graphite (one line, elided); 2px, the relationships in the same grey; 5px, the tag fold; 5px, the blurb clamped to three lines with 1.3 line spacing and an ellipsis; 5px, the numbers.
+- **Numbers:** Words, Chapters and Updated on one line: 15px Slate labels, bold ink values, a Slate "·" between facts. A fact that will not fit is dropped, never wrapped.
+- **Behaviour:** the whole card is one tap target; the tag fold is the only nested target and consumes its own tap; the focus underline sits under the record, not under the text.
+
+### Symbol Grid (AO3 required tags)
+- **Style:** four square cells in a 2×2 grid, 1px ink border, paper fill, one mark centred in each: the rating letter (G / T / M / E / ?), the warning mark ("!", "!?", "↗", or blank for none), the category's symbol (a 14px drawn SVG), and a check for a finished work (the no-entry mark for a work in progress).
+- **Order:** AO3's own strip, read left to right: rating, warnings, category, completion.
+- **Ink only:** AO3's symbols are coloured on the website; here they are redrawn as monochrome marks. The shape carries the meaning, because the device has no hue.
+- **Behaviour:** the grid appears only when AO3 supplied at least one required tag; a work without them starts at the title.
+
+### Tag Fold
+- **Style:** a 1px Slate border, paper fill, 5px padding. Closed: one line of whole tags, then "+N more" when some do not fit, with the section headers' bold Slate "+" in the top-right corner. Open: the full list, up to six lines with an ellipsis, and a "−" in the corner.
+- **Behaviour:** tapping the box opens or closes it in place; the work does not open. The menu re-measures the card so the records below move rather than clip. The work details page still carries the complete list.
+- **Default:** closed. Settings → **Expanded tags:** can start every list open.
+
+### Settings Screen
+- **Style:** one native row: "Expanded tags:" at the left, **On** or **Off** in the 15px Slate right column. No heading, no description, no second control.
+- **Behaviour:** the tap stores the choice and the row redraws with its new value; the next listing follows it. The choice lives in `settings/ao3_prefs.lua`, so Log out does not reset it.
 
 ### Section Headers (folded content)
 - **Style:** bold 19px Ink label at the left, a bold 21px Graphite "+" or "−" flush right; 2px above, 5px below.
@@ -281,11 +299,14 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 
 ### Do:
 - **Do** keep exactly one solid Ink bar per screen and let it name the screen's purpose.
-- **Do** align everything to the 15px gutter; the left edge is the system's spine.
+- **Do** align everything to the 15px gutter; the left edge is the system's spine. A work card's symbol margin is the one planned inset.
 - **Do** bold the noun and grey the qualifier: title/number bold, byline/blurb/caption regular.
 - **Do** use Graphite for sentences inside a record and Slate for chrome; keep contrast survivable in grayscale.
 - **Do** build tiles and actions from their content (icon + name + hint; 2.4× font height) so nothing clips.
 - **Do** close each work record with a single hairline and keep the blurb to three lines.
+- **Do** draw AO3's required-tag symbols in ink, in AO3's order, and let their shapes carry the meaning.
+- **Do** keep the tag fold closed by default and let a tap open it in place without leaving the list.
+- **Do** keep the settings screen to the one option it owns: label on the left, On/Off on the right.
 - **Do** keep the fandom letter index on screen while a letter's list is paged, and let a long fandom name take a second line before it is elided.
 - **Do** open every author tab on the same masthead and name each shelf in the title bar, with the strip as the page's whole navigation: one control per destination, and a page whose tabs are its actions needs no bar of its own.
 - **Do** let state be a KOReader checkmark and let the account tile keep its place while its symbol and name change with the session.
@@ -297,6 +318,8 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 - **Don't** add shadows or lift anything off the page; borders, rules and inversion are the only depth cues.
 - **Don't** round anything but the tiles (7px) and the author page's tab strip (a full pill); a rounded button, card or primary bar is not this world's form.
 - **Don't** wrap a work card in an outline box or add a cover thumbnail; cards are paper records.
+- **Don't** reproduce AO3's coloured rating and warning symbols; the device has no hue and the ink is the design.
+- **Don't** put helper text, a heading or a second control on the settings page; the one option is the page.
 - **Don't** centre body text, float section labels, or let a label drift away from the gutter.
 - **Don't** use more than three blurb lines, a "show more" ellipsis inside a row, or any infinite scroll.
 - **Don't** put two primaries on one screen, grey out a secondary action, or make a disabled state by lowering contrast below Graphite.

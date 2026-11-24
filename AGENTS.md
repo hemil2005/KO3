@@ -11,10 +11,22 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   plugin customises, such as the table of contents. Do not rely on
   `Device:hasKeyboard()`: the emulator reports a keyboard and draws the
   Q/W/E shortcut column even though the target device is a touchscreen.
-- Work cards: bold title, author, up to three summary lines, one separator per
-  card, no per-row shortcut boxes.
-- The KO3 entry sits directly on the Tools tab, at the bottom
-  (`sorting_hint = "tools"`), not nested under More tools.
+- Work cards: AO3's rating, warning, category and completion marks as a 2×2
+  ink grid beside a bold title; the byline shares the title's line when both
+  fit; fandoms and relationships share one line when they fit; a one-line tag
+  box that opens in place on tap; up to three summary lines; one separator per
+  card; no per-row shortcut boxes. Three works fit a 600×800 page with the
+  tags folded.
+- Settings is one row, **Expanded tags:** On or Off, opened by the gear at the
+  right of the landing masthead. The choice lives in
+  `settings/ao3_prefs.lua`, separate from the AO3 session, so Log out keeps it.
+- The author page is one screen: the author's masthead, the pill of four tabs,
+  then a count line and the shelf. Every tab keeps the masthead and the tab
+  strip sits at the same height; the native title bar names the shelf, not the
+  author.
+- The KO3 entry sits directly on the Tools tab, fourth from the top (before
+  Statistics, `sorting_hint = "tools"`), so it stays on page 1. Not nested
+  under More tools.
 - After any user-visible change, demonstrate it in the local Kindle emulator
   and save a capture under `screenshots/`. Tests alone are not enough.
 
@@ -61,6 +73,13 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - Opening a signed-in work page reads its action state once, silently, so the
   four buttons start with accurate checkmarks. Failures are not shown; a tap
   reports its own error.
+
+## Bug reports
+
+- Reports go through the KO3 Cloudflare relay (`relay/worker.js`); the GitHub
+  token lives in the Worker, never in the plugin. Consent names the issue
+  tracker before the log is attached, and the saved bundle is the fallback
+  when neither the relay nor a maintainer token is reachable.
 
 ## Updates
 
