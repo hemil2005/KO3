@@ -1,15 +1,27 @@
 --[[--
-Author page tabs and parsers for KO3.
+The author page: one author's page, and the parsers behind it.
 
 The real author page has Dashboard / Works / Series / Bookmarks tabs (this
 plugin skips Profile, which has no reader value). The Dashboard tab groups
 the author's works by fandom; tapping a fandom opens that author's works in
 that fandom, using AO3's own author-scoped `?fandom_id=` links.
 
-The tab strip is a horizontal row of native Buttons. There is no TabBar
-widget in older KOReader builds, and Buttons are long-stable everywhere,
-so the strip works on the same range of devices as the rest of the plugin.
-The active tab is marked with the native checkmark.
+The screen follows the catalogue's own shape (DESIGN.md): a masthead naming
+the author, the pill of four tabs, then a quiet count line and the records.
+The four tabs are the same screen with a different shelf under them, so every
+tab keeps the masthead — you always know whose page you are reading.
+
+The strip is the page's only navigation. A solid "All works" bar was tried
+above it and cut: the works list is a tab, so the bar and the strip were two
+controls for one destination, and it had to be dropped on Works (where it
+would do nothing) which moved the strip 57px and shifted every tab under the
+reader's finger. One control per destination beats a primary the page does
+not need the way the account page does not need one.
+
+Records are the currency of the rest of the system rather than this screen's
+invention: a fandom and a series are the letter index's record (bold name of
+one or two lines, count in the right-hand column), and a bookmarked work is
+the same card the work lists paint.
 
 Parsers here read the exact live AO3 markup (captured 2026-11-23):
 
@@ -19,25 +31,60 @@ Parsers here read the exact live AO3 markup (captured 2026-11-23):
     Works      li.work.blurb.group (shared with Ao3:parseListing)
 ]]
 
-local Button = require("ui/widget/button")
+local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local Font = require("ui/font")
+local FrameContainer = require("ui/widget/container/framecontainer")
+local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local LeftContainer = require("ui/widget/container/leftcontainer")
+local LineWidget = require("ui/widget/linewidget")
 local Size = require("ui/size")
 local Screen = require("device").screen
+local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextWidget = require("ui/widget/textwidget")
+local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
 local htmlparser = require("htmlparser")
 local util = require("util")
 local _ = require("gettext")
+local T = require("ffi/util").template
+
+local SOURCE = debug.getinfo(1, "S").source:sub(2)
+local Uikit = dofile((SOURCE:gsub("authorpage%.lua$", "uikit.lua")))
 
 local AuthorPage = {}
 
 local BASE_URL = "https://archiveofourown.org"
 
--- Button grew checked_func (and the class-level checkmark it appends) after
--- the oldest supported builds. Without it the active tab would carry no mark,
--- so fall back to drawing the same checkmark into the label.
-local BUTTON_HAS_CHECKMARK = Button.checkmark ~= nil
+-- The two air steps the catalogue uses everywhere: a group starts two gutters
+-- above its label, and a label sits one small step above its records.
+local GROUP_GAP = Size.padding.large * 2
+
+-- Single-line height for a face, so a control is measured from the text it
+-- actually holds instead of from a font-size multiplier.
+local function lineHeight(face, bold)
+    if TextWidget.getTextHeight then
+        local ok, h = pcall(TextWidget.getTextHeight, "Ag", face, bold)
+        if ok and h then return h end
+    end
+    local probe = TextWidget:new{ text = "Ag", face = face, bold = bold }
+    local h = probe:getSize().h
+    if probe.free then probe:free() end
+    return h
+end
 
 local function trim(s)
     return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- "1 work" / "12 works". AO3 gives counts as strings, sometimes with a
+-- thousands separator, so only the exact "1" takes the singular.
+local function counted(count, singular, plural)
+    local text = trim(tostring(count or ""))
+    if text == "" then return nil end
+    if text == "1" then return singular end
+    return T(plural, text)
 end
 
 local function plain(node)
@@ -62,12 +109,28 @@ local function absoluteUrl(url)
     return BASE_URL .. (url:sub(1, 1) == "/" and "" or "/") .. url
 end
 
+-- `label` is the strip's own word (AO3's tab names, so a reader who knows the
+-- site recognises them); `title` names the shelf the tab holds, and is the one
+-- line the native title bar carries.
 AuthorPage.TABS = {
-    { id = "dashboard", label = _("Dashboard") },
-    { id = "works", label = _("Works") },
-    { id = "series", label = _("Series") },
-    { id = "bookmarks", label = _("Bookmarks") },
+    { id = "dashboard", label = _("Dashboard"), title = _("Fandoms") },
+    { id = "works", label = _("Works"), title = _("Works") },
+    { id = "series", label = _("Series"), title = _("Series") },
+    { id = "bookmarks", label = _("Bookmarks"), title = _("Bookmarks") },
 }
+
+local function tabEntry(tab_id)
+    for _, tab in ipairs(AuthorPage.TABS) do
+        if tab.id == tab_id then return tab end
+    end
+end
+
+-- The native title bar's one line. The masthead already names the author and
+-- the strip already shows the tab, so the bar names the shelf and nothing else.
+function AuthorPage.tabTitle(tab_id)
+    local tab = tabEntry(tab_id)
+    return tab and tab.title or _("Author")
+end
 
 -- `profile` is the author's page without a sub-page, e.g.
 -- https://archiveofourown.org/users/foo or /users/foo/pseuds/bar.
@@ -91,29 +154,243 @@ function AuthorPage.tabUrl(profile, tab_id)
     return nil
 end
 
--- One row of tabs, each the same width, with the current tab checked.
-function AuthorPage.tabStrip(current, on_select, width)
-    local group = HorizontalGroup:new{}
+-- The tab strip (DESIGN.md, "Tab Strip"): the four tabs as one pill — a single
+-- rounded bar inset to the gutter, divided by three hairline ink rules, a bold
+-- label in each equal segment, and the current tab marked with KOReader's own
+-- checkmark rather than a fill.
+--
+-- It replaced a full-bleed band of four bordered cells. Edge to edge, that band
+-- drew two long rules across the page and read as a table on a screen that
+-- already has one; one rounded bar with internal dividers says "four views of
+-- one thing" at a glance, which is what tabs are. The radius is half the bar's
+-- own height, so the shape scales with the reader's font instead of pinning a
+-- number of pixels.
+--
+-- Native Buttons were the first answer here: they carry their own padding and
+-- a heavier border, and they cannot keep the segments exactly equal once a
+-- checkmark widens one label. These segments are drawn with the same widgets
+-- the rest of the designed screens use, and each is one tap target.
+function AuthorPage.tabStrip(current, on_select, width, font_size)
+    width = width or Screen:getWidth()
+    font_size = font_size or 19
+    local face = Font:getFace("smallinfofont", font_size)
+    local border = Size.border.thin
     local count = #AuthorPage.TABS
-    local tab_width = math.floor((width or Screen:getWidth()) / count)
-    for _, tab in ipairs(AuthorPage.TABS) do
-        local checked = tab.id == current
-        local label = tab.label
-        if checked and not BUTTON_HAS_CHECKMARK then
-            label = label .. "  \u{2713}"
+    local inner_w = math.max(1, width - 2 * border)
+    local inner_h = math.max(1, lineHeight(face, true) + 2 * Size.span.vertical_large)
+    -- A pill's ends are half its own height, borders included.
+    local radius = math.floor((inner_h + 2 * border) / 2)
+    local segment_w = math.floor((inner_w - (count - 1) * border) / count)
+
+    local strip = HorizontalGroup:new{ align = "center" }
+    local segments = {}
+    local left = inner_w
+    for i, tab in ipairs(AuthorPage.TABS) do
+        if i > 1 then
+            -- The divider between two options: hairline ink at the pill's full
+            -- interior height, so four labels read as one bar divided in four.
+            strip[#strip + 1] = LineWidget:new{
+                dimen = Geom:new{ w = border, h = inner_h },
+                background = Blitbuffer.COLOR_BLACK,
+            }
+            left = left - border
         end
-        group[#group + 1] = Button:new{
-            text = label,
-            width = tab_width,
-            margin = 0,
-            padding = Size.padding.small,
-            bordersize = Size.border.thin,
-            focusable = false,
-            checked_func = function() return tab.id == current end,
-            callback = function() on_select(tab.id) end,
+        -- The last segment takes the sub-pixel remainder so the bar closes
+        -- flush inside its own border.
+        local this_w = i == count and left or segment_w
+        left = left - this_w
+
+        local active = tab.id == current
+        local label = TextWidget:new{
+            text = active and (tab.label .. "  \u{2713}") or tab.label,
+            face = face,
+            bold = true,
+            max_width = math.max(1, this_w - 2 * Size.span.horizontal_small),
+        }
+        local area = Uikit.tapArea(
+            CenterContainer:new{
+                dimen = Geom:new{ w = this_w, h = inner_h },
+                label,
+            },
+            this_w, inner_h,
+            function() on_select(tab.id) end)
+        area.tab_id = tab.id
+        segments[i] = area
+        strip[#strip + 1] = area
+    end
+
+    local frame = FrameContainer:new{
+        bordersize = border,
+        -- The system's one pill (DESIGN.md, "Shapes"): tabs are a control for
+        -- switching views, so they earn the rounded form nothing else may take.
+        radius = radius,
+        color = Blitbuffer.COLOR_BLACK,
+        background = Blitbuffer.COLOR_WHITE,
+        padding = 0,
+        margin = 0,
+        strip,
+    }
+    frame.segments = segments
+    return frame
+end
+
+-- The masthead: the author's name at display size, one honest quiet line
+-- beneath it, and air before whatever the tab puts next. It wraps rather than
+-- truncating — a long pseud is the reader's own name.
+function AuthorPage.identity(name, width, font_size)
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = TextBoxWidget:new{
+        text = (name and name ~= "") and name or _("Author"),
+        face = Font:getFace("smallinfofont", font_size + 6),
+        bold = true,
+        width = width,
+        height_adjust = true,
+        alignment = "left",
+    }
+    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+    group[#group + 1] = TextWidget:new{
+        text = _("Author on AO3"),
+        face = Font:getFace("smallinfofont", font_size - 4),
+        fgcolor = Uikit.SECONDARY,
+        max_width = width,
+    }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.large }
+    return group
+end
+
+-- A quiet group label carrying the shelf's size ("6 fandoms", "12 works"),
+-- pinned to the gutter so the menu cannot centre it.
+function AuthorPage.count_label(text, width, font_size)
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = GROUP_GAP }
+    group[#group + 1] = Uikit.label(text, width, font_size)
+    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+    return LeftContainer:new{
+        dimen = Geom:new{ w = width, h = group:getSize().h },
+        group,
+    }
+end
+
+-- An empty shelf says so in one grey sentence. It keeps the group's air, so a
+-- tab with nothing on it is quiet rather than broken-looking.
+function AuthorPage.empty(text, width, font_size)
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = GROUP_GAP }
+    group[#group + 1] = TextBoxWidget:new{
+        text = text,
+        face = Font:getFace("smallinfofont", font_size - 2),
+        fgcolor = Blitbuffer.COLOR_GRAY_6,
+        width = width,
+        height_adjust = true,
+        alignment = "left",
+    }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    return group
+end
+
+-- Every tab is the same screen with a different shelf under it. `o` carries
+-- the session's data and the callbacks; `work_row(work)` is the plugin's work
+-- card, so a bookmarked work stays the card the listings paint.
+function AuthorPage.build(o)
+    local width = o.width
+    local font_size = o.font_size
+    local tab = o.tab or "dashboard"
+    local data = o.data or { items = {} }
+    local items = data.items or {}
+    local rows = {}
+
+    rows[#rows + 1] = {
+        ao3_static = Uikit.padded(
+            AuthorPage.identity(o.name, width, font_size)),
+        role = "author_identity",
+    }
+
+    rows[#rows + 1] = {
+        -- A pill inset to the gutter, not a full-bleed band: its rounded ends
+        -- need paper beside them to read as rounded at all.
+        ao3_tabs = AuthorPage.tabStrip(tab, o.on_tab, width, font_size),
+        role = "author_tabs",
+    }
+
+    local count_text
+    local empty_text
+    if tab == "dashboard" then
+        count_text = counted(#items, _("1 fandom"), _("%1 fandoms"))
+        empty_text = _("No fandoms listed.")
+    elseif tab == "works" then
+        count_text = counted(data.count, _("1 work"), _("%1 works"))
+        empty_text = _("No works found.")
+    elseif tab == "series" then
+        count_text = counted(data.count, _("1 series"), _("%1 series"))
+        empty_text = _("No series.")
+    else
+        count_text = counted(data.count, _("1 bookmark"), _("%1 bookmarks"))
+        empty_text = _("No bookmarks.")
+    end
+
+    if #items == 0 then
+        rows[#rows + 1] = {
+            ao3_static = Uikit.padded(
+                AuthorPage.empty(empty_text, width, font_size)),
+            role = "author_empty",
+        }
+        return rows
+    end
+
+    if count_text then
+        rows[#rows + 1] = {
+            ao3_static = Uikit.padded(
+                AuthorPage.count_label(count_text, width, font_size)),
+            role = "author_count",
+            -- A page must not end on a count whose records are overleaf.
+            keep_with_next = true,
         }
     end
-    return group
+
+    -- Translate outside the loop: `for _, item` shadows gettext `_`.
+    local works_singular = _("1 work")
+    local works_plural = _("%1 works")
+    for _, item in ipairs(items) do
+        if tab == "dashboard" then
+            rows[#rows + 1] = {
+                text = item.name,
+                mandatory = counted(item.count, works_singular, works_plural),
+                ao3_fandom = true,
+                action = function() o.on_listing(item.url, item.name) end,
+                role = "author_fandom",
+            }
+        elseif tab == "series" or item.kind == "series" then
+            rows[#rows + 1] = {
+                text = item.title,
+                mandatory = counted(item.works, works_singular, works_plural),
+                ao3_series = true,
+                action = function() o.on_listing(item.url, item.title) end,
+                role = "author_series",
+            }
+        else
+            rows[#rows + 1] = o.work_row(item)
+        end
+    end
+
+    -- Paging is AO3's own next/previous link, and it stays a native row: it is
+    -- navigation, not a record.
+    if data.next_url then
+        rows[#rows + 1] = {
+            text = _("Next page →"),
+            action = function() o.on_page(data.next_url) end,
+            role = "author_next",
+        }
+    end
+    if data.prev_url then
+        rows[#rows + 1] = {
+            text = _("← Previous page"),
+            action = function() o.on_page(data.prev_url) end,
+            role = "author_prev",
+        }
+    end
+
+    return rows
 end
 
 -- Shared work-blurb parser. Work listings, search results and bookmarks all

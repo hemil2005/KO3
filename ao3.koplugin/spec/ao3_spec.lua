@@ -685,6 +685,28 @@ describe("AO3 browser", function()
             end
         end
 
+        -- The author screen is a page, not a list of lists: the masthead, the
+        -- bar and the strip are rows like any other, so tests find rows by the
+        -- role the author page names them with.
+        local function author_row(menu, role)
+            for _, row in ipairs(menu.item_table) do
+                if row.role == role then return row end
+            end
+        end
+
+        local function author_rows(menu, role)
+            local out = {}
+            for _, row in ipairs(menu.item_table) do
+                if row.role == role then out[#out + 1] = row end
+            end
+            return out
+        end
+
+        local function author_tabs(menu)
+            local row = author_row(menu, "author_tabs")
+            return row and row.ao3_tabs
+        end
+
         it("opens a home menu led by the logo, not a repeated title", function()
             local menu = open_home()
             assert.is_truthy(menu)
@@ -1108,10 +1130,18 @@ describe("AO3 browser", function()
             plugin.fetchPage = nil
             assert.is_true(ok, err)
             assert.is_truthy(fetched[1]:find("?expand_fandoms=true", 1, true))
-            -- The tab strip is the first row, then the fandom list.
-            assert.is_truthy(menu.item_table[1].ao3_tabs)
-            assert.are.equal("Harry Potter - J. K. Rowling", menu.item_table[2].text)
-            assert.are.equal("12 works", menu.item_table[2].mandatory)
+            -- The masthead names the author, then the strip, then the shelf
+            -- itself: no solid bar, since the works list is one of the tabs.
+            local masthead = author_row(menu, "author_identity")
+            assert.is_truthy(masthead)
+            assert.is_nil(author_row(menu, "author_all_works"))
+            assert.are.equal(4, #author_tabs(menu).segments)
+            -- The bar names the shelf, not the author again.
+            assert.are.equal("Fandoms", menu.ao3_title)
+            local fandoms = author_rows(menu, "author_fandom")
+            assert.are.equal("Harry Potter - J. K. Rowling", fandoms[1].text)
+            assert.are.equal("12 works", fandoms[1].mandatory)
+            assert.is_truthy(fandoms[1].ao3_fandom)
         end)
 
         it("switches author tabs in place and caches each page", function()
@@ -1128,14 +1158,16 @@ describe("AO3 browser", function()
             local ok, err = pcall(function()
                 plugin:showAuthor("Kingsaxcul", "https://archiveofourown.org/users/Kingsaxcul")
                 assert.are.equal(1, calls)
-                menu.item_table[1].ao3_tabs[3].callback()
+                author_tabs(menu).segments[3].onTap()
                 assert.are.equal(2, calls)
-                assert.are.equal("Coils AU", menu.item_table[2].text)
-                assert.are.equal("2 works", menu.item_table[2].mandatory)
-                assert.is_truthy(menu.ao3_title:find("2 series", 1, true))
+                local series = author_rows(menu, "author_series")
+                assert.are.equal("Coils AU", series[1].text)
+                assert.are.equal("2 works", series[1].mandatory)
+                assert.is_truthy(series[1].ao3_series)
+                assert.are.equal("Series", menu.ao3_title)
                 -- Re-visiting a tab uses its cached page, no extra request.
-                menu.item_table[1].ao3_tabs[3].callback()
-                menu.item_table[1].ao3_tabs[1].callback()
+                author_tabs(menu).segments[3].onTap()
+                author_tabs(menu).segments[1].onTap()
                 assert.are.equal(2, calls)
             end)
             plugin.fetchPage = nil
@@ -1153,7 +1185,7 @@ describe("AO3 browser", function()
             end
             local ok, err = pcall(function()
                 plugin:showAuthor("Kingsaxcul", "https://archiveofourown.org/users/Kingsaxcul")
-                menu.item_table[2].action()
+                author_rows(menu, "author_fandom")[1].action()
             end)
             plugin.fetchPage = nil
             plugin.loadListing = nil

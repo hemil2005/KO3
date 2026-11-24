@@ -56,6 +56,7 @@ typography:
 rounded:
   none: "0px"
   card: "7px"
+  pill: "half the control's height"
 spacing:
   gutter: "15px"
   gap: "10px"
@@ -106,7 +107,7 @@ components:
     backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
     typography: "{typography.title}"
-    rounded: "{rounded.none}"
+    rounded: "{rounded.pill}"
     padding: "2px 0"
 ---
 
@@ -147,7 +148,7 @@ A two-ink press: pure black and pure white, with three greys separating chrome f
 ### Named Rules
 **The Ink-and-Paper Rule.** No hue, ever. Every surface is black, white, or a value of grey, so the system renders identically on grayscale and colour e-ink. A change that needs colour to be understood is the wrong change.
 
-**The One Inverted Bar Rule.** Exactly one solid ink bar per screen, for the action the screen exists for: "Search works" on the landing page, "Read" (or "Open saved copy") on a work. Everything else is outlined or plain text. Two black bars on one screen is a bug.
+**The One Inverted Bar Rule.** Exactly one solid ink bar per screen, for the action the screen exists for: "Search works" on the landing page, "Read" (or "Open saved copy") on a work. Everything else is outlined or plain text. Two black bars on one screen is a bug. A screen that is itself a contents page — the account screen, the author page — carries none: its rows or its tab strip are the action, and a bar added beside them would be a second control for one destination.
 
 **The Two Greys Rule.** Slate is for the frame and Graphite is for the record. A work card's author and blurb are Graphite; a section label, stat caption or row separator is Slate. Never swap them, and never lighten text past Graphite.
 
@@ -203,12 +204,12 @@ There are **no shadows, no gradients and no translucency** anywhere in the syste
 
 ## Shapes
 
-The form language is a printed page, not a card app. Controls are **square** (0 radius): the primary bar, secondary buttons, the tab strip, the action row. Only the two-up content tiles are rounded, at 7px with a 1px ink border — they read as catalogue cards, not buttons. Nothing is pill-shaped, nothing has a coloured left border, nothing is clipped at an angle.
+The form language is a printed page, not a card app. Controls are **square** (0 radius): the primary bar, secondary buttons, the action row, every row. Exactly two rounded forms exist: the two-up content tiles at 7px with a 1px ink border (catalogue cards, not buttons), and the author page's tab strip as a full pill whose ends are half its own height, so the shape scales with the reader's font (see "Tab Strip"). The pill is a switching control — one bar divided into the views it holds — and nothing else may take the rounded form. Nothing has a coloured left border, nothing is clipped at an angle.
 
 Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's own `mdlight` set; the AO3 mark is the official OTW artwork at 84px wide (57px tall). Both are the only graphics the system allows.
 
 ### Named Rules
-**The Square Control, Rounded Card Rule.** A thing you press is square; a thing you read is a card. Never round an action bar, never square an icon tile.
+**The Square Control, Rounded Card Rule.** A thing you press is square, and a thing you read is a card — with one documented exception, the author page's tab strip, which is a single pill. Tabs are the one control that reports which view you are in rather than doing something to the page, so the pill is a selection device, not an action: every button, bar, row and card stays square or 7px, and never round an action bar or square an icon tile.
 
 ## Components
 
@@ -254,8 +255,19 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 - **Behaviour:** labels never truncate; values wrap to as many lines as they need.
 
 ### Tab Strip (author pages)
-- **Style:** four equal, edge-to-edge segments (Dashboard / Works / Series / Bookmarks) with 0.5px Ink borders, bold 19px labels, Paper fill in every state.
-- **State:** the current tab is marked with a "✓" after its label, not with a fill. No inset: the strip is the only full-bleed element in the system.
+- **Shape:** one pill, inset to the 15px gutter — a single rounded bar with 1px Ink border and Paper fill in every state. Its ends are half its own height, so the form scales with the reader's font instead of pinning a radius. A segmented control is the one form that means "these are views of one thing", and this is the one place the system rounds a control.
+- **Dividers:** three hairline Ink rules at the bar's full interior height split it into four equal options (Dashboard / Works / Series / Bookmarks). Four options take three dividers: one bar cut into four, never four floating labels.
+- **State:** the current tab is marked with a "✓" after its label, not with a fill, and nothing shifts when the mark moves: the mark is paid for inside its own segment.
+- **Height:** the label's own line plus 5px above and below, measured from the bold face, so the bar grows with the reader's font. Each segment is its own tap target; the border and dividers are not.
+
+### Author Page (masthead and shelves)
+- **Masthead:** the author's name at Display (bold +6, 1.2), wrapping rather than truncating, then 2px, then a Slate "Author on AO3". All four tabs open on the same masthead: a page whose whole subject is one person says who that is on every shelf, and a pseud is the reader's own name.
+- **Navigation:** the strip is the whole of it, so the author page carries no solid bar. The works list is a tab; a bar above the strip would be a second control for the same destination, and dropping it on Works (where it would do nothing) moved every tab 57px. The account screen sets the same precedent: a page whose tabs or rows are its actions needs no primary of its own.
+- **Title bar:** the shelf's own name — "Fandoms" on the dashboard, then "Works", "Series", "Bookmarks" — not AO3's "Works by <name>" sentence. The bar names the shelf; the masthead names the author.
+- **Count line:** the shelf's total as a bold Slate group label ("6 fandoms", "535 works", "1 bookmark"), two gutters of lead-in above and one small step below, left-pinned so the menu cannot centre it. It drops out when the shelf is empty.
+- **Records:** fandoms and series use the two-line index record — bold Title name, ellipsis after two lines, right-aligned 15px ink count on the first line, regular so the bold name stays the only loud thing — rather than a card, because a name and a number is the whole record. Works and bookmarked works are the standard Work Card.
+- **Empty shelf:** one Graphite sentence ("No series yet."), no icon, no box. An author with nothing on a shelf is quiet, not broken.
+- **Paging:** native rows at the foot of a long shelf ("Next page →") swap that shelf in place and leave the reader on the tab.
 
 ### Letter Index (fandom list, signature component)
 - **Style:** the whole alphabet as one printed thumb index above the fandom list — three shelves of nine (A–I, J–R, S–Z and `#`), inset to the 15px gutter. Each letter is a square cell: 0.5px Ink border, Paper fill, one bold 19px letter centred, height from the letter's line plus 5px above and below.
@@ -263,7 +275,7 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 - **Behaviour:** the index is pinned above every page of the open letter (it is not paged away), so switching letters never means paging back to the top. A tap reloads that letter at its first window. Cells scale to a shorter alphabet rather than leaving a ragged last row.
 
 ### Menu Rows
-- **Style:** native density — 19px title at the left, a right-aligned 15px grey value ("2,523 fandoms", "Author page"), 1px Slate separator inset to the gutter. No shortcut boxes, no chevrons, no pills.
+- **Style:** native density — 19px title at the left, a right-aligned 15px ink value ("2,523 fandoms", "Author page") that carries its quieter weight rather than a lighter grey — KOReader greys it itself when a row is dimmed, which is the one exception — 1px Slate separator inset to the gutter. No shortcut boxes, no chevrons, no pills.
 
 ## Do's and Don'ts
 
@@ -275,6 +287,7 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 - **Do** build tiles and actions from their content (icon + name + hint; 2.4× font height) so nothing clips.
 - **Do** close each work record with a single hairline and keep the blurb to three lines.
 - **Do** keep the fandom letter index on screen while a letter's list is paged, and let a long fandom name take a second line before it is elided.
+- **Do** open every author tab on the same masthead and name each shelf in the title bar, with the strip as the page's whole navigation: one control per destination, and a page whose tabs are its actions needs no bar of its own.
 - **Do** let state be a KOReader checkmark and let the account tile keep its place while its symbol and name change with the session.
 - **Do** keep the AO3 mark and name as the only masthead identity, and leave the native title bar empty on the landing page.
 - **Do** verify every screen in the 600×800 emulator and save the capture under `screenshots/`.
@@ -282,7 +295,7 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 ### Don't:
 - **Don't** introduce hue, tinted backgrounds, gradients, or a second accent — Refresh stays black-and-white too.
 - **Don't** add shadows or lift anything off the page; borders, rules and inversion are the only depth cues.
-- **Don't** round buttons, bars or the tab strip; 7px belongs to tiles only.
+- **Don't** round anything but the tiles (7px) and the author page's tab strip (a full pill); a rounded button, card or primary bar is not this world's form.
 - **Don't** wrap a work card in an outline box or add a cover thumbnail; cards are paper records.
 - **Don't** centre body text, float section labels, or let a label drift away from the gutter.
 - **Don't** use more than three blurb lines, a "show more" ellipsis inside a row, or any infinite scroll.

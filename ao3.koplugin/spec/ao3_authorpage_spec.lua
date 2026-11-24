@@ -1,11 +1,11 @@
--- KOReader busted spec for the author page tab strip.
+-- KOReader busted spec for the author page: its screen and its parsers.
 --
 -- From a KOReader checkout with this plugin symlinked into plugins/:
 --   ln -s ../../plugins/ao3.koplugin/spec/ao3_authorpage_spec.lua spec/unit/
 --   ./kodev test --busted=--pattern=ao3_authorpage_spec front
 --
--- The strip uses native Button widgets, so this exercises the same widget
--- code the device paints.
+-- The screen is built from the same widgets the device paints, so the strip's
+-- segments and the rows the menu pages through are exercised for real.
 
 require("commonrequire")
 
@@ -20,30 +20,73 @@ describe("AO3 author page tabs", function()
         assert.are.same({ "Dashboard", "Works", "Series", "Bookmarks" }, labels)
     end)
 
-    it("builds one horizontal row of buttons, none of them focusable", function()
-        local strip = AuthorPage.tabStrip("works", function() end, 600)
-        assert.are.equal(4, #strip)
-        for _, button in ipairs(strip) do
-            assert.is_false(button.focusable)
-            assert.are.equal(150, button.width)
-        end
+    it("names the shelf in the native title bar", function()
+        assert.are.equal("Fandoms", AuthorPage.tabTitle("dashboard"))
+        assert.are.equal("Works", AuthorPage.tabTitle("works"))
+        assert.are.equal("Series", AuthorPage.tabTitle("series"))
+        assert.are.equal("Bookmarks", AuthorPage.tabTitle("bookmarks"))
     end)
 
-    it("checks only the active tab", function()
-        local strip = AuthorPage.tabStrip("series", function() end, 600)
-        local checked = {}
-        for _, button in ipairs(strip) do
-            if button.checked_func() then
-                checked[#checked + 1] = button.text
+    it("draws one pill holding four near-equal segments", function()
+        local strip = AuthorPage.tabStrip("works", function() end, 570, 19)
+        assert.are.equal(4, #strip.segments)
+        -- A pill, inset to the gutter: it keeps the width it is given, and the
+        -- radius is half its own height so the ends are true half-circles.
+        local size = strip:getSize()
+        assert.are.equal(570, size.w)
+        assert.are.equal(math.floor(size.h / 2), strip.radius)
+        -- The four segments plus three dividers fill the inside exactly.
+        local total = 3 * strip.bordersize
+        for _, segment in ipairs(strip.segments) do
+            total = total + segment.dimen.w
+        end
+        assert.are.equal(size.w, total + 2 * strip.bordersize)
+        local widest, narrowest = 0, 1000
+        for _, segment in ipairs(strip.segments) do
+            widest = math.max(widest, segment.dimen.w)
+            narrowest = math.min(narrowest, segment.dimen.w)
+        end
+        -- Sub-pixel borders are rounded per segment, so the last one may take
+        -- a couple of pixels; the segments never differ by more than that.
+        assert.is_true(widest - narrowest <= 4)
+        assert.are.equal("dashboard", strip.segments[1].tab_id)
+        assert.are.equal("bookmarks", strip.segments[4].tab_id)
+    end)
+
+    it("separates the four options with three internal rules", function()
+        local strip = AuthorPage.tabStrip("dashboard", function() end, 570, 19)
+        -- Inside the pill, tap areas and rules alternate: four options need
+        -- exactly three dividers, each one hairline wide and full height, so
+        -- they read as one bar cut into four rather than four floating labels.
+        local dividers = 0
+        for _, child in ipairs(strip[1]) do
+            if not child.tab_id then
+                dividers = dividers + 1
+                assert.are.equal(strip.bordersize, child.dimen.w)
+                assert.are.equal(strip[1]:getSize().h, child.dimen.h)
             end
         end
-        assert.are.same({ "Series" }, checked)
+        assert.are.equal(3, dividers)
+    end)
+
+    it("marks only the active tab with the checkmark", function()
+        local strip = AuthorPage.tabStrip("series", function() end, 600, 19)
+        local marked = {}
+        for _, segment in ipairs(strip.segments) do
+            -- The segment centres one label: tap area -> centre -> text.
+            local label = segment[1][1].text
+            if label:find("\u{2713}", 1, true) then
+                marked[#marked + 1] = segment.tab_id
+            end
+        end
+        assert.are.same({ "series" }, marked)
     end)
 
     it("reports the tapped tab", function()
         local selected
-        local strip = AuthorPage.tabStrip("dashboard", function(id) selected = id end, 600)
-        strip[3].callback()
+        local strip = AuthorPage.tabStrip("dashboard",
+            function(id) selected = id end, 600, 19)
+        strip.segments[3].onTap()
         assert.are.equal("series", selected)
     end)
 
@@ -56,6 +99,126 @@ describe("AO3 author page tabs", function()
         assert.are.equal(base .. "/bookmarks", AuthorPage.tabUrl(base, "bookmarks"))
         assert.is_nil(AuthorPage.tabUrl(nil, "works"))
         assert.is_nil(AuthorPage.tabUrl(base, "nope"))
+    end)
+end)
+
+describe("AO3 author page screen", function()
+    local function build(over)
+        local o = {
+            tab = "dashboard",
+            name = "Kingsaxcul",
+            data = { items = {} },
+            width = 570,
+            font_size = 19,
+            on_tab = function() end,
+            on_listing = function() end,
+            on_page = function() end,
+            work_row = function(work) return { text = work.title, role = "work" } end,
+        }
+        for key, value in pairs(over or {}) do o[key] = value end
+        return AuthorPage.build(o)
+    end
+
+    local function row(rows, wanted)
+        for _, entry in ipairs(rows) do
+            if entry.role == wanted then return entry end
+        end
+    end
+
+    -- A padded row is gutter + the block + gutter. The count label sits in a
+    -- fixed-width container (so the menu cannot centre it); the empty sentence
+    -- is the block itself.
+    local function count_text(rows)
+        return row(rows, "author_count").ao3_static[2][1][2].text
+    end
+
+    local function empty_text(rows)
+        return row(rows, "author_empty").ao3_static[2][2].text
+    end
+
+    it("keeps the masthead and the strip on all four tabs", function()
+        for _, tab in ipairs({ "dashboard", "works", "series", "bookmarks" }) do
+            local rows = build{ tab = tab }
+            assert.are.equal("author_identity", rows[1].role)
+            assert.is_truthy(row(rows, "author_tabs").ao3_tabs)
+        end
+    end)
+
+    it("spends no solid bar on the page, because the strip is its navigation", function()
+        -- A bar above the strip would be a second control for the works list,
+        -- which is already a tab, and it would have to vanish on Works and move
+        -- every tab up with it. The account screen sets the precedent: a page
+        -- that is a contents page needs no primary of its own.
+        for _, tab in ipairs({ "dashboard", "works", "series", "bookmarks" }) do
+            local rows = build{ tab = tab, data = { items = { {} }, count = "1" } }
+            assert.is_nil(row(rows, "author_all_works"))
+            for _, entry in ipairs(rows) do
+                assert.is_nil(entry.ao3_panel)
+            end
+        end
+    end)
+
+    it("counts the shelf above its records, singular when there is one", function()
+        local fandom = { { name = "Code Geass", url = "/u/1", count = "1" } }
+        assert.are.equal("1 fandom", count_text(build{ data = { items = fandom } }))
+        assert.are.equal("12 works", count_text(
+            build{ tab = "works", data = { items = { {} }, count = "12" } }))
+        assert.are.equal("1 bookmark", count_text(
+            build{ tab = "bookmarks",
+                data = { items = { { kind = "work" } }, count = "1" } }))
+        assert.are.equal("2 series", count_text(
+            build{ tab = "series", data = { items = { {} }, count = "2" } }))
+    end)
+
+    it("paints fandoms and series as index records and bookmarks as work cards", function()
+        local fandoms = build{ data = { items = {
+            { name = "Code Geass", url = "/users/x/works?fandom_id=1", count = "3" },
+        } } }
+        local fandom = row(fandoms, "author_fandom")
+        assert.is_truthy(fandom.ao3_fandom)
+        assert.are.equal("Code Geass", fandom.text)
+        assert.are.equal("3 works", fandom.mandatory)
+        local fandom_url
+        fandoms = build{
+            data = { items = { { name = "Code Geass", url = "/u?fandom_id=1", count = "3" } } },
+            on_listing = function(url) fandom_url = url end,
+        }
+        row(fandoms, "author_fandom").action()
+        assert.are.equal("/u?fandom_id=1", fandom_url)
+
+        local series = row(build{ tab = "series", data = { items = {
+            { title = "Coils AU", url = "/series/4164283", works = "1" },
+        }, count = "1" } }, "author_series")
+        assert.is_truthy(series.ao3_series)
+        assert.are.equal("Coils AU", series.text)
+        assert.are.equal("1 work", series.mandatory)
+
+        -- A bookmarked work keeps the card the listings paint.
+        local bookmark = row(build{ tab = "bookmarks", data = { items = {
+            { id = "7", title = "A Bookmarked Work", kind = "work" },
+        }, count = "1" } }, "work")
+        assert.are.equal("A Bookmarked Work", bookmark.text)
+        assert.is_nil(bookmark.ao3_fandom)
+    end)
+
+    it("says so quietly when a shelf is empty", function()
+        local rows = build{ tab = "bookmarks" }
+        assert.are.equal("No bookmarks.", empty_text(rows))
+        -- No count line over an empty shelf, and nothing to tap.
+        assert.is_nil(row(rows, "author_count"))
+        assert.is_nil(row(rows, "work"))
+    end)
+
+    it("pages with AO3's own next and previous links", function()
+        local paged
+        local rows = build{
+            tab = "works",
+            data = { items = { { title = "A" } }, count = "12",
+                next_url = "https://archiveofourown.org/users/x/works?page=2" },
+            on_page = function(url) paged = url end,
+        }
+        row(rows, "author_next").action()
+        assert.are.equal("https://archiveofourown.org/users/x/works?page=2", paged)
     end)
 end)
 

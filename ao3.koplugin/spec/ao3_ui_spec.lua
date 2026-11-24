@@ -342,8 +342,14 @@ describe("AO3 work-list cards", function()
         assert.are.same(Blitbuffer.COLOR_GRAY_6, card.summary_widget.fgcolor)
 
         local line_h = card.summary_widget.line_height_px
-        assert.is_true(card.summary_widget.height >= 2 * line_h)
-        assert.is_true(card.summary_widget.height <= 3 * line_h)
+        assert.is_true(card.summary_widget.lines_per_page <= 3)
+        assert.is_true(card.summary_widget.height <= 3 * line_h + 2)
+        -- The row is measured from what the widget actually draws, so the
+        -- card's hairline never cuts through the last line of the blurb.
+        assert.is_true(card.summary_widget:getSize().h
+            <= menu.ao3_metrics.summary_h)
+        assert.is_true(card.content_group:getSize().h
+            <= card.dimen.h - card.linesize)
         -- The summary overflows three lines and gets an ellipsis from the
         -- TextBoxWidget, so the card never becomes an unbounded wall of text.
         assert.is_truthy(card.summary_widget.line_with_ellipsis)
@@ -489,7 +495,12 @@ describe("AO3 fandom index", function()
 
         local row = menu.item_group[4]
         assert.is_truthy(row.fandom_name_widget)
-        assert.is_true(row.fandom_name_widget.height <= 2 * row.fandom_name_widget.line_height_px)
+        assert.is_true(row.fandom_name_widget.lines_per_page <= 2)
+        -- Two lines plus the descender overflow the face actually draws. The
+        -- widget's own height is adjusted down to whole line boxes, so the
+        -- record's allotted metric is the yardstick.
+        assert.is_true(row.fandom_name_widget:getSize().h
+            <= menu.ao3_metrics.fandom_name_h)
         assert.is_truthy(row.fandom_name_widget.line_with_ellipsis)
         assert.are.equal("2", row.fandom_count_widget.text)
     end)

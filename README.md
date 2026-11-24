@@ -29,8 +29,9 @@ details captured from a live work.
 | ![A letter's fandoms](screenshots/05-fandom-list.png) | ![Works with summaries](screenshots/06-works.png) |
 | ![Work details](screenshots/07-work-details.png) | ![Reading a work](screenshots/08-reading.png) |
 | ![Author entry](screenshots/09-author-dialog.png) | ![Author dashboard](screenshots/10-author-dashboard.png) |
-| ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/35-author-bookmarks.png) |
-| ![Author works](screenshots/13-author-works.png) | ![Update row](screenshots/29-update-home.png) |
+| ![Author series](screenshots/11-author-series.png) | ![Author bookmarks](screenshots/12-author-bookmarks.png) |
+| ![Author works](screenshots/13-author-works.png) | ![Author works, later page](screenshots/38-author-works-page2.png) |
+| ![An author with nothing on a shelf](screenshots/39-author-empty.png) | ![Update row](screenshots/29-update-home.png) |
 | ![Update prompt](screenshots/30-update-dialog.png) | ![Update changelog](screenshots/37-update-changelog.png) |
 | ![Report row](screenshots/31-report-home.png) | ![Report editor](screenshots/32-report-editor.png) |
 | ![Log consent](screenshots/33-report-consent.png) | ![Report sent](screenshots/36-report-sent.png) |
@@ -121,13 +122,17 @@ table for rating, warnings, category, status and date. **Summary** and
 and opens in full from **Read full summary**. Each author's name opens the
 author page (co-authors each get a row; Anonymous stays plain text).
 
-The author page has four tabs in a horizontal strip:
+The author page has four tabs in one pill-shaped bar — a rounded strip split
+by three hairlines into equal options — and that bar is the page's whole
+navigation. Every tab opens on the same masthead — the author's
+name, with AO3's "Author on AO3" qualifier in grey beneath it — and a quiet
+count line names the shelf above the records:
 
 | Tab | What it shows |
 |---|---|
 | **Dashboard** (default) | The fandoms the author has written in, with work counts. Tapping one opens that author's works in that fandom (AO3's own author-scoped fandom links). |
 | **Works** | All of the author's works as the same card listing. |
-| **Series** | The author's series, with work counts; tapping one opens the series' works. |
+| **Series** | The author's series, with work counts, as index rows; tapping one opens the series' works. |
 | **Bookmarks** | Works (and series) the author has bookmarked, as cards. |
 
 Each tab is fetched at most once per author visit, so switching back and
@@ -365,8 +370,18 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   row is tapped.
 - The author page (Dashboard / Works / Series / Bookmarks) is built from the
   exact live AO3 markup captured on 2026-11-23, including author-scoped
-  fandom links, series stats, work bookmarks and series bookmarks; the four
-  tabs render in the emulator (`screenshots/10`–`13`).
+  fandom links, series stats, work bookmarks and series bookmarks. Every tab
+  opens the same way: the title bar names the shelf (Fandoms for Dashboard),
+  the author's name sits at display size with AO3's "Author on AO3" qualifier
+  in grey beneath it, then one pill-shaped bar holding the four tabs, split by
+  three hairline dividers, the current one carrying a checkmark. That bar is
+  the whole navigation: no solid bar duplicates a tab, so nothing on the page
+  moves when the shelf changes. A quiet count line names the shelf
+  ("6 fandoms", "535 works"),
+  fandom and series records are two-line index rows with their count on the
+  first line, works are the usual summary card, and an empty shelf is a single
+  grey sentence. A shelf longer than one page pages in place
+  (`screenshots/10`–`13`, `38`–`39`).
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
 - Works opened from AO3 return to the plugin from the Back key, the reader
@@ -407,14 +422,15 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
 - The KO3 entry is directly on the Tools tab, fourth from the top so it stays
   on page 1 even when later rows move to page 2 (`screenshots/34`), not nested
   under More tools.
-- The author tabs: tapping **Bookmarks** opens the author's bookmarked works
-  (`screenshots/35`). The title bar's close target is trimmed to the bar so it
+- The author tabs: each of the four is its own tap target inside the pill,
+  and tapping **Bookmarks** opens the author's bookmarked works
+  (`screenshots/12`). The title bar's close target is trimmed to the bar so it
   no longer covers the rightmost tab.
 - The updater's network path: manual redirect following, a refused HTTPS → HTTP
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 238 tests passing across parser, navigation,
+- The offline `busted` suite: 246 tests passing across parser, navigation,
   bounded-index, rendered-card interaction, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and
   bug-report tests, including 51 account tests across token parsing, the

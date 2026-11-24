@@ -603,6 +603,31 @@ local function lineHeight(face, bold)
     return h
 end
 
+-- A TextBoxWidget draws its line boxes plus whatever the face's tallest
+-- glyph needs beyond the last one, so a block measured from its line count
+-- alone clips its final line by a pixel — visible as a hairline cutting
+-- through the third line of a work card's blurb. Measure that overflow the way
+-- TextBoxWidget itself does, once per size.
+local textbox_extra_cache = {}
+local function textboxExtra(face)
+    local key = face.size or 0
+    local extra = textbox_extra_cache[key]
+    if extra == nil then
+        extra = 0
+        local ok, face_height = pcall(function()
+            return face.ftsize:getHeightAndAscender()
+        end)
+        if ok and face_height then
+            -- TextBoxWidget's own line height, which the card metrics use too.
+            local line_h = math.floor((1 + 0.3) * (face.size or 0) + 0.5)
+            local diff = math.floor(line_h - face_height)
+            if diff < 0 then extra = -diff end
+        end
+        textbox_extra_cache[key] = extra
+    end
+    return extra
+end
+
 local function ao3CardMetrics(font_size, infont_size, linesize)
     local title_size, info_size, summary_size = ao3CardSizes(font_size, infont_size)
     local title_face = Font:getFace("smallinfofont", title_size)
@@ -612,9 +637,12 @@ local function ao3CardMetrics(font_size, infont_size, linesize)
     -- TextBoxWidget computes its line height as (1 + line_height) * face.size.
     local summary_line_h = math.floor((1 + 0.3) * summary_size + 0.5)
     local summary_h = AO3_CARD_SUMMARY_LINES * summary_line_h
+        + textboxExtra(Font:getFace("smallinfofont", summary_size))
     -- A fandom index row is a name of at most two lines plus the air that
     -- keeps two records apart; the second line is only paid when used.
     local fandom_line_h = math.floor((1 + 0.3) * title_size + 0.5)
+    local fandom_line_extra = textboxExtra(title_face)
+    local fandom_name_h = 2 * fandom_line_h + fandom_line_extra
     local fandom_pad = 2 * Size.span.vertical_large
     local card_content_h = title_h + author_h + summary_h
         + Size.span.vertical_default + Size.span.vertical_large
@@ -623,10 +651,10 @@ local function ao3CardMetrics(font_size, infont_size, linesize)
         info_size = info_size,
         summary_size = summary_size,
         summary_h = summary_h,
-        fandom_name_h = 2 * fandom_line_h,
+        fandom_name_h = fandom_name_h,
         fandom_line_h = fandom_line_h,
-        fandom_one_line_h = fandom_line_h + fandom_pad + linesize,
-        fandom_two_line_h = 2 * fandom_line_h + fandom_pad + linesize,
+        fandom_one_line_h = fandom_line_h + fandom_line_extra + fandom_pad + linesize,
+        fandom_two_line_h = fandom_name_h + fandom_pad + linesize,
         card_h = card_content_h + linesize,
         card_no_summary_h = title_h + author_h
             + Size.span.vertical_default + Size.span.vertical_large + linesize,
@@ -725,10 +753,11 @@ function Ao3MenuItem:buildCard(metrics)
     return content
 end
 
--- A fandom index record: the name in bold, allowed to run to two lines and
--- closed with an ellipsis after that, and its work count in the right-hand
--- column like every other row.
-function Ao3MenuItem:buildFandom(metrics)
+-- An index record: a bold name allowed to run to two lines and closed with an
+-- ellipsis after that, and its count in the right-hand column like every other
+-- row. The fandom browser and an author's fandoms and series share it, so a
+-- long name gets a second line instead of being cut after one.
+function Ao3MenuItem:buildIndex(metrics)
     local width = self.content_width
     local count = trim(tostring(self.entry.mandatory or ""))
 
@@ -750,7 +779,10 @@ function Ao3MenuItem:buildFandom(metrics)
         alignment = "left",
     }
 
-    local row = HorizontalGroup:new{ align = "center" }
+    -- The count sits on the record's first line. Centring it against a
+    -- two-line name would float it between the lines and read as a stray
+    -- number in the middle of the row.
+    local row = HorizontalGroup:new{ align = "top" }
     row[#row + 1] = self.fandom_name_widget
     if self.fandom_count_widget then
         row[#row + 1] = HorizontalSpan:new{ width = gap }
@@ -800,8 +832,8 @@ function Ao3MenuItem:init()
         content = self.entry.ao3_panel
     elseif self.entry.ao3_work then
         content = self:buildCard(metrics)
-    elseif self.entry.ao3_fandom then
-        content = self:buildFandom(metrics)
+    elseif self.entry.ao3_fandom or self.entry.ao3_series then
+        content = self:buildIndex(metrics)
     else
         content = self:buildCompact(metrics)
     end
@@ -962,7 +994,7 @@ function Ao3WorkMenu:setupItemHeights()
             item.height = item.ao3_panel:getSize().h + self.linesize
         elseif item.ao3_work then
             item.height = item.summary and metrics.card_h or metrics.card_no_summary_h
-        elseif item.ao3_fandom then
+        elseif item.ao3_fandom or item.ao3_series then
             -- An index record: one line for most names, two when the name
             -- needs it, never more.
             item.height = fandomNameLines(item, self:fandomContentWidth(),
@@ -1520,16 +1552,10 @@ end
 -- Author screen
 -- ---------------------------------------------------------------------------
 --
--- Four tabs: Dashboard (default), Works, Series, Bookmarks. The tab strip is
--- the first row of the menu, so Back and paging behave like every other
--- screen, and each tab's page is fetched at most once per author visit.
-
-function Ao3:authorTabRow(tab_id)
-    local strip = AuthorPage.tabStrip(tab_id, function(selected)
-        self:renderAuthorTab(selected, true)
-    end)
-    return { ao3_tabs = strip }
-end
+-- Four tabs: Dashboard (default), Works, Series, Bookmarks, as one page rather
+-- than four lists: the same masthead, solid bar and tab strip on every tab, so
+-- the screen always says whose page it is and which shelf is open. Each tab's
+-- page is fetched at most once per author visit.
 
 function Ao3:showAuthor(name, profile)
     local base = AuthorPage.profileUrl(profile or "")
@@ -1584,79 +1610,56 @@ end
 
 function Ao3:showAuthorRows(tab_id, data, replace)
     local author = self.author
-    local rows = { self:authorTabRow(tab_id) }
-    local title = author.name
+    local font_size = (self.menu and self.menu.font_size) or 20
+    local width = Screen:getWidth() - 2 * Size.padding.fullscreen
 
-    if tab_id == "dashboard" then
-        -- Translate outside the loop: `for _, item` shadows `_`.
-        local works_label = _("%1 works")
-        for _, item in ipairs(data.items) do
-            rows[#rows + 1] = {
-                text = item.name,
-                mandatory = item.count and T(works_label, item.count) or nil,
-                action = function()
-                    self:loadListing(BASE_URL .. item.url, item.name)
-                end,
-            }
-        end
-        if #data.items == 0 then
-            rows[#rows + 1] = { text = _("No fandoms listed.") }
-        end
-        title = T(_("%1 · Fandoms"), author.name)
-    elseif tab_id == "works" then
-        local listing_rows, listing_title = self:listingRows(
-            data, T(_("Works by %1"), author.name))
-        for _, row in ipairs(listing_rows) do
-            rows[#rows + 1] = row
-        end
-        title = listing_title
-    elseif tab_id == "series" then
-        local works_label = _("%1 works")
-        for _, item in ipairs(data.items) do
-            rows[#rows + 1] = {
-                text = item.title,
-                mandatory = item.works and T(works_label, item.works) or nil,
-                action = function()
-                    self:loadListing(BASE_URL .. item.url, item.title)
-                end,
-            }
-        end
-        if #data.items == 0 then
-            rows[#rows + 1] = { text = _("No series.") }
-        end
-        title = T(_("Series by %1"), author.name)
-        if data.count then
-            title = T(_("%1 · %2 series"), title, data.count)
-        end
-    elseif tab_id == "bookmarks" then
-        local works_label = _("%1 works")
-        for _, item in ipairs(data.items) do
-            if item.kind == "series" then
-                rows[#rows + 1] = {
-                    text = item.title,
-                    mandatory = item.works and T(works_label, item.works) or nil,
-                    action = function()
-                        self:loadListing(BASE_URL .. item.url, item.title)
-                    end,
-                }
-            else
-                rows[#rows + 1] = self:workRow(item)
-            end
-        end
-        if #data.items == 0 then
-            rows[#rows + 1] = { text = _("No bookmarks.") }
-        end
-        title = T(_("Bookmarks by %1"), author.name)
-        if data.count then
-            title = T(_("%1 · %2 bookmarks"), title, data.count)
-        end
-    end
+    local rows = AuthorPage.build{
+        tab = tab_id,
+        name = author.name,
+        data = data,
+        width = width,
+        font_size = font_size,
+        on_tab = function(selected) self:renderAuthorTab(selected, true) end,
+        on_listing = function(url, title)
+            self:loadListing(BASE_URL .. url, title)
+        end,
+        on_page = function(url) self:loadAuthorPage(tab_id, url) end,
+        work_row = function(work) return self:workRow(work) end,
+    }
 
+    -- The masthead names the author and the strip shows the tab, so the title
+    -- bar names the shelf and nothing else.
+    local title = AuthorPage.tabTitle(tab_id)
     if replace then
         self:replaceRows(title, rows)
     else
         self:pushRows(title, rows)
     end
+end
+
+-- Another page of the open shelf replaces that shelf's rows, so the masthead,
+-- the strip and the title bar stay put and Back still returns to the screen
+-- that opened the author page.
+function Ao3:loadAuthorPage(tab_id, url)
+    local author = self.author
+    if not author then return end
+    local parse, label
+    if tab_id == "works" then
+        parse = function(html) return self:parseListing(html) end
+        label = _("Loading works…")
+    elseif tab_id == "series" then
+        parse = function(html) return AuthorPage.parseSeries(html) end
+        label = _("Loading series…")
+    elseif tab_id == "bookmarks" then
+        parse = function(html) return AuthorPage.parseBookmarks(html) end
+        label = _("Loading bookmarks…")
+    else
+        return
+    end
+    self:fetchPage(url, parse, label, function(data)
+        author.cache[tab_id] = data
+        self:showAuthorRows(tab_id, data, true)
+    end)
 end
 
 function Ao3:showWork(work)
