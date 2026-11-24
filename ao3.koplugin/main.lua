@@ -3235,13 +3235,16 @@ function Ao3:ensureMenu()
     end
 
     -- Menu's own back logic pops `item_table_stack`; keep the title stack and
-    -- the footer arrow in sync with it.
+    -- the footer arrow in sync with it. Closing the last menu hands the screen
+    -- back to KOReader, and some builds free the widget inside that call, so
+    -- nothing may touch the menu afterwards.
     menu.onClose = function(menu_self)
-        local will_pop = #menu_self.item_table_stack > 0
-        local ret = Menu.onClose(menu_self)
-        if will_pop then
-            menu_self.ao3_title = table.remove(menu_self.ao3_title_stack) or _("AO3")
+        local stack = menu_self.item_table_stack
+        if not stack or #stack == 0 then
+            return Menu.onClose(menu_self)
         end
+        local ret = Menu.onClose(menu_self)
+        menu_self.ao3_title = table.remove(menu_self.ao3_title_stack) or _("AO3")
         if menu_self.page_return_arrow then
             menu_self.page_return_arrow:enableDisable(#menu_self.item_table_stack > 0)
         end

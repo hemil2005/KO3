@@ -428,6 +428,30 @@ describe("AO3 work-list cards", function()
         assert.is_true(#menu.page_items[1] >= 3)
     end)
 
+    it("closes the last menu without touching the closed widget", function()
+        -- Older builds free the menu inside Menu.onClose. The landing page's
+        -- X is the one close that takes this path; reading the footer arrow
+        -- afterwards raised an error and took KOReader down with the menu.
+        local Menu = require("ui/widget/menu")
+        local saved = Menu.onClose
+        local calls = 0
+        Menu.onClose = function(menu_self)
+            calls = calls + 1
+            menu_self.item_table_stack = {}
+            menu_self.page_return_arrow = {
+                enableDisable = function() error("closed widget touched") end,
+            }
+            return true
+        end
+        local menu = open_listing(listing_with(
+            { work("1", "Closed", "Writer", "A summary.") }))
+        menu.item_table_stack = {}
+        local ok, err = pcall(function() menu:onClose() end)
+        Menu.onClose = saved
+        assert.is_true(ok, err)
+        assert.are.equal(1, calls)
+    end)
+
     it("marks a work with AO3's symbols, fandoms, ships and numbers", function()
         local tagged = work("1", "Tagged", "Writer", "A summary.", {
             rating_key = "rating-teen",
