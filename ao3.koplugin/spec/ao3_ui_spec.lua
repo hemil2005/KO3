@@ -620,6 +620,123 @@ describe("AO3 work-list cards", function()
             assert.is_nil(child.is_line_widget)
         end
     end)
+
+    -- A record with every field the modern card can draw, so a design test can
+    -- assert both what is present and what a different design leaves out.
+    local function decorated_work()
+        return work("1", "Tagged", "Writer", "A summary.", {
+            rating_key = "rating-teen",
+            warning_key = "warning-yes",
+            category_key = "category-slash",
+            complete_key = "complete-yes",
+            fandoms = "Fandom One",
+            relationships = "A/B",
+            tag_list = { "slow burn", "fix-it" },
+            words = "4,913",
+            chapters = "1/1",
+            updated = "4 Jul 2020",
+        })
+    end
+
+    it("builds the modern card with its symbols, classifications, tags and numbers", function()
+        local menu = open_listing(listing_with({ decorated_work() }))
+        local card = menu.item_group[1]
+
+        assert.is_truthy(card.symbol_grid)
+        assert.are.equal("Fandom One", card.fandom_widget.text)
+        assert.are.equal("A/B", card.ships_widget.text)
+        assert.is_truthy(card.tags_widget)
+        assert.is_truthy(card.stats_widget)
+        assert.is_truthy(card.summary_widget)
+    end)
+
+    it("builds the legacy card as a title, plain author and blurb only", function()
+        plugin.prefs = { card_style = "legacy", tags_expanded = false }
+        local menu = open_listing(listing_with({ decorated_work() }))
+        local card = menu.item_group[1]
+
+        -- The card as it was before the redesign: no "by", no symbols.
+        assert.are.equal("Tagged", card.title_widget.text)
+        assert.are.equal("Writer", card.author_widget.text)
+        assert.are.equal("A summary.", card.summary_widget.text)
+        assert.are.same(Blitbuffer.COLOR_GRAY_6, card.author_widget.fgcolor)
+
+        -- None of the modern card's furniture is built, so none of its air is
+        -- reserved either.
+        assert.is_nil(card.symbol_grid)
+        assert.is_nil(card.fandom_widget)
+        assert.is_nil(card.ships_widget)
+        assert.is_nil(card.tags_widget)
+        assert.is_nil(card.stats_widget)
+    end)
+
+    it("falls back to Untitled and Anonymous in the legacy card", function()
+        plugin.prefs = { card_style = "legacy", tags_expanded = false }
+        local menu = open_listing(listing_with({
+            work("1", "", "", "A summary."),
+        }))
+        local card = menu.item_group[1]
+        assert.are.equal("Untitled", card.title_widget.text)
+        assert.are.equal("Anonymous", card.author_widget.text)
+    end)
+
+    it("pages legacy cards at their own, shorter height", function()
+        -- The gap between the designs is the furniture: a decorated record
+        -- pays for its symbols, classifications, tags and numbers, and the
+        -- legacy card pays for none of it.
+        local items = {}
+        for i = 1, 8 do
+            items[i] = decorated_work()
+            items[i].id = tostring(i)
+        end
+
+        plugin.prefs = { card_style = "modern", tags_expanded = false }
+        local modern = open_listing(listing_with(items))
+        local modern_h = modern.item_table[1].height
+        local modern_page = #modern.page_items[1]
+
+        plugin.prefs = { card_style = "legacy", tags_expanded = false }
+        local legacy = open_listing(listing_with(items))
+        local legacy_h = legacy.item_table[1].height
+
+        assert.is_true(legacy_h < modern_h)
+        assert.is_true(#legacy.page_items[1] >= modern_page)
+
+        -- Every card on the page fits the page's budget: no clipped last card.
+        local budget = legacy.available_height
+        if budget then
+            local used = 0
+            for _, index in ipairs(legacy.page_items[1]) do
+                used = used + legacy.item_table[index].height
+            end
+            assert.is_true(used <= budget)
+        end
+    end)
+
+    it("restyles work rows already on the navigation stack", function()
+        local tagged = decorated_work()
+        local menu = open_listing(listing_with({ tagged }))
+        plugin:pushRows("Work details", { { text = "back" } })
+
+        -- The listing sits somewhere under the pages pushed on top of it.
+        local listing_rows
+        for _, rows in ipairs(menu.item_table_stack) do
+            if rows[1] and rows[1].ao3_work then listing_rows = rows end
+        end
+        assert.is_truthy(listing_rows)
+        assert.are.equal("modern", listing_rows[1].card_style)
+
+        plugin:restyleWorkRows("legacy")
+        assert.are.equal("legacy", listing_rows[1].card_style)
+
+        -- Returning to the list rebuilds the card from the row, in the new
+        -- design, without a fetch.
+        table.remove(menu.item_table_stack)
+        plugin:replaceRows("Search: test", listing_rows)
+        menu:paintTo(Screen.bb, 0, 0)
+        assert.is_nil(menu.item_group[1].tags_widget)
+        assert.is_truthy(menu.item_group[1].author_widget)
+    end)
 end)
 
 describe("AO3 fandom index", function()

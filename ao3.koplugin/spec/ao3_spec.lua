@@ -866,12 +866,17 @@ describe("AO3 browser", function()
                 gear.onTap()
                 assert.are.equal("Settings", menu.ao3_title)
 
-                -- Exactly one option: the label and its On/Off state.
-                assert.are.equal(1, #menu.item_table)
+                -- Two options, each a label and its state: the tag default,
+                -- then the card design, which starts modern.
+                assert.are.equal(2, #menu.item_table)
                 local row = menu.item_table[1]
                 assert.are.equal("tags_default", row.role)
                 assert.are.equal("Expanded tags:", row.text)
                 assert.are.equal("Off", row.mandatory)
+                local style_row = menu.item_table[2]
+                assert.are.equal("card_style", style_row.role)
+                assert.are.equal("Work cards:", style_row.text)
+                assert.are.equal("Modern", style_row.mandatory)
 
                 row.action()
                 assert.is_true(plugin.prefs.tags_expanded)

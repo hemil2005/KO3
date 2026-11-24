@@ -50,6 +50,27 @@ describe("AO3 reader preferences", function()
         assert.is_false(Preferences.load(path).tags_expanded)
     end)
 
+    it("uses the modern work card when nothing has been chosen yet", function()
+        assert.are.equal("modern", Preferences.load(path).card_style)
+    end)
+
+    it("falls back to the modern card for an unknown design", function()
+        local f = assert(io.open(path, "wb"))
+        f:write('return { ["card_style"] = "ornate" }\n')
+        f:close()
+        assert.are.equal("modern", Preferences.load(path).card_style)
+    end)
+
+    it("round-trips the legacy work card", function()
+        assert.is_true(Preferences.save({ card_style = "legacy" }, path))
+        assert.are.equal("legacy", Preferences.load(path).card_style)
+    end)
+
+    it("stores a design it does not know as the modern card", function()
+        assert.is_true(Preferences.save({ card_style = "ornate" }, path))
+        assert.are.equal("modern", Preferences.load(path).card_style)
+    end)
+
     it("keeps its file separate from the session file", function()
         local DataStorage = require("datastorage")
         local old_dir = DataStorage.getSettingsDir
