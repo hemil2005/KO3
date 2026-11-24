@@ -225,9 +225,9 @@ function HomePage.card(entry, width, height, o)
         content[#content + 1] = TextWidget:new{
             text = entry.hint,
             face = Font:getFace("smallinfofont", HomePage.hint_size(o)),
-            -- The same secondary grey as the work cards' author and summary:
-            -- a hint that has been made readable should not stay pale.
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            -- The same detail ink as the work cards' author and summary: a
+            -- hint that has been made readable should not stay pale.
+            fgcolor = Uikit.CARD_DETAIL,
             max_width = inner_w,
         }
     end

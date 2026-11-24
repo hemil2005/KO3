@@ -1041,9 +1041,9 @@ function Ao3MenuItem:buildSymbols(work, metrics)
     return grid
 end
 
--- Words, chapters, updated: the record's numbers, with the labels in Slate
--- and the values in bold ink. A trailing fact that will not fit is dropped
--- rather than wrapped onto a second line.
+-- Words, chapters, updated: the record's numbers, with the labels in the
+-- card's detail ink and the values in bold ink. A trailing fact that will not
+-- fit is dropped rather than wrapped onto a second line.
 function Ao3MenuItem:buildStats(work, metrics, width)
     local face = Font:getFace("smallinfofont", metrics.info_size)
     local items = {}
@@ -1064,7 +1064,7 @@ function Ao3MenuItem:buildStats(work, metrics, width)
         local label = TextWidget:new{
             text = item.label,
             face = face,
-            fgcolor = Uikit.SECONDARY,
+            fgcolor = Uikit.CARD_DETAIL,
         }
         local value = TextWidget:new{
             text = item.value,
@@ -1083,7 +1083,7 @@ function Ao3MenuItem:buildStats(work, metrics, width)
             row[#row + 1] = TextWidget:new{
                 text = "·",
                 face = face,
-                fgcolor = Uikit.SECONDARY,
+                fgcolor = Uikit.CARD_DETAIL,
             }
             row[#row + 1] = HorizontalSpan:new{ width = Size.span.horizontal_small }
         end
@@ -1111,7 +1111,7 @@ function Ao3MenuItem:buildTagBox(work, metrics, width)
         text = expanded and "-" or "+",
         face = Font:getFace("cfont", metrics.info_size),
         bold = true,
-        fgcolor = Uikit.SECONDARY,
+        fgcolor = Uikit.CARD_DETAIL,
     }
 
     local text
@@ -1124,13 +1124,13 @@ function Ao3MenuItem:buildTagBox(work, metrics, width)
             height_adjust = true,
             height_overflow_show_ellipsis = true,
             alignment = "left",
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
         }
     else
         text = TextWidget:new{
             text = fittedTags(tags, face, text_w),
             face = face,
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
             max_width = text_w,
         }
     end
@@ -1181,7 +1181,7 @@ function Ao3MenuItem:buildCard(metrics)
     local author_widget = TextWidget:new{
         text = T(_("by %1"), author ~= "" and author or _("Anonymous")),
         face = Font:getFace("smallinfofont", metrics.info_size),
-        fgcolor = Blitbuffer.COLOR_GRAY_6,
+        fgcolor = Uikit.CARD_DETAIL,
         max_width = text_w,
     }
     self.title_widget = title_widget
@@ -1236,13 +1236,13 @@ function Ao3MenuItem:buildCard(metrics)
         self.fandom_widget = TextWidget:new{
             text = work.fandoms,
             face = Font:getFace("smallinfofont", metrics.info_size),
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
             max_width = text_w,
         }
         self.ships_widget = TextWidget:new{
             text = work.relationships,
             face = Font:getFace("smallinfofont", metrics.info_size),
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
             max_width = text_w,
         }
         local meta = HorizontalGroup:new{ align = "center" }
@@ -1250,7 +1250,7 @@ function Ao3MenuItem:buildCard(metrics)
         meta[#meta + 1] = TextWidget:new{
             text = " · ",
             face = Font:getFace("smallinfofont", metrics.info_size),
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
         }
         meta[#meta + 1] = self.ships_widget
         addBlock(meta, Size.span.vertical_default)
@@ -1259,7 +1259,7 @@ function Ao3MenuItem:buildCard(metrics)
             self.fandom_widget = TextWidget:new{
                 text = work.fandoms,
                 face = Font:getFace("smallinfofont", metrics.info_size),
-                fgcolor = Blitbuffer.COLOR_GRAY_6,
+                fgcolor = Uikit.CARD_DETAIL,
                 max_width = text_w,
             }
             addBlock(self.fandom_widget, Size.span.vertical_default)
@@ -1268,7 +1268,7 @@ function Ao3MenuItem:buildCard(metrics)
             self.ships_widget = TextWidget:new{
                 text = work.relationships,
                 face = Font:getFace("smallinfofont", metrics.info_size),
-                fgcolor = Blitbuffer.COLOR_GRAY_6,
+                fgcolor = Uikit.CARD_DETAIL,
                 max_width = text_w,
             }
             addBlock(self.ships_widget, Size.span.vertical_default)
@@ -1288,7 +1288,7 @@ function Ao3MenuItem:buildCard(metrics)
             height_adjust = true,
             height_overflow_show_ellipsis = true,
             alignment = "left",
-            fgcolor = Blitbuffer.COLOR_GRAY_6,
+            fgcolor = Uikit.CARD_DETAIL,
         }
         addBlock(self.summary_widget, Size.span.vertical_large)
     end
