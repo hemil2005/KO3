@@ -462,7 +462,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 262 tests passing across parser, navigation,
+- The offline `busted` suite: 268 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and

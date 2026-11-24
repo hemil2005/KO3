@@ -31,6 +31,10 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   KOReader's file manager (`ShowingReader`), so after returning from the
   reader the plugin menu can be the last window; show the file manager when
   that menu closes rather than letting the stack empty, which quits KOReader.
+- Back from a pushed screen (work details, an author page, any submenu) returns
+  the listing to the page it was left on. `Menu:onClose` reopens the parent
+  through `switchItemTable` without an itemnumber, which means page 1; record
+  the page at push time and follow it back after the pop.
 - After any user-visible change, demonstrate it in the local Kindle emulator
   and save a capture under `screenshots/`. Tests alone are not enough.
 
