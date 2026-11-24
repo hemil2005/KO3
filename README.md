@@ -1,4 +1,4 @@
-# KO3 — an AO3 browser for KOReader
+﻿# KO3 â€” an AO3 browser for KOReader
 
 A deliberately small browser for [Archive of Our Own](https://archiveofourown.org)
 that runs inside KOReader on Kindle (and other e-readers).
@@ -17,7 +17,7 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
 
 ## Screenshots
 
-Taken from the KOReader emulator (600×800, grayscale). The work-list and
+Taken from the KOReader emulator (600Ã—800, grayscale). The work-list and
 author-tab shots render real AO3 markup captured offline; the other
 browse/detail shots use the plugin and embedded fandom data, with the
 details captured from a live work.
@@ -42,6 +42,7 @@ details captured from a live work.
 | ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
 | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
 | ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![KO3 on the first Tools page](screenshots/34-tools-menu.png) |
+| ![The older, simpler work card](screenshots/42-legacy-work-list.png) | |
 
 ## Install
 
@@ -52,7 +53,7 @@ The quickest way is the release zip:
 2. Unzip it into `koreader/plugins/` on the device (the archive already
    contains the `ao3.koplugin` folder).
 3. Restart KOReader.
-4. Open **Tools → KO3**.
+4. Open **Tools â†’ KO3**.
 
 Or copy the `ao3.koplugin` folder yourself. Either way, the layout should be:
 
@@ -97,7 +98,7 @@ name beside the icon, with a one-line hint underneath:
 | **Search works** (solid bar) | Work title, author or keyword |
 | **Latest works** | Newest works across the archive (`/works`) |
 | **Fandoms** | Categorized fandom index, shipped with the plugin |
-| **Author** | An author's name or profile URL — their works list |
+| **Author** | An author's name or profile URL â€” their works list |
 | **Tag** | A tag name, or paste a full `/tags/.../works` URL |
 | **Account** | Sign in to AO3, then your bookmarks, marked-for-later, history and subscriptions |
 | **Downloads** | Works already saved on this device |
@@ -105,33 +106,33 @@ name beside the icon, with a one-line hint underneath:
 | **Update KO3** | Check GitHub Releases for a newer version |
 | **Report a bug** | Write what happened; optionally attach a diagnostic log |
 
-Fandoms are browsed media category → letter → fandom, the same way AO3's
+Fandoms are browsed media category â†’ letter â†’ fandom, the same way AO3's
 own index is organised. Choosing a category opens the whole alphabet as one
-index above the list: three shelves of nine (A–I, J–R, S–Z and `#`), with the
+index above the list: three shelves of nine (Aâ€“I, Jâ€“R, Sâ€“Z and `#`), with the
 open letter inverted. The index stays on screen while you page through a
 letter, so changing letters never means paging back. A fandom's name may run
 to two lines and is then elided; its work count keeps the right-hand column.
 Large letters load in local windows of up to 100 fandoms. **Find in this
-letter…** jumps to a matching name without going online; tapping a fandom
+letterâ€¦** jumps to a matching name without going online; tapping a fandom
 fetches only its 20-work page. On the AO3 screens, the letter shortcut boxes
 are hidden so the text gets the full touchscreen width.
 
 Each work is one selectable card. Beside the title sits AO3's own required-tag
-strip as a 2×2 grid of ink symbols: the rating letter (G/T/M/E), a warning
+strip as a 2Ã—2 grid of ink symbols: the rating letter (G/T/M/E), a warning
 mark, the category's symbol, and a check for a finished work. The bold title
-shares its line with the byline ("by …") when both fit; a title that needs the
+shares its line with the byline ("by â€¦") when both fit; a title that needs the
 whole width keeps its line and the byline drops beneath it. Fandoms and
 relationships share one grey line when they fit, and take a line each when
 they do not. Then come the tag box, up to three lines of summary, and the
-record's numbers — words, chapters and the last update. The tag box stays to
+record's numbers â€” words, chapters and the last update. The tag box stays to
 one line, ending in "+N more"; tapping it opens that work's tags in place (up
 to six lines) without opening the work. The work's details page still carries
 the complete tag list.
 
 **Settings** (the gear beside the AO3 name) has two options. **Expanded tags:**
-**On** or **Off** — Off is the default and keeps every tag box to one line; On
+**On** or **Off** â€” Off is the default and keeps every tag box to one line; On
 starts each listing with the boxes open. **Work cards:** **Modern** or
-**Legacy** — Modern is the default, with the AO3 symbols, fandom and
+**Legacy** â€” Modern is the default, with the AO3 symbols, fandom and
 relationships, the tag box and the word/chapter numbers; Legacy is the simpler
 card the plugin started with, a bold title, the author and the first three
 lines of the summary. Both choices are stored in `settings/ao3_prefs.lua`,
@@ -146,10 +147,10 @@ table for rating, warnings, category, status and date. **Summary** and
 and opens in full from **Read full summary**. Each author's name opens the
 author page (co-authors each get a row; Anonymous stays plain text).
 
-The author page has four tabs in one pill-shaped bar — a rounded strip split
-by three hairlines into equal options — and that bar is the page's whole
-navigation. Every tab opens on the same masthead — the author's
-name, with AO3's "Author on AO3" qualifier in grey beneath it — and a quiet
+The author page has four tabs in one pill-shaped bar â€” a rounded strip split
+by three hairlines into equal options â€” and that bar is the page's whole
+navigation. Every tab opens on the same masthead â€” the author's
+name, with AO3's "Author on AO3" qualifier in grey beneath it â€” and a quiet
 count line names the shelf above the records:
 
 | Tab | What it shows |
@@ -164,7 +165,7 @@ forth does not re-request AO3. Back (the footer
 arrow, the hardware Back key, the X, or a downward swipe) goes one level up
 instead of dropping you into the file manager.
 
-Signing in is optional and only unlocks the personal lists. **Account → Sign
+Signing in is optional and only unlocks the personal lists. **Account â†’ Sign
 in** takes an AO3 username (or email) and password. The password is posted
 once, directly to AO3, and is never written to disk. What is kept is AO3's own
 session cookie (`_otwarchive_session`, plus `remember_user_token` when AO3 sets
@@ -207,7 +208,7 @@ the session cookie changes; the tokens embedded in a work page belong to their
 forms, so they are not reused for a different action. A form post is never
 retried, so a 403 cannot leave two kudos or two bookmarks behind.
 
-The first read downloads the whole work (usually 200 KB–1 MB); after that the
+The first read downloads the whole work (usually 200 KBâ€“1 MB); after that the
 cached copy opens instantly, offline. **Refresh** downloads and validates the
 latest version before replacing the saved copy, so a failed request leaves
 the offline book available.
@@ -231,7 +232,7 @@ heading.
 ### Updating KO3
 
 **No computer is needed after the first install.** Open
-**Tools → KO3 → Update KO3**:
+**Tools â†’ KO3 â†’ Update KO3**:
 
 1. It asks GitHub for the latest release and shows the current version, the
    new version and the release notes (`manifest.json` is the fallback).
@@ -261,7 +262,7 @@ the release page is on `github.com`). Later updates then work in place.
 
 ### Reporting a bug
 
-**Tools → KO3 → Report a bug** opens a text field. After you describe what
+**Tools â†’ KO3 â†’ Report a bug** opens a text field. After you describe what
 happened, a consent dialog asks whether to attach the diagnostic log and
 states that the report and log are sent to the project's issue tracker, and
 that the log is used only to find the cause. Choosing **Without log** sends
@@ -346,7 +347,7 @@ The fandom snapshot is generated from AO3 with `tools/build_fandoms.py`:
 
 ```sh
 # Save https://archiveofourown.org/media as 00_media.html, then each
-# /media/<category>/fandoms page as 01.html … 10.html in one directory:
+# /media/<category>/fandoms page as 01.html â€¦ 10.html in one directory:
 python3 tools/build_fandoms.py fandom_pages ao3.koplugin/data/fandoms
 ```
 
@@ -367,24 +368,24 @@ is readable in the file manager too. Delete the file to force a re-download.
 Tested in the KOReader emulator with a native HTTP client (no browser):
 
 - The embedded snapshot: 77,535 fandoms across 10 media categories,
-  browsable offline as category → letter → bounded 100-entry windows.
+  browsable offline as category â†’ letter â†’ bounded 100-entry windows.
 - A live fandom listing (`/tags/Harry Potter .../works`) returned a full
   page with the count and working page navigation.
 - Work lists render one selectable card per work: AO3's rating, warning,
-  category and completion symbols in a 2×2 ink grid; the bold title sharing
+  category and completion symbols in a 2Ã—2 ink grid; the bold title sharing
   its line with the byline; fandoms and relationships sharing a line when they
   fit; a one-line tag box that opens in place on a tap; the blurb clamped to
   three lines; and words, chapters and the last update. Cards are measured
   from their content, so an opened tag box moves the records below rather than
-  clipping them. Three works fit on a 600×800 page with the tags folded.
+  clipping them. Three works fit on a 600Ã—800 page with the tags folded.
   Captured in `screenshots/06` and `40`.
 - With **Work cards: Legacy**, the same lists render the 0.x card instead: a
   bold title, the author's plain name and a three-line summary, with no
   symbols, classifications, tags or numbers. They are measured and paged at
   their own, shorter height, so a page of them neither clips the last card nor
   leaves an empty band. Captured in `screenshots/42`.
-- Settings has two options, each a label and its value — **Expanded tags:** On
-  or Off and **Work cards:** Modern or Legacy — stored in
+- Settings has two options, each a label and its value â€” **Expanded tags:** On
+  or Off and **Work cards:** Modern or Legacy â€” stored in
   `settings/ao3_prefs.lua`, separately from the AO3 session. A tap flips the
   choice, the row redraws with its new value, and every work list already on
   the back stack is restyled from its own rows, so returning to it shows the
@@ -394,7 +395,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   account actions (Kudos, Bookmark, Subscribe, Mark for later), and folded
   Summary and Tags sections. A summary longer than a page is elided and opens
   in full; expanding lands on the text it revealed. Captured in
-  `screenshots/07`, `18`–`19` and `26`–`27`.
+  `screenshots/07`, `18`â€“`19` and `26`â€“`27`.
 - The landing page: AO3 logo lockup with the settings gear at the right edge
   of the masthead line, one solid Search bar, then Browse, Account, Library
   and Plugin groups of icon tiles (clock, grid, person, tag, login, download,
@@ -422,7 +423,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   fandom and series records are two-line index rows with their count on the
   first line, works are the usual summary card, and an empty shelf is a single
   grey sentence. A shelf longer than one page pages in place
-  (`screenshots/10`–`13`, `38`–`39`).
+  (`screenshots/10`â€“`13`, `38`â€“`39`).
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
 - Works opened from AO3 return to the plugin from the Back key, the reader
@@ -431,7 +432,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
 - The account screens render in the emulator: the Account tile on the
   landing page signed out and signed in, the sign-in form with a masked
   password field, the signed-in Account page, the work actions, and the
-  signed-out work page (`screenshots/24`–`25`, `27`–`28`). The action and
+  signed-out work page (`screenshots/24`â€“`25`, `27`â€“`28`). The action and
   account captures use a local demo session and make no AO3 request.
 - The sign-in flow completed against live AO3 on 2026-11-23 and saved AO3's
   session and remember-me cookies to `settings/ao3.lua`; the saved data has no
@@ -450,15 +451,15 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
 - The sign-in handshake is covered offline. A successful POST must be
   confirmed by AO3's logged-in greeting; an anonymous cookie plus a redirect
   back to the form is rejected. Cloudflare cookies are dropped, the session
-  is not attached to other hosts, an HTTPS → HTTP redirect is refused, and a
+  is not attached to other hosts, an HTTPS â†’ HTTP redirect is refused, and a
   rotated session cookie cannot be replaced by an expired deletion cookie.
 - The inline updater: manifest validation, version comparison, path-traversal
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row, prompt and full changelog render in the
-  emulator (`screenshots/29`–`30`, `37`).
+  emulator (`screenshots/29`â€“`30`, `37`).
 - Bug reports: query stripping, consent-gated log inclusion, report bundle
   writing, relay submission and token handling; the four screens render in
-  the emulator (`screenshots/31`–`33`, `36`). The relay was tested live end
+  the emulator (`screenshots/31`â€“`33`, `36`). The relay was tested live end
   to end from `bugreport.lua` (issues #1 and #2, then closed).
 - The KO3 entry is directly on the Tools tab, fourth from the top so it stays
   on page 1 even when later rows move to page 2 (`screenshots/34`), not nested
@@ -467,11 +468,11 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   and tapping **Bookmarks** opens the author's bookmarked works
   (`screenshots/12`). The title bar's close target is trimmed to the bar so it
   no longer covers the rightmost tab.
-- The updater's network path: manual redirect following, a refused HTTPS → HTTP
+- The updater's network path: manual redirect following, a refused HTTPS â†’ HTTP
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 262 tests passing across parser, navigation,
+- the offline `busted` suite: 271 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater and
@@ -497,7 +498,7 @@ real `429` is still possible, still honoured with `Retry-After`, and never
 retried. If AO3 is queueing traffic, stop and try later rather than tapping
 through it.
 
-If AO3 works in your browser but not here, use AO3's **Download → HTML**
+If AO3 works in your browser but not here, use AO3's **Download â†’ HTML**
 button in the browser, transfer the file to your device, and open it from
 KOReader's file browser. AO3 currently reports that other download formats
 are temporarily disabled. This manual path does not require the plugin's
@@ -530,7 +531,7 @@ what made the 403 stick for the plugin while `curl` could still fetch pages.
   plugin does not fetch them.
 - **Snapshot, not live.** The fandom list is a point-in-time copy; tag names
   that were renamed on AO3 after the snapshot will 404 until it is
-  regenerated. "Find a tag…" resolves any current tag by name.
+  regenerated. "Find a tagâ€¦" resolves any current tag by name.
 - **Simple search.** One query box. AO3's filter matrix (rating, warnings,
   completion, word count, sort) is not exposed. Apps commonly have it; it
   would need a filter screen and is intentionally out of scope here.
@@ -579,7 +580,7 @@ pull request. The updater reads
 ### Demonstrating a change in the emulator
 
 Every user-visible change is also shown in the local Kindle emulator
-(600×800), not only tested. After the suite is green:
+(600Ã—800), not only tested. After the suite is green:
 
 1. Launch the emulator (`kodev run` or the `wl_launch.sh` helper used here).
 2. Exercise the real screen with taps/keys, or, when live AO3 is gated,
@@ -594,19 +595,19 @@ Tests prove behaviour; the emulator capture shows the actual result.
 
 | Symptom | Likely cause |
 |---|---|
-| KOReader exits when opening AO3 | An older KOReader build lacking newer font APIs. Current plugin versions fall back automatically — reinstall the latest `ao3.koplugin` |
+| KOReader exits when opening AO3 | An older KOReader build lacking newer font APIs. Current plugin versions fall back automatically â€” reinstall the latest `ao3.koplugin` |
 | `429` or a wait message | Cloudflare's bot layer (or AO3) is refusing the client. A **VPN or privacy browser can trigger this**; wait the time shown, or turn the VPN off and retry. Do not repeatedly tap or reinstall to bypass it. If AO3 sends `Retry-After`, the plugin honors it. |
 | `403` or a wait message | AO3 or its edge refused this client. A recognized browser check is not retried; other 403s get one retry, then a five-minute cooldown. |
 | `404` | Work deleted, restricted, or downloads disabled |
-| “did not return a work file” | Restricted/adult/login page instead of the work |
-| “Could not parse the AO3 page” | AO3 changed its HTML, or `htmlparser` failed |
+| â€œdid not return a work fileâ€ | Restricted/adult/login page instead of the work |
+| â€œCould not parse the AO3 pageâ€ | AO3 changed its HTML, or `htmlparser` failed |
 | Nothing happens after tapping Read | Check Wi-Fi and that the Kindle is online |
-| “Could not check for updates” | The device cannot reach `github.com`. Check Wi-Fi; the check is a single small request |
-| “failed its checksum” | The download was truncated or altered; nothing was installed. Try again |
-| “does not contain the plugin” | The release asset is wrong or incomplete; the installed copy was left untouched |
-| Update installed but nothing changed | KOReader is still running the old code — use **Restart** in the prompt, or restart it yourself |
-| “Report saved” but no issue was created | The relay was unreachable; attach `report.md` (and `log.txt`) to a new issue |
-| “Could not send the report” | Token rejected or no network; the report is still saved in `ao3/reports/` |
+| â€œCould not check for updatesâ€ | The device cannot reach `github.com`. Check Wi-Fi; the check is a single small request |
+| â€œfailed its checksumâ€ | The download was truncated or altered; nothing was installed. Try again |
+| â€œdoes not contain the pluginâ€ | The release asset is wrong or incomplete; the installed copy was left untouched |
+| Update installed but nothing changed | KOReader is still running the old code â€” use **Restart** in the prompt, or restart it yourself |
+| â€œReport savedâ€ but no issue was created | The relay was unreachable; attach `report.md` (and `log.txt`) to a new issue |
+| â€œCould not send the reportâ€ | Token rejected or no network; the report is still saved in `ao3/reports/` |
 
 If a work opens as a login page or an adult warning, the file is rejected
 before it reaches the reader, so you should see an error rather than a

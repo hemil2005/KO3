@@ -16,6 +16,7 @@ local Blitbuffer = require("ffi/blitbuffer")
 local Size = require("ui/size")
 
 local Ao3 = dofile("plugins/ao3.koplugin/main.lua")
+local Uikit = dofile("plugins/ao3.koplugin/uikit.lua")
 
 local function work(id, title, authors, summary, extra)
     local item = {
@@ -342,8 +343,10 @@ describe("AO3 work-list cards", function()
         assert.is_true(card.author_widget.face.size < card.title_widget.face.size)
         assert.are.equal("smallinfofont", card.author_widget.face.orig_font)
         assert.are.equal("smallinfofont", card.summary_widget.face.orig_font)
-        assert.are.same(Blitbuffer.COLOR_GRAY_6, card.author_widget.fgcolor)
-        assert.are.same(Blitbuffer.COLOR_GRAY_6, card.summary_widget.fgcolor)
+        -- Every detail line on the card shares one tier of ink, darker than
+        -- the quiet labels elsewhere but still below the bold black title.
+        assert.are.same(Uikit.CARD_DETAIL, card.author_widget.fgcolor)
+        assert.are.same(Uikit.CARD_DETAIL, card.summary_widget.fgcolor)
 
         local line_h = card.summary_widget.line_height_px
         assert.is_true(card.summary_widget.lines_per_page <= 3)
@@ -513,15 +516,16 @@ describe("AO3 work-list cards", function()
 
         assert.are.equal("Fandom One, Fandom Two", card.fandom_widget.text)
         assert.are.equal("A/B", card.ships_widget.text)
-        assert.are.same(Blitbuffer.COLOR_GRAY_6, card.fandom_widget.fgcolor)
+        assert.are.same(Uikit.CARD_DETAIL, card.fandom_widget.fgcolor)
+        assert.are.same(Uikit.CARD_DETAIL, card.ships_widget.fgcolor)
 
-        -- Labels in Slate, values in bold ink.
+        -- Labels in the card's detail ink, values in bold ink.
         local labels, values = {}, {}
         for _, child in ipairs(card.stats_widget) do
             if child.text == "Words" or child.text == "Chapters"
                     or child.text == "Updated" then
                 labels[#labels + 1] = child.text
-                assert.are.same(Blitbuffer.COLOR_DARK_GRAY, child.fgcolor)
+                assert.are.same(Uikit.CARD_DETAIL, child.fgcolor)
             elseif child.text and child.bold then
                 values[#values + 1] = child.text
             end
@@ -659,7 +663,8 @@ describe("AO3 work-list cards", function()
         assert.are.equal("Tagged", card.title_widget.text)
         assert.are.equal("Writer", card.author_widget.text)
         assert.are.equal("A summary.", card.summary_widget.text)
-        assert.are.same(Blitbuffer.COLOR_GRAY_6, card.author_widget.fgcolor)
+        assert.are.same(Uikit.CARD_DETAIL, card.author_widget.fgcolor)
+        assert.are.same(Uikit.CARD_DETAIL, card.summary_widget.fgcolor)
 
         -- None of the modern card's furniture is built, so none of its air is
         -- reserved either.
