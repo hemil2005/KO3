@@ -1810,3 +1810,239 @@ describe("AO3 reader hooks", function()
         assert.is_true(called)
     end)
 end)
+
+describe("bug fixes: pagination, singular counts, work details, and downloads", function()
+    local plugin
+
+    before_each(function()
+        package.loaded["main"] = nil
+        plugin = dofile("plugins/ao3.koplugin/main.lua")
+    end)
+
+    it("matches singular work counts in parseListing and formats singular titles", function()
+        local listing_author = plugin:parseListing([[
+            <html><body>
+              <h2 class="heading">1 Work by AuthorOne</h2>
+              <ol class="work index group"></ol>
+            </body></html>
+        ]])
+        assert.are.equal("1", listing_author.count)
+
+        local listing_search = plugin:parseListing([[
+            <html><body>
+              <h2 class="heading">1 - 1 of 1 Work in Tag</h2>
+              <ol class="work index group"></ol>
+            </body></html>
+        ]])
+        assert.are.equal("1", listing_search.count)
+
+        local _, title = plugin:listingRows(listing_author, "AuthorOne")
+        assert.are.equal("AuthorOne · 1 work", title)
+    end)
+
+    it("parses pagy li.previous pagination links without rel=prev", function()
+        local listing = plugin:parseListing([[
+            <html><body>
+              <ol class="pagination actions pagy">
+                <li class="previous"><a href="/works?page=1">← Previous</a></li>
+                <li class="next"><a href="/works?page=3">Next →</a></li>
+              </ol>
+              <ol class="work index group"></ol>
+            </body></html>
+        ]])
+        assert.are.equal("https://archiveofourown.org/works?page=1", listing.prev_url)
+        assert.are.equal("https://archiveofourown.org/works?page=3", listing.next_url)
+    end)
+
+    it("parses a single AO3 work page for Work details", function()
+        local html = [[
+            <html><body>
+              <div class="wrapper">
+                <dl class="work meta group">
+                  <dt class="rating tags">Rating:</dt>
+                  <dd class="rating tags"><ul><li><a class="tag">Teen And Up Audiences</a></li></ul></dd>
+                  <dt class="warning tags">Archive Warning:</dt>
+                  <dd class="warning tags"><ul><li><a class="tag">No Archive Warnings Apply</a></li></ul></dd>
+                  <dt class="category tags">Category:</dt>
+                  <dd class="category tags"><ul><li><a class="tag">Gen</a></li></ul></dd>
+                  <dt class="fandom tags">Fandom:</dt>
+                  <dd class="fandom tags"><ul><li><a class="tag">Original Work</a></li></ul></dd>
+                  <dt class="relationship tags">Relationship:</dt>
+                  <dd class="relationship tags"><ul><li><a class="tag">A &amp; B</a></li></ul></dd>
+                  <dt class="character tags">Character:</dt>
+                  <dd class="character tags"><ul><li><a class="tag">Hero</a></li></ul></dd>
+                  <dt class="freeform tags">Additional Tags:</dt>
+                  <dd class="freeform tags"><ul><li><a class="tag">Adventure</a></li></ul></dd>
+                  <dt class="stats">Stats:</dt>
+                  <dd class="stats"><dl class="stats">
+                    <dd class="published">2026-01-01</dd>
+                    <dd class="words">1,234</dd>
+                    <dd class="chapters">2/2</dd>
+                    <dd class="kudos">10</dd>
+                    <dd class="hits">100</dd>
+                  </dl></dd>
+                </dl>
+              </div>
+              <div class="preface group">
+                <h2 class="title heading">Solo Work</h2>
+                <h3 class="byline heading"><a rel="author" href="/users/alice">Alice</a></h3>
+                <div class="summary module"><blockquote class="userstuff"><p>A short tale.</p></blockquote></div>
+              </div>
+            </body></html>
+        ]]
+        local work, err = plugin:parseWorkPage(html, "999")
+        assert.is_nil(err)
+        assert.are.equal("999", work.id)
+        assert.are.equal("Solo Work", work.title)
+        assert.are.equal("Alice", work.authors)
+        assert.are.equal("Original Work", work.fandoms)
+        assert.are.equal("Teen And Up Audiences", work.rating)
+        assert.are.equal("Complete", work.complete)
+        assert.are.equal("1,234", work.words)
+        assert.are.equal("2/2", work.chapters)
+        assert.are.equal("A short tale.", work.summary)
+    end)
+
+    it("recovers when os.rename fails on an existing destination file", function()
+        local DataStorage = require("datastorage")
+        local http = require("socket.http")
+        local dir = DataStorage:getFullDataDir() .. "/ao3"
+        local final = dir .. "/Test Work [555].html"
+        local f = assert(io.open(final, "wb"))
+        f:write("old copy")
+        f:close()
+
+        local old_request = http.request
+        local old_rename = os.rename
+        local body = [[<!DOCTYPE html><html><head><title>Test Work</title></head><body><div id="preface"></div><div id="chapters">new copy</div></body></html>]]
+        http.request = function(opts)
+            opts.sink(body)
+            opts.sink(nil)
+            return 1, 200, {}, "HTTP/1.1 200 OK"
+        end
+        local first_fail = true
+        os.rename = function(src, dst)
+            if first_fail and dst == final and src:match("%.part$") then
+                first_fail = false
+                return nil, "File exists"
+            end
+            return old_rename(src, dst)
+        end
+
+        local ok, path, err = pcall(plugin.downloadWork, plugin, "555", "Test Work")
+        http.request = old_request
+        os.rename = old_rename
+
+        assert.is_true(ok, path)
+        assert.is_nil(err)
+        assert.are.equal(final, path)
+        local rf = assert(io.open(final, "rb"))
+        local content = rf:read("*a")
+        rf:close()
+        assert.is_truthy(content:find("new copy", 1, true))
+        os.remove(final)
+    end)
+
+    it("attaches hold_action to rows in showDownloads", function()
+        local DataStorage = require("datastorage")
+        local UIManager = require("ui/uimanager")
+        local dir = DataStorage:getFullDataDir() .. "/ao3"
+        local sample = dir .. "/Cached Fic [777].html"
+        local f = assert(io.open(sample, "wb"))
+        f:write("<html></html>")
+        f:close()
+
+        local old_show = UIManager.show
+        UIManager.show = function() end
+        plugin.menu = nil
+        plugin:showHome()
+        plugin:showDownloads()
+        UIManager.show = old_show
+
+        local found
+        for _, row in ipairs(plugin.menu.item_table) do
+            if row.text == "Cached Fic" then
+                found = row
+                break
+            end
+        end
+        assert.is_truthy(found)
+        assert.are.equal("function", type(found.hold_action))
+        os.remove(sample)
+        plugin.menu = nil
+    end)
+end)
+
+describe("search history", function()
+    local SearchHistory = dofile("plugins/ao3.koplugin/searchhistory.lua")
+    local DataStorage = require("datastorage")
+    local UIManager = require("ui/uimanager")
+    local plugin
+
+    local function history_path()
+        return SearchHistory.path()
+    end
+
+    before_each(function()
+        os.remove(history_path())
+        os.remove(history_path() .. ".old")
+        package.loaded["main"] = nil
+        plugin = dofile("plugins/ao3.koplugin/main.lua")
+    end)
+
+    after_each(function()
+        os.remove(history_path())
+        os.remove(history_path() .. ".old")
+    end)
+
+    it("keeps at most 10 entries per dialog with the most recent first and separate histories", function()
+        for i = 1, 12 do
+            SearchHistory.record("works", "query " .. i)
+        end
+        SearchHistory.record("works", "query 5")
+        SearchHistory.record("tags", "Fluff")
+
+        local works = SearchHistory.get("works")
+        assert.are.equal(10, #works)
+        assert.are.equal("query 5", works[1])
+        assert.are.equal("query 12", works[2])
+        assert.are.equal("query 3", works[10])
+
+        local tags = SearchHistory.get("tags")
+        assert.are.same({ "Fluff" }, tags)
+        assert.are.same({}, SearchHistory.get("authors"))
+    end)
+
+    it("persists history in settings outside the plugin directory", function()
+        SearchHistory.record("authors", "astolat")
+        local settings_dir = DataStorage:getSettingsDir()
+        assert.is_truthy(history_path():find(settings_dir, 1, true))
+        assert.are.same({ "astolat" }, SearchHistory.get("authors"))
+    end)
+
+    it("attaches a history button beside the input bar and replaces existing input on pick", function()
+        SearchHistory.record("works", "dragon")
+        SearchHistory.record("works", "time loop")
+
+        local shown = {}
+        local old_show = UIManager.show
+        UIManager.show = function(_, widget) shown[#shown + 1] = widget end
+
+        plugin:searchDialog()
+        local dialog = shown[#shown]
+        assert.is_truthy(dialog.ao3_history_button)
+        dialog:setInputText("existing text")
+
+        -- Tapping the history icon opens the picker with most recent first.
+        dialog.ao3_history_button:onTap()
+        local picker = shown[#shown]
+        assert.are.equal("Recent searches", picker.title)
+        assert.are.equal("time loop", picker.buttons[1][1].text)
+        assert.are.equal("dragon", picker.buttons[2][1].text)
+
+        -- Tapping an entry clears existing text and inserts the chosen query without searching.
+        picker.buttons[2][1].callback()
+        UIManager.show = old_show
+        assert.are.equal("dragon", dialog:getInputValue())
+    end)
+end)
