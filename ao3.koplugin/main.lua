@@ -12,6 +12,7 @@ the browser is unchanged and reads public works.
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
+local ButtonDialog = require("ui/widget/buttondialog")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
@@ -402,6 +403,7 @@ local HomePage = dofile((MAIN_SOURCE:gsub("main%.lua$", "homepage.lua")))
 local AccountPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "accountpage.lua")))
 local SettingsPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "settingspage.lua")))
 local Preferences = dofile((MAIN_SOURCE:gsub("main%.lua$", "preferences.lua")))
+local SearchHistory = dofile((MAIN_SOURCE:gsub("main%.lua$", "searchhistory.lua")))
 local Uikit = dofile((MAIN_SOURCE:gsub("main%.lua$", "uikit.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
 BugReport = dofile((MAIN_SOURCE:gsub("main%.lua$", "bugreport.lua")))
@@ -441,6 +443,7 @@ function Ao3:parseListing(html)
     local next_link = first(root:select("ol.pagination a[rel='next']"))
         or first(root:select("ol.pagination li.next a"))
     local prev_link = first(root:select("ol.pagination a[rel='prev']"))
+        or first(root:select("ol.pagination li.previous a"))
         or first(root:select("ol.pagination li.prev a"))
     local next_url = next_link and absoluteUrl(util.htmlEntitiesToUtf8(next_link.attributes.href or ""))
     local prev_url = prev_link and absoluteUrl(util.htmlEntitiesToUtf8(prev_link.attributes.href or ""))
@@ -456,8 +459,8 @@ function Ao3:parseListing(html)
             local text = plain(h)
             -- Search/tag pages say "1 - 20 of N Works"; author pages say
             -- "N Works by <name>" (single page) or the same "of" form.
-            count = text:match("of ([%d,]+) Works")
-                or text:match("^([%d,]+) Works by")
+            count = text:match("of ([%d,]+) Works?")
+                or text:match("^([%d,]+) Works? by")
             if count then break end
         end
     end
@@ -467,6 +470,127 @@ function Ao3:parseListing(html)
         next_url = next_url,
         prev_url = prev_url,
         count = count,
+    }
+end
+
+-- Parse a single AO3 work page (/works/<id>) into the same work table that
+-- parseListing produces, so Open work and Downloads can open Work details.
+function Ao3:parseWorkPage(html, fallback_id)
+    if Account.isLostCookiePage(html) then
+        self.session = nil
+        self:clearWorkActionCache()
+        Account.clear()
+        return nil, _("AO3 ended the saved session. Sign in again from Account.")
+    end
+    if Account.isLoginPage(html) then
+        return nil, _("This work requires signing in to AO3.")
+    end
+    if html:find("Just a moment", 1, true)
+            or html:find("cf-challenge", 1, true)
+            or html:find("Enable JavaScript and cookies", 1, true) then
+        return nil, _("Cloudflare wants a browser check. Try again in a minute.")
+    end
+
+    local ok, root = pcall(htmlparser.parse, html, 5000)
+    if not ok or not root then
+        return nil, _("Could not parse the AO3 work page.")
+    end
+
+    local title_node = first(root:select("h2.title.heading"))
+        or first(root:select("div.preface h2.title"))
+    local meta_node = first(root:select("dl.work.meta"))
+    if not title_node and not meta_node then
+        return nil, _("Could not find a work on that AO3 page.")
+    end
+
+    local id = fallback_id and tostring(fallback_id) or nil
+    if not id then
+        local kudo_id = first(root:select("form#new_kudo input[name='kudo[commentable_id]']"))
+        if kudo_id and kudo_id.attributes and kudo_id.attributes.value then
+            id = kudo_id.attributes.value:match("^(%d+)$")
+        end
+    end
+
+    local authors, author_names, author_urls = {}, {}, {}
+    for _, a in ipairs(root:select("h3.byline.heading a[rel='author']")) do
+        local name = plain(a)
+        if name ~= "" then
+            authors[#authors + 1] = name
+            author_names[#author_names + 1] = name
+            local href = a.attributes and a.attributes.href or ""
+            if href ~= "" then author_urls[#author_urls + 1] = href end
+        end
+    end
+
+    local function collectTags(selector)
+        local list = {}
+        for _, a in ipairs(root:select(selector)) do
+            local name = plain(a)
+            if name ~= "" then list[#list + 1] = name end
+        end
+        return list
+    end
+
+    local ratings = collectTags("dl.work.meta dd.rating.tags a.tag")
+    local warnings = collectTags("dl.work.meta dd.warning.tags a.tag")
+    local categories = collectTags("dl.work.meta dd.category.tags a.tag")
+    local fandoms = collectTags("dl.work.meta dd.fandom.tags a.tag")
+    local relationships = collectTags("dl.work.meta dd.relationship.tags a.tag")
+    local characters = collectTags("dl.work.meta dd.character.tags a.tag")
+    local freeforms = collectTags("dl.work.meta dd.freeform.tags a.tag")
+
+    local all_tags, tag_list = {}, {}
+    for _, list in ipairs({ warnings, relationships, characters, freeforms }) do
+        for _, name in ipairs(list) do all_tags[#all_tags + 1] = name end
+    end
+    for _, list in ipairs({ characters, freeforms }) do
+        for _, name in ipairs(list) do tag_list[#tag_list + 1] = name end
+    end
+
+    local function stat(class_name)
+        return plain(first(root:select("dl.stats dd." .. class_name)))
+    end
+
+    local chapters = stat("chapters")
+    local cur_ch, total_ch = chapters:match("^(%d+)/(%d+)$")
+    local complete = ""
+    if cur_ch and total_ch then
+        complete = (cur_ch == total_ch) and _("Complete") or _("In progress")
+    elseif chapters:match("/%?$") then
+        complete = _("In progress")
+    end
+
+    local updated = stat("status")
+    if updated == "" then updated = stat("published") end
+
+    local summary_node = first(root:select("div.summary.module blockquote.userstuff"))
+        or first(root:select("blockquote.userstuff"))
+
+    return {
+        id = id,
+        title = title_node and plain(title_node) or (id and T(_("Work %1"), id) or _("Untitled")),
+        authors = #authors > 0 and table.concat(authors, ", ") or _("Anonymous"),
+        author_names = #author_names > 0 and author_names or nil,
+        author_urls = #author_urls > 0 and author_urls or nil,
+        fandoms = table.concat(fandoms, ", "),
+        tags = table.concat(all_tags, ", "),
+        tag_list = #tag_list > 0 and tag_list or nil,
+        relationships = table.concat(relationships, " · "),
+        relationship_list = #relationships > 0 and relationships or nil,
+        summary = plain(summary_node),
+        rating = table.concat(ratings, ", "),
+        warnings = table.concat(warnings, ", "),
+        category = table.concat(categories, ", "),
+        complete = complete,
+        updated = updated,
+        words = stat("words"),
+        chapters = chapters,
+        comments = stat("comments"),
+        kudos = stat("kudos"),
+        bookmarks = stat("bookmarks"),
+        hits = stat("hits"),
+        _work_actions = Account.isSignedIn(self.session) and Account.parseWorkActions(html) or nil,
+        _account_name = Account.isSignedIn(self.session) and Account.loggedInName(html) or nil,
     }
 end
 
@@ -1859,7 +1983,8 @@ function Ao3:listingRows(listing, fallback_title)
 
     local title = fallback_title or _("Works")
     if listing.count then
-        title = T(_("%1 · %2 works"), title, listing.count)
+        local fmt = listing.count == "1" and _("%1 · %2 work") or _("%1 · %2 works")
+        title = T(fmt, title, listing.count)
     end
     return rows, title
 end
@@ -2405,6 +2530,25 @@ end
 
 function Ao3:showWork(work)
     self:showWorkPage(work, false)
+end
+
+function Ao3:openWorkDetails(id, title)
+    if not id then return end
+    self:fetchPage(Account.workUrl(id), function(html)
+        return self:parseWorkPage(html, id)
+    end, T(_("Loading “%1”…"), title or id), function(work)
+        if work._account_name and self.session
+                and work._account_name ~= self.session.username then
+            self.session.username = work._account_name
+            Account.save(Account.settingsPath(), self.session)
+        end
+        if work._work_actions then
+            self:rememberWorkState(work, work._work_actions)
+        end
+        work._account_name = nil
+        work._work_actions = nil
+        self:showWorkPage(work, false)
+    end)
 end
 
 -- The four buttons on the work page map onto the account module's toggles.
@@ -3078,8 +3222,21 @@ function Ao3:downloadWork(id, title)
 
     local final = dir .. "/" .. base .. " [" .. id .. "].html"
     -- Keep the old offline copy until a complete, validated replacement is
-    -- ready. On Kindle/POSIX, rename atomically replaces the destination.
+    -- ready. On Kindle/POSIX, rename atomically replaces the destination; on
+    -- Windows os.rename fails when `final` already exists, so stage it aside.
     local renamed, rename_err = os.rename(tmp, final)
+    if not renamed and lfs.attributes(final, "mode") == "file" then
+        local swap_bak = final .. ".bak"
+        os.remove(swap_bak)
+        if os.rename(final, swap_bak) then
+            renamed, rename_err = os.rename(tmp, final)
+            if renamed then
+                os.remove(swap_bak)
+            else
+                os.rename(swap_bak, final)
+            end
+        end
+    end
     if not renamed then
         os.remove(tmp)
         return nil, T(_("Could not save the file: %1"), tostring(rename_err))
@@ -3355,6 +3512,15 @@ function Ao3:ensureMenu()
                 item.callback(menu_self)
             end
             return true
+        end,
+        onMenuHold = function(menu_self, item)
+            if item.hold_action then
+                item.hold_action(menu_self)
+                return true
+            elseif item.hold_callback then
+                item.hold_callback(menu_self)
+                return true
+            end
         end,
         close_callback = function()
             self:onMenuClosed()
@@ -3764,28 +3930,210 @@ end
 -- `replace` says where a new search lands: over the letter page it was asked
 -- from (the default), or in place when the reader is already looking at
 -- results. `current` pre-fills the field so a term can be refined.
+local HistoryInputDialog = InputDialog:extend{}
+
+function HistoryInputDialog:init(reinit)
+    if not self._ao3_base_text_width then
+        local orig_w = self.width
+            or math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.8)
+        local orig_row_w = math.floor(orig_w * 0.9)
+        local outer_pad = math.floor((orig_w - orig_row_w) / 2)
+        local base_btn_w = Screen:scaleBySize(38)
+        local extra_w = Screen:scaleBySize(10)
+        self._ao3_base_text_width = self.text_width
+            or math.max(1, orig_row_w - base_btn_w)
+        self.text_width = self._ao3_base_text_width
+        self.width = math.min(Screen:getWidth() - 2 * outer_pad, orig_w + extra_w)
+    end
+
+    InputDialog.init(self, reinit)
+
+    if self._input_widget and self.vgroup and self.on_history then
+        local input_h = self._input_widget:getSize().h
+        local margin = self._input_widget.margin or self.input_margin or 0
+        local border = Size.border.inputtext or Size.border.button
+        local box_h = math.max(1, input_h - 2 * margin)
+        -- Square outer box: width matches height.
+        local box_w = box_h
+        local btn_w = box_w + 2 * margin
+        local mark_size = math.min(Screen:scaleBySize(22), math.max(12, box_h - 2 * border - 4))
+        local mark
+        if self.ao3_icons_dir then
+            local ok, img = pcall(ImageWidget.new, ImageWidget, {
+                file = self.ao3_icons_dir .. "clock.svg",
+                width = mark_size,
+                height = mark_size,
+                alpha = true,
+            })
+            if ok and img then mark = img end
+        end
+        if not mark then
+            mark = TextWidget:new{
+                text = "H",
+                face = Font:getFace("smallinfofont", 16),
+                bold = true,
+            }
+        end
+        local icon_box = FrameContainer:new{
+            bordersize = border,
+            color = Blitbuffer.COLOR_BLACK,
+            background = Blitbuffer.COLOR_WHITE,
+            padding = 0,
+            margin = margin,
+            CenterContainer:new{
+                dimen = Geom:new{
+                    w = math.max(1, box_w - 2 * border),
+                    h = math.max(1, box_h - 2 * border),
+                },
+                mark,
+            },
+        }
+        local history_btn = Uikit.tapArea(icon_box, btn_w, input_h, function()
+            self.on_history(self)
+        end)
+        self.ao3_history_button = history_btn
+
+        -- Replace the input row in InputDialog.vgroup with input + icon.
+        -- Both widgets carry `margin`, which provides the gap between them
+        -- and keeps outer left/right padding symmetric.
+        local row = HorizontalGroup:new{
+            align = "center",
+            self._input_widget,
+            history_btn,
+        }
+        for i, child in ipairs(self.vgroup) do
+            if type(child) == "table" and child[1] == self._input_widget then
+                self.vgroup[i] = CenterContainer:new{
+                    dimen = Geom:new{ w = self.width, h = row:getSize().h },
+                    row,
+                }
+                break
+            end
+        end
+    end
+end
+
+function Ao3:showSearchHistoryPicker(dialog, kind)
+    local entries = SearchHistory.get(kind)
+    if #entries == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No recent searches yet."),
+            timeout = 2,
+        })
+        return
+    end
+    local picker
+    local buttons = {}
+    for _, entry in ipairs(entries) do
+        buttons[#buttons + 1] = {{
+            text = entry,
+            callback = function()
+                UIManager:close(picker)
+                -- Clear any existing text before inserting the selected query.
+                dialog:setInputText("")
+                dialog:setInputText(entry, true, false)
+            end,
+        }}
+    end
+    picker = ButtonDialog:new{
+        title = _("Recent searches"),
+        buttons = buttons,
+    }
+    UIManager:show(picker)
+end
+
+function Ao3:newSearchDialog(opts)
+    local dialog
+    local kind = opts.history_kind
+    dialog = HistoryInputDialog:new{
+        title = opts.title,
+        description = opts.description,
+        input = opts.input or "",
+        ao3_icons_dir = self:pluginDir() .. "/assets/icons/",
+        on_history = function(d)
+            self:showSearchHistoryPicker(d, kind)
+        end,
+        buttons = opts.buttons(function() return dialog end),
+    }
+    return dialog
+end
+
 function Ao3:findFandomDialog(category, letter, replace, current)
     local dialog
-    dialog = InputDialog:new{
+    dialog = self:newSearchDialog{
+        history_kind = "fandoms",
         title = T(_("Find in %1 · %2"), category.name, letter),
         input = current or "",
-        buttons = {{
-            { text = _("Cancel"), id = "close", callback = function()
-                UIManager:close(dialog)
-            end },
-            { text = _("Find"), is_enter_default = true, callback = function()
-                local query = trim(dialog:getInputValue())
-                UIManager:close(dialog)
-                if query == "" then return end
-                self:showFandomSearch(category, letter, query, 0, replace)
-            end },
-        }},
+        buttons = function(get_dialog)
+            return {{
+                { text = _("Cancel"), id = "close", callback = function()
+                    UIManager:close(get_dialog())
+                end },
+                { text = _("Find"), is_enter_default = true, callback = function()
+                    local query = trim(get_dialog():getInputValue())
+                    UIManager:close(get_dialog())
+                    if query == "" then return end
+                    SearchHistory.record("fandoms", query)
+                    self:showFandomSearch(category, letter, query, 0, replace)
+                end },
+            }}
+        end,
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
 end
 
-function Ao3:showDownloads()
+function Ao3:downloadItemActions(item)
+    local dialog
+    local buttons = {
+        {
+            {
+                text = _("Read"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:openWorkReader(item.path, item.title)
+                end,
+            },
+        },
+    }
+    if item.id then
+        buttons[#buttons + 1] = {
+            {
+                text = _("Work details"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:openWorkDetails(item.id, item.title)
+                end,
+            },
+        }
+        buttons[#buttons + 1] = {
+            {
+                text = _("Refresh from AO3"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self:readWork(item.id, item.title, true)
+                end,
+            },
+        }
+    end
+    buttons[#buttons + 1] = {
+        {
+            text = _("Delete"),
+            callback = function()
+                UIManager:close(dialog)
+                os.remove(item.path)
+                self:showDownloads(true)
+            end,
+        },
+    }
+    dialog = ButtonDialog:new{
+        title = item.title,
+        buttons = buttons,
+    }
+    UIManager:show(dialog)
+end
+
+function Ao3:showDownloads(replace)
     local downloads = self:listDownloads()
     local rows = {}
 
@@ -3795,6 +4143,9 @@ function Ao3:showDownloads()
             mandatory = item.id and ("#" .. item.id) or nil,
             action = function()
                 self:openWorkReader(item.path, item.title)
+            end,
+            hold_action = function()
+                self:downloadItemActions(item)
             end,
         }
     end
@@ -3816,7 +4167,11 @@ function Ao3:showDownloads()
     }
 
     local title = #downloads > 0 and T(_("Downloads (%1)"), #downloads) or _("Downloads")
-    self:pushRows(title, rows)
+    if replace then
+        self:replaceRows(title, rows)
+    else
+        self:pushRows(title, rows)
+    end
 end
 
 -- ---------------------------------------------------------------------------
@@ -3912,6 +4267,7 @@ function Ao3:parsePeopleSearch(html)
     local next_link = first(root:select("ol.pagination a[rel='next']"))
         or first(root:select("ol.pagination li.next a"))
     local prev_link = first(root:select("ol.pagination a[rel='prev']"))
+        or first(root:select("ol.pagination li.previous a"))
         or first(root:select("ol.pagination li.prev a"))
 
     return {
@@ -3933,29 +4289,33 @@ end
 
 function Ao3:searchDialog()
     local dialog
-    dialog = InputDialog:new{
+    dialog = self:newSearchDialog{
+        history_kind = "works",
         title = _("Search AO3"),
         description = _("Title, author, or keyword"),
-        buttons = {{
-            {
-                text = _("Cancel"),
-                id = "close",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Search"),
-                is_enter_default = true,
-                callback = function()
-                    local query = trim(dialog:getInputValue())
-                    UIManager:close(dialog)
-                    if query ~= "" then
-                        self:loadListing(self:searchUrl(query), T(_("Search: %1"), query))
-                    end
-                end,
-            },
-        }},
+        buttons = function(get_dialog)
+            return {{
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(get_dialog())
+                    end,
+                },
+                {
+                    text = _("Search"),
+                    is_enter_default = true,
+                    callback = function()
+                        local query = trim(get_dialog():getInputValue())
+                        UIManager:close(get_dialog())
+                        if query ~= "" then
+                            SearchHistory.record("works", query)
+                            self:loadListing(self:searchUrl(query), T(_("Search: %1"), query))
+                        end
+                    end,
+                },
+            }}
+        end,
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
@@ -3963,29 +4323,33 @@ end
 
 function Ao3:tagDialog()
     local dialog
-    dialog = InputDialog:new{
+    dialog = self:newSearchDialog{
+        history_kind = "tags",
         title = _("Browse an AO3 tag"),
         description = _("Tag name or tag URL"),
-        buttons = {{
-            {
-                text = _("Cancel"),
-                id = "close",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Browse"),
-                is_enter_default = true,
-                callback = function()
-                    local input = trim(dialog:getInputValue())
-                    UIManager:close(dialog)
-                    if input ~= "" then
-                        self:loadListing(self:tagUrl(input), input)
-                    end
-                end,
-            },
-        }},
+        buttons = function(get_dialog)
+            return {{
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(get_dialog())
+                    end,
+                },
+                {
+                    text = _("Browse"),
+                    is_enter_default = true,
+                    callback = function()
+                        local input = trim(get_dialog():getInputValue())
+                        UIManager:close(get_dialog())
+                        if input ~= "" then
+                            SearchHistory.record("tags", input)
+                            self:loadListing(self:tagUrl(input), input)
+                        end
+                    end,
+                },
+            }}
+        end,
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
@@ -4090,35 +4454,39 @@ end
 -- `current` pre-fills the field when the reader is refining a search.
 function Ao3:authorDialog(current)
     local dialog
-    dialog = InputDialog:new{
+    dialog = self:newSearchDialog{
+        history_kind = "authors",
         title = _("Browse an AO3 author"),
         description = _("Author name or profile URL"),
         input = current or "",
-        buttons = {{
-            {
-                text = _("Cancel"),
-                id = "close",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Browse"),
-                is_enter_default = true,
-                callback = function()
-                    local input = trim(dialog:getInputValue())
-                    UIManager:close(dialog)
-                    if input == "" then return end
-                    if input:match("^https?://") or input:sub(1, 1) == "/" then
-                        -- A pasted profile link is already unambiguous.
-                        local url = self:authorWorksUrl(input)
-                        if url then self:showAuthor(input, url) end
-                    else
-                        self:searchAuthors(input)
-                    end
-                end,
-            },
-        }},
+        buttons = function(get_dialog)
+            return {{
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(get_dialog())
+                    end,
+                },
+                {
+                    text = _("Browse"),
+                    is_enter_default = true,
+                    callback = function()
+                        local input = trim(get_dialog():getInputValue())
+                        UIManager:close(get_dialog())
+                        if input == "" then return end
+                        SearchHistory.record("authors", input)
+                        if input:match("^https?://") or input:sub(1, 1) == "/" then
+                            -- A pasted profile link is already unambiguous.
+                            local url = self:authorWorksUrl(input)
+                            if url then self:showAuthor(input, url) end
+                        else
+                            self:searchAuthors(input)
+                        end
+                    end,
+                },
+            }}
+        end,
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
@@ -4126,34 +4494,54 @@ end
 
 function Ao3:workDialog()
     local dialog
-    dialog = InputDialog:new{
+    dialog = self:newSearchDialog{
+        history_kind = "open_work",
         title = _("Open a work"),
         description = _("Paste an AO3 work URL or ID"),
-        buttons = {{
-            {
-                text = _("Cancel"),
-                id = "close",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("Open"),
-                is_enter_default = true,
-                callback = function()
-                    local input = trim(dialog:getInputValue())
-                    UIManager:close(dialog)
-                    local id = self:parseWorkId(input)
-                    if id then
-                        self:readWork(id)
-                    else
-                        UIManager:show(InfoMessage:new{
-                            text = _("Could not find a work ID in that input."),
-                        })
-                    end
-                end,
-            },
-        }},
+        buttons = function(get_dialog)
+            return {{
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function()
+                        UIManager:close(get_dialog())
+                    end,
+                },
+                {
+                    text = _("Details"),
+                    callback = function()
+                        local input = trim(get_dialog():getInputValue())
+                        UIManager:close(get_dialog())
+                        local id = self:parseWorkId(input)
+                        if id then
+                            SearchHistory.record("open_work", input)
+                            self:openWorkDetails(id)
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = _("Could not find a work ID in that input."),
+                            })
+                        end
+                    end,
+                },
+                {
+                    text = _("Open"),
+                    is_enter_default = true,
+                    callback = function()
+                        local input = trim(get_dialog():getInputValue())
+                        UIManager:close(get_dialog())
+                        local id = self:parseWorkId(input)
+                        if id then
+                            SearchHistory.record("open_work", input)
+                            self:readWork(id)
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = _("Could not find a work ID in that input."),
+                            })
+                        end
+                    end,
+                },
+            }}
+        end,
     }
     UIManager:show(dialog)
     dialog:onShowKeyboard()
