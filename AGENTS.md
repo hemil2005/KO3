@@ -59,6 +59,12 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   `work_search[query]`, and are Include-only on the fixed lists because AO3's
   form has no exclude side for them. `spec/fixtures/search_form.html` pins every
   id and name to the live form.
+- A recent-searches picker is a `ButtonDialog` opened from an `InputDialog`.
+  Hide the on-screen keyboard before showing it and restore it after a pick or
+  a dismissal: on a touch reader the keyboard window stays above the picker for
+  input and swallows every tap, which leaves a box that looks open but is dead.
+  Set the chosen text once and repaint the whole screen afterwards, or the
+  picker's larger box lingers as a stale image on e-ink.
 - The author page is one screen: the author's masthead, the pill of four tabs,
   then a count line and the shelf. Every tab keeps the masthead and the tab
   strip sits at the same height; the native title bar names the shelf, not the

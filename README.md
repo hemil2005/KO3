@@ -51,6 +51,7 @@ details captured from a live work.
 | ![Bookmark filter dialog with Bookmarker's Tags](screenshots/52-bookmark-filter-dialog.png) | ![Downloads narrowed by its local filter](screenshots/53-downloads-filter.png) |
 | ![A search filtered by AO3's fixed search dimensions](screenshots/54-search-filter.png) | ![The same search narrowed to Mature, complete works](screenshots/55-search-filter-applied.png) |
 | ![Bookmarker's Tags with a typed tag row](screenshots/56-bookmarker-tags.png) | ![Live bookmarker-tag suggestions](screenshots/57-bookmarker-tag-search.png) |
+| ![Recent searches, shown with the keyboard hidden](screenshots/58-history-picker.png) | ![A past term filled in, keyboard back](screenshots/59-history-picked.png) |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -138,6 +139,12 @@ the reader where they were; a search that finds something sits on top of the
 letter page, so Back returns to the page being browsed. Tapping a fandom
 fetches only its 20-work page. On the AO3 screens, the letter shortcut boxes
 are hidden so the text gets the full touchscreen width.
+
+Every search dialog — works, author, tag, fandom letter and **Open work** —
+keeps its own ten most recent terms. The clock button beside the field opens
+**Recent searches**; tapping a term fills the field for editing before the
+search, then the keyboard comes back. The picker is shown with the keyboard
+hidden so it can always be tapped.
 
 Each work is one selectable card. Beside the title sits AO3's own required-tag
 strip as a 2×2 grid of ink symbols: the rating letter (G/T/M/E), a warning
@@ -595,13 +602,14 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 404 tests passing across parser, navigation,
+- The offline `busted` suite: 409 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
   listing-filter, tag-autocomplete, search-filter, bookmark-filter,
-  Downloads-filter, background-update-check and bug-report tests, including 51
-  account tests across token parsing, the three-request sign-in, cookie
+  Downloads-filter, search-history, background-update-check and bug-report
+  tests, including 51 account tests across token parsing, the three-request
+  sign-in, cookie
   scoping/rotation, session persistence/logout, subscription parsing and work
   actions. The work-action tests cover the website's form bodies, reading the
   work page's bookmarked/subscribed/read-later state, one-time token reuse,

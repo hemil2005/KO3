@@ -77,6 +77,10 @@ The tests are offline:
   the include-only fixed rows, applying `work_search[...]` params beside the
   query, adopting a pasted filtered search, paging, and the funnel's life on a
   search listing.
+- `ao3_searchhistory_spec.lua` covers the recent-searches picker: the keyboard
+  is hidden before the picker opens and restored after a pick or a dismissal,
+  the text is set once with the caret at the end, and a pick does not
+  double-restore the keyboard.
 - The report flow is also exercised through the UI: the home row, the
   editor, the log-consent dialog and the saved bundle.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and

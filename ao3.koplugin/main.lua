@@ -5160,6 +5160,53 @@ function HistoryInputDialog:init(reinit)
     end
 end
 
+-- The picker rows. Kept apart from `showSearchHistoryPicker` so the keyboard
+-- and repaint rules can be tested without a settings file.
+function Ao3:showSearchHistoryEntries(dialog, entries)
+    -- Never stack the picker over the on-screen keyboard. On e-ink the
+    -- keyboard window stays above a dialog opened from the input row and
+    -- swallows every tap, leaving a picker that looks open but cannot be
+    -- touched. Hiding it first gives the picker the whole screen; closing the
+    -- picker brings the keyboard back.
+    local keyboard_visible = dialog:isKeyboardVisible()
+    if keyboard_visible then dialog:onCloseKeyboard() end
+    local restored = false
+    local function restore_keyboard()
+        if keyboard_visible and not restored then
+            restored = true
+            dialog:onShowKeyboard()
+        end
+    end
+
+    local picker
+    local buttons = {}
+    for _, entry in ipairs(entries) do
+        buttons[#buttons + 1] = {{
+            text = entry,
+            callback = function()
+                restored = true
+                UIManager:close(picker)
+                dialog:setInputText(entry, true)
+                if keyboard_visible then dialog:onShowKeyboard() end
+                -- The picker is wider and taller than the input dialog, so a
+                -- partial repaint of the dialog alone leaves its box behind as
+                -- a stale image on e-ink. Repaint everything once.
+                UIManager:setDirty("all", "ui")
+            end,
+        }}
+    end
+    picker = ButtonDialog:new{
+        title = _("Recent searches"),
+        buttons = buttons,
+    }
+    local base_close = picker.onCloseWidget
+    picker.onCloseWidget = function(widget)
+        restore_keyboard()
+        if base_close then return base_close(widget) end
+    end
+    UIManager:show(picker)
+end
+
 function Ao3:showSearchHistoryPicker(dialog, kind)
     local entries = SearchHistory.get(kind)
     if #entries == 0 then
@@ -5169,24 +5216,7 @@ function Ao3:showSearchHistoryPicker(dialog, kind)
         })
         return
     end
-    local picker
-    local buttons = {}
-    for _, entry in ipairs(entries) do
-        buttons[#buttons + 1] = {{
-            text = entry,
-            callback = function()
-                UIManager:close(picker)
-                -- Clear any existing text before inserting the selected query.
-                dialog:setInputText("")
-                dialog:setInputText(entry, true, false)
-            end,
-        }}
-    end
-    picker = ButtonDialog:new{
-        title = _("Recent searches"),
-        buttons = buttons,
-    }
-    UIManager:show(picker)
+    self:showSearchHistoryEntries(dialog, entries)
 end
 
 function Ao3:newSearchDialog(opts)
