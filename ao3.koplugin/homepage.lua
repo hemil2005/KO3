@@ -243,7 +243,7 @@ function HomePage.card(entry, width, height, o)
             content,
         },
     }
-    return Uikit.tapArea(frame, width, height, entry.action)
+    return Uikit.tapArea(frame, width, height, entry.action, entry.hold_action)
 end
 
 -- A card row plus the air that separates it from the next row. The gap lives
@@ -309,6 +309,57 @@ function HomePage.build(o)
         -- when the row actually has focus.
         line_color = Blitbuffer.COLOR_WHITE,
     }
+
+    -- Pinned fandoms sit between Search and Browse: they are the reader's own
+    -- short shelf, a faster path than the letter index, but they must not
+    -- displace the one primary action above them. An empty shelf emits no
+    -- rows at all, so the landing page is unchanged until something is pinned.
+    local favourites = o.favourites or {}
+    if #favourites > 0 then
+        local label = _("%1 works")
+        local function tile(favourite)
+            return {
+                text = favourite.name,
+                hint = type(favourite.count) == "string" and favourite.count ~= ""
+                    and T(label, favourite.count) or _("Fandom"),
+                icon = "heart",
+                role = "favourite",
+                -- The stored record travels with the tile so a hold can
+                -- unpin the exact url, not a name guessed from the label.
+                favourite = favourite,
+                action = function() o.on_favourite(favourite) end,
+                hold_action = function() o.on_unfavourite(favourite) end,
+            }
+        end
+
+        rows[#rows + 1] = {
+            ao3_static = Uikit.padded(HomePage.section_label(_("Favourites"), o)),
+            role = "favourites_label",
+            keep_with_next = true,
+        }
+
+        local shown = {}
+        for i = 1, math.min(#favourites, 4) do
+            shown[i] = tile(favourites[i])
+        end
+        rows[#rows + 1] = HomePage.tiles_row(
+            { shown[1], shown[2] }, o, "favourites_row_1",
+            shown[3] and GUTTER or 0)
+        if shown[3] then
+            rows[#rows + 1] = HomePage.tiles_row(
+                { shown[3], shown[4] }, o, "favourites_row_2",
+                #favourites > 4 and GUTTER or 0)
+        end
+        if #favourites > 4 then
+            rows[#rows + 1] = HomePage.wide_tile({
+                text = _("All favourites"),
+                hint = T(_("%1 pinned"), #favourites),
+                icon = "heart",
+                role = "favourites_all",
+                action = o.on_all_favourites,
+            }, o, "favourites_all")
+        end
+    end
 
     rows[#rows + 1] = {
         ao3_static = Uikit.padded(HomePage.section_label(_("Browse"), o)),

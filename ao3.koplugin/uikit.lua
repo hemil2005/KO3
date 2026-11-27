@@ -54,8 +54,10 @@ end
 
 -- A tap target around an already-built widget (the primary bar is not a
 -- native Button: an inverted bar needs a white label, which Button does not
--- expose).
-function Uikit.tapArea(widget, width, height, callback)
+-- expose). The optional fifth argument gives the same area a hold gesture, for
+-- controls that carry a second action (unpinning a favourite tile). Callers
+-- that pass only four arguments keep the tap-only target they had.
+function Uikit.tapArea(widget, width, height, callback, hold_callback)
     local area = InputContainer:new{
         dimen = Geom:new{ x = 0, y = 0, w = width, h = height },
     }
@@ -68,6 +70,15 @@ function Uikit.tapArea(widget, width, height, callback)
     area.onTap = function()
         callback()
         return true
+    end
+    if hold_callback then
+        area.ges_events.Hold = {
+            GestureRange:new{ ges = "hold", range = area.dimen },
+        }
+        area.onHold = function()
+            hold_callback()
+            return true
+        end
     end
     return area
 end
