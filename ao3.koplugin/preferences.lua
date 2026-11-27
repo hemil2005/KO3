@@ -2,10 +2,12 @@
 Reader preferences that belong to the app, not to a session.
 
 They live in their own settings file so Log out (which deletes
-`settings/ao3.lua`) cannot take the reader's display choices with it. Two kinds
-of choice are stored here: how the app looks (booleans, plus the one card-design
-enum) and how often it may ask about updates (timestamps and a dismissed
-version). Neither identifies the reader; that stays in the session file.
+`settings/ao3.lua`) cannot take the reader's display choices with it. Three
+kinds of choice are stored here: how the app looks (booleans, plus the one
+card-design enum), the fandoms the reader pinned to the landing page
+(`favourites`), and how often the app may ask about updates (timestamps and a
+dismissed version). None of them identifies the reader; that stays in the
+session file.
 ]]
 
 local DataStorage = require("datastorage")
@@ -24,6 +26,10 @@ local Preferences = {}
 local DEFAULTS = {
     tags_expanded = false,
     card_style = "modern",
+    -- Pinned fandoms, newest first: { name = string, url = string, count = string }.
+    -- The url is the offline index's path ("/tags/Some%20Fandom/works"), so a
+    -- tile can open the listing without a request of its own.
+    favourites = {},
     last_check_ts = 0,
     remind_after_ts = 0,
     dismissed_version = "",
@@ -33,6 +39,56 @@ local CARD_STYLES = {
     modern = true,
     legacy = true,
 }
+
+-- The landing page has room for four favourites plus the "All favourites"
+-- tile; keeping twelve means the full list still fits a couple of pages.
+local FAVOURITES_MAX = 12
+Preferences.MAX_FAVOURITES = FAVOURITES_MAX
+
+local function trim(value)
+    return (value:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function favouriteString(value)
+    local kind = type(value)
+    if kind == "string" then return value end
+    if kind == "number" then return tostring(value) end
+    return nil
+end
+
+-- One rule for the favourites list, shared by load, save, the home screen and
+-- the fandom rows: an entry is a table with a name and a url, anything else is
+-- dropped. URLs identify a fandom, names are the fallback identity, so a
+-- hand-edited file can never pin the same fandom twice. Order is newest first
+-- and only the first twelve survive.
+function Preferences.favourites(value)
+    local favourites = {}
+    if type(value) ~= "table" then return favourites end
+    local seen_urls, seen_names = {}, {}
+    for _, item in ipairs(value) do
+        if #favourites >= FAVOURITES_MAX then break end
+        if type(item) == "table" then
+            local name = favouriteString(item.name)
+            local url = favouriteString(item.url)
+            local count = favouriteString(item.count) or ""
+            if name and url then
+                name, url, count = trim(name), trim(url), trim(count)
+                local url_key, name_key = url:lower(), name:lower()
+                if name ~= "" and url ~= ""
+                        and not seen_urls[url_key] and not seen_names[name_key] then
+                    seen_urls[url_key] = true
+                    seen_names[name_key] = true
+                    favourites[#favourites + 1] = {
+                        name = name,
+                        url = url,
+                        count = count,
+                    }
+                end
+            end
+        end
+    end
+    return favourites
+end
 
 -- Anything that is not one of the two designs is the default. A hand-edited
 -- or older file must never leave the list without a card builder.
@@ -61,7 +117,11 @@ end
 -- defaults. `path` is for tests.
 function Preferences.load(path)
     local prefs = {}
-    for key, value in pairs(DEFAULTS) do prefs[key] = value end
+    for key, value in pairs(DEFAULTS) do
+        -- Tables are copied so a caller mutating the list cannot reach into
+        -- the defaults table and leak into the next load.
+        prefs[key] = type(value) == "table" and {} or value
+    end
 
     local ok, settings = pcall(function()
         return LuaSettings:open(path or Preferences.path())
@@ -73,6 +133,7 @@ function Preferences.load(path)
         prefs.tags_expanded = expanded
     end
     prefs.card_style = Preferences.cardStyle(settings:readSetting("card_style"))
+    prefs.favourites = Preferences.favourites(settings:readSetting("favourites"))
     prefs.last_check_ts = Preferences.timestamp(settings:readSetting("last_check_ts"))
     prefs.remind_after_ts = Preferences.timestamp(settings:readSetting("remind_after_ts"))
     local dismissed = settings:readSetting("dismissed_version")
@@ -90,6 +151,8 @@ function Preferences.save(prefs, path)
     settings:saveSetting("tags_expanded", prefs and prefs.tags_expanded == true)
     settings:saveSetting("card_style",
         Preferences.cardStyle(prefs and prefs.card_style))
+    settings:saveSetting("favourites",
+        Preferences.favourites(prefs and prefs.favourites))
     settings:saveSetting("last_check_ts",
         Preferences.timestamp(prefs and prefs.last_check_ts))
     settings:saveSetting("remind_after_ts",

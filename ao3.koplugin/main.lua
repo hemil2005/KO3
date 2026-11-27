@@ -765,14 +765,35 @@ end
 -- One index record per fandom. The letter browser and its search results share
 -- the row, so a search hit looks exactly like the record it was found in.
 function Ao3:fandomRecordRow(entry)
-    return {
-        text = entry.name,
-        mandatory = entry.count ~= "" and entry.count or nil,
+    local name = tostring(entry.name or "")
+    local url = tostring(entry.url or "")
+    local count = entry.count ~= nil and tostring(entry.count) or ""
+    local row = {
+        text = name,
+        mandatory = count ~= "" and count or nil,
         ao3_fandom = true,
         action = function()
-            self:loadListing(BASE_URL .. entry.url, entry.name)
+            self:loadListing(BASE_URL .. url, name)
         end,
     }
+    if self:isFavouriteFandom(name, url) then
+        row.ao3_icon = "heart"
+    end
+    -- A hold is the second action on a fandom record. Toggling writes the
+    -- preference, then repaints only this page: the reader keeps their place
+    -- in the letter index and the heart appears or vanishes in place.
+    row.hold_action = function()
+        local pinned = self:toggleFavouriteFandom({
+            name = name,
+            url = url,
+            count = count,
+        })
+        row.ao3_icon = pinned and "heart" or nil
+        if self.menu then
+            pcall(function() self.menu:updateItems(self.menu.page or 1) end)
+        end
+    end
+    return row
 end
 
 function Ao3:fandomRecordRows(entries)
@@ -781,6 +802,66 @@ function Ao3:fandomRecordRows(entries)
         rows[#rows + 1] = self:fandomRecordRow(entry)
     end
     return rows
+end
+
+-- Preferences belong to the reader, not to a session: load them once and keep
+-- the table so a toggle and a saved timestamp cannot race each other. Older
+-- files (and tests that set `prefs` by hand) may have no favourites list at all.
+function Ao3:ensurePrefs()
+    if not self.prefs then
+        self.prefs = Preferences.load()
+    end
+    if type(self.prefs.favourites) ~= "table" then
+        self.prefs.favourites = {}
+    end
+    return self.prefs
+end
+
+-- A pinned fandom is identified by its index url. The name is only the
+-- fallback when a caller has no url, because two spellings of one name would
+-- otherwise pin different records.
+function Ao3:isFavouriteFandom(name, url)
+    local url_key = type(url) == "string" and url ~= "" and url:lower() or nil
+    local name_key = type(name) == "string" and name ~= "" and name:lower() or nil
+    for _, favourite in ipairs(self:ensurePrefs().favourites) do
+        if url_key then
+            if favourite.url:lower() == url_key then return true end
+        elseif name_key and favourite.name:lower() == name_key then
+            return true
+        end
+    end
+    return false
+end
+
+-- Pin or unpin one fandom, newest first, and report whether it is now pinned.
+-- The entry goes through the same normaliser the file uses, so a home tile, a
+-- letter row and the saved list can never disagree about what was pinned.
+function Ao3:toggleFavouriteFandom(entry)
+    local favourite = Preferences.favourites({ entry or {} })[1]
+    if not favourite then return false end
+
+    local prefs = self:ensurePrefs()
+    local favourites = Preferences.favourites(prefs.favourites)
+    local url_key, name_key = favourite.url:lower(), favourite.name:lower()
+    local pinned = true
+    for index, item in ipairs(favourites) do
+        if item.url:lower() == url_key or item.name:lower() == name_key then
+            table.remove(favourites, index)
+            pinned = false
+            break
+        end
+    end
+    if pinned then
+        table.insert(favourites, 1, favourite)
+        favourites = Preferences.favourites(favourites)
+    end
+    prefs.favourites = favourites
+    self:savePrefs()
+    UIManager:show(InfoMessage:new{
+        text = pinned and _("Added to favourites") or _("Removed from favourites"),
+        timeout = 2,
+    })
+    return pinned
 end
 
 function Ao3:loadFandomLetter(category, letter, offset)
@@ -1052,7 +1133,12 @@ local function fandomNameWidth(entry, content_width, metrics)
         count_w = measuredWidth(count,
             Font:getFace("infont", metrics.info_size), false)
     end
-    return math.max(1, content_width - (count_w > 0
+    -- A pinned record leads with the heart, so its name starts one icon later;
+    -- measuring with the icon here keeps the height pass and the builder in
+    -- step or a one-line name would wrap after it was measured.
+    local icon_w = entry.ao3_icon and (metrics.title_h
+        + Size.span.horizontal_default) or 0
+    return math.max(1, content_width - icon_w - (count_w > 0
         and (count_w + Size.span.horizontal_default) or 0))
 end
 
@@ -1694,11 +1780,18 @@ function Ao3MenuItem:buildIndex(metrics)
     local count_w = self.fandom_count_widget and self.fandom_count_widget:getWidth() or 0
     local gap = count_w > 0 and Size.span.horizontal_default or 0
 
+    -- A pinned fandom leads with the heart, the same quiet mark a compact row
+    -- uses for its action. The name still owns the rest of the line.
+    local icon = self:rowIcon(self.entry.ao3_icon, metrics)
+    self.icon_widget = icon
+    local icon_w = icon and icon:getSize().w or 0
+    local icon_gap = icon and Size.span.horizontal_default or 0
+
     self.fandom_name_widget = TextBoxWidget:new{
         text = trim(self.entry.text or ""),
         face = Font:getFace("smallinfofont", metrics.title_size),
         bold = true,
-        width = math.max(1, width - count_w - gap),
+        width = math.max(1, width - count_w - gap - icon_w - icon_gap),
         height = metrics.fandom_name_h,
         height_adjust = true,
         height_overflow_show_ellipsis = true,
@@ -1709,6 +1802,10 @@ function Ao3MenuItem:buildIndex(metrics)
     -- two-line name would float it between the lines and read as a stray
     -- number in the middle of the row.
     local row = HorizontalGroup:new{ align = "top" }
+    if icon then
+        row[#row + 1] = icon
+        row[#row + 1] = HorizontalSpan:new{ width = icon_gap }
+    end
     row[#row + 1] = self.fandom_name_widget
     if self.fandom_count_widget then
         row[#row + 1] = HorizontalSpan:new{ width = gap }
@@ -4808,9 +4905,20 @@ function Ao3:homeRows()
         version = Updater.currentVersion(self:pluginDir()),
         signed_in = self.session ~= nil,
         account_name = self.session and self.session.username or nil,
+        favourites = self:ensurePrefs().favourites,
         on_account = function() self:showAccount() end,
         on_settings = function() self:showSettings() end,
         on_search = function() self:searchDialog() end,
+        on_favourite = function(entry)
+            self:loadListing(BASE_URL .. entry.url, entry.name)
+        end,
+        on_unfavourite = function(entry)
+            -- A hold on a tile is its second action: unpin that fandom and
+            -- rebuild the front page so the tile (or the whole shelf) leaves.
+            self:toggleFavouriteFandom(entry)
+            self:replaceRows("", self:homeRows())
+        end,
+        on_all_favourites = function() self:showFavourites() end,
         on_latest = function()
             self:loadListing(self:recentUrl(), _("Latest works"))
         end,
@@ -4868,6 +4976,40 @@ function Ao3:showFandoms()
         return
     end
     self:pushRows(_("Fandoms"), self:fandomRows(index))
+end
+
+-- The list behind the home shelf's "All favourites" tile. Its rows are the
+-- fandom index record with one difference: a hold rebuilds this list without
+-- the row it just unpinned, rather than repainting a letter page underneath.
+function Ao3:favouriteRows()
+    local rows = {}
+    for _, favourite in ipairs(self:ensurePrefs().favourites) do
+        local row = self:fandomRecordRow(favourite)
+        row.ao3_icon = "heart"
+        row.hold_action = function()
+            self:toggleFavouriteFandom(favourite)
+            self:showFavourites(true)
+        end
+        rows[#rows + 1] = row
+    end
+    if #rows == 0 then
+        rows[1] = {
+            text = _("No favourite fandoms yet."),
+            role = "favourites_empty",
+        }
+    end
+    return rows
+end
+
+function Ao3:showFavourites(replace)
+    local rows = self:favouriteRows()
+    if replace then
+        -- Unpinning from the shelf must not stack a screen per tap: replace
+        -- the list in place and leave the reader on the same shelf.
+        self:replaceRows(_("Favourites"), rows)
+    else
+        self:pushRows(_("Favourites"), rows)
+    end
 end
 
 -- The alphabet as one printed thumb index: nine letters to a shelf, so the
