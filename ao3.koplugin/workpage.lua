@@ -385,8 +385,9 @@ function WorkPage.build(o)
     if o.update then
         local update = o.update
         rows[#rows + 1] = {
-            text = update.added > 0 and T(_("%1 new chapters"), update.added)
-                or _("Work complete"),
+            text = update.added == 1 and _("1 new chapter")
+                or (update.added > 1 and T(_("%1 new chapters"), update.added)
+                    or _("Work complete")),
             mandatory = chapterPair(update.old_current, update.old_total)
                 .. " → " .. chapterPair(update.new_current, update.new_total),
             action = o.on_refresh,

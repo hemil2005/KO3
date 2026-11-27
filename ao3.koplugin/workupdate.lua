@@ -146,13 +146,15 @@ function WorkUpdate.message(result)
         chapterPair(result.new_current, result.new_total))
 end
 
--- A work that can still grow chapters. A 1/1 one-shot never can; an unknown
--- total ("3/?") is the definition of a work in progress.
+-- A work that can still grow chapters. An unknown total ("3/?") is the
+-- definition of a work in progress; a known equal pair ("2/2", "7/7") is
+-- finished and already has the plain Refresh action, so the check would only
+-- cost a request to say "up to date". A one-shot can never grow.
 function WorkUpdate.isWip(chapters)
     local current, total = countsOf(chapters)
     if not current then return false end
     if not total then return true end
-    return total > 1
+    return current < total
 end
 
 return WorkUpdate
