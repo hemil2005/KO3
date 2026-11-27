@@ -28,6 +28,13 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - Card detail ink is `Uikit.CARD_DETAIL` (0x44), one tier darker than
   `Uikit.SECONDARY`, for the byline, fandom, ships, tags, summary and stats
   labels: the 0x66/0x88 greys wash out on e-ink under a bold black title.
+- A work listing carries a funnel at the top-left of the title bar, opposite
+  Close. It opens an Include/Exclude screen built only from the facets already
+  in AO3's `#work-filters` sidebar (rating, warning, category, fandom,
+  character, relationship, additional tags), marks chosen facets with
+  KOReader's checkmark, and refetches page 1 only on **Apply filters**; paging
+  keeps the filters and leaving the listing drops them. Author works, search,
+  tag and fandom listings get it; no other screen does.
 - The author page is one screen: the author's masthead, the pill of four tabs,
   then a count line and the shelf. Every tab keeps the masthead and the tab
   strip sits at the same height; the native title bar names the shelf, not the

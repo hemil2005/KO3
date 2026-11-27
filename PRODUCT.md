@@ -76,8 +76,10 @@ Hard constraints:
 - One page per tap, 20 works per page, no infinite scroll, no crawling;
   `Retry-After` honoured; a download is validated before it replaces a cached
   copy.
-- Simple search only: one query box. AO3's filter matrix (rating, warnings,
-  completion, word count, sort) is not exposed.
+- Simple search: one query box. The listing filter exposes the facets AO3
+  already embeds in a results page (rating, warnings, categories, fandoms,
+  characters, relationships, tags), in Include and Exclude groups; completion,
+  word count, sort order and free-text tag filters are not exposed.
 - The fandom list is a point-in-time snapshot; renamed tags 404 until the
   snapshot is regenerated. "Find a tag…" resolves current tags by name.
 - Untested on physical Kindle hardware; parsers and UI are verified in the

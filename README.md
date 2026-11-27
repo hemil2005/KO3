@@ -10,6 +10,10 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
 - Optional AO3 sign-in for your own bookmarks, marked-for-later, history and
   subscriptions
 - Optional kudos, bookmark, subscribe and Marked for Later from a work page
+- Filter a listing by the facets AO3 already puts on the page — rating,
+  warnings, categories, fandoms, characters, relationships and tags — with
+  include and exclude groups. The filters apply on tap, page with you, and
+  reset when you leave the listing
 - No images
 - No comments, no work posting, no third-party service
 - One page fetched per tap; only opened works are saved
@@ -37,6 +41,7 @@ details captured from a live work.
 | ![Log consent](screenshots/33-report-consent.png) | ![Report sent](screenshots/36-report-sent.png) |
 | ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
 | ![Tag box open in the list](screenshots/40-work-list-tags.png) | ![Settings](screenshots/41-settings.png) |
+| ![Filter button on a work listing](screenshots/46-work-filter-button.png) | ![Filter dialog with Include and Exclude groups](screenshots/47-work-filter-dialog.png) |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -67,6 +72,7 @@ koreader/
       account.lua
       accountpage.lua
       authorpage.lua
+      filterpage.lua
       homepage.lua
       settingspage.lua
       preferences.lua
@@ -142,6 +148,18 @@ relationships, the tag box and the word/chapter numbers; Legacy is the simpler
 card the plugin started with, a bold title, the author and the first three
 lines of the summary. Both choices are stored in `settings/ao3_prefs.lua`,
 separately from the AO3 session, so Log out does not reset them.
+
+On a work listing — search results, a tag, a fandom, or an author's **Works**
+tab — a funnel at the top-left of the title bar, opposite the close button,
+opens the filters AO3 already puts on that page. The screen has two groups,
+**Include** and **Exclude**, each listing the dimensions that page offers
+(rating, archive warning, category, fandom, character, relationship, additional
+tags). Tapping a dimension opens its facets with their work counts, and a tap
+ticks or unticks one; rating is single-select on the include side, as it is on
+AO3. **Apply filters** refetches only page 1 of the listing with the chosen
+facets; nothing is requested while you tick boxes. The funnel fills and the
+dimension rows carry "1 selected" while filters are on. Paging keeps them, and
+leaving the listing clears them.
 
 Tap a result to drill in; tap a work for its details. The work screen leads
 with the title, author and fandom, then **Read** (the solid bar, which
@@ -321,6 +339,9 @@ Listing:
   GET https://archiveofourown.org/works/search?work_search[query]=...
   GET https://archiveofourown.org/tags/<tag>/works?page=N
     -> parse <li class="work blurb group"> into 20 selectable work cards
+    -> parse <form id="work-filters"> into the listing's include/exclude facets
+  Filters (on Apply only; AO3's own page links keep them while paging):
+  GET ...?include_work_search[rating_ids][]=10&exclude_work_search[fandom_ids][]=17
 
 Author page (four tabs):
   GET /users/<name>?expand_fandoms=true       Dashboard: fandoms + counts
@@ -403,6 +424,14 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   choice, the row redraws with its new value, and every work list already on
   the back stack is restyled from its own rows, so returning to it shows the
   new design without fetching the page again. Captured in `screenshots/41`.
+- The listing filter, built from AO3's own `#work-filters` sidebar in the same
+  response as the works: a funnel at the top-left of the title bar, opposite
+  the close button, opens an **Include** / **Exclude** screen whose fourteen
+  dimension rows, two quiet group labels and its Clear/Apply row fit one
+  600×800 page; a dimension opens its facets with work counts and KOReader's
+  checkmark. Ticking changes only local state; Apply makes the single request
+  and replaces the listing at page 1, AO3's paging links keep the filters, and
+  leaving the listing clears them. Captured in `screenshots/46`–`47`.
 - The work screen is one page, not a key/value list: title/author/fandom,
   Read and Refresh, a four-number strip, an aligned metadata table, four
   account actions (Kudos, Bookmark, Subscribe, Mark for later), and folded
@@ -485,16 +514,20 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 311 tests passing across parser, navigation,
+- The offline `busted` suite: 331 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
-  author-page, work-page, account-screen, home-page, reader-hook, updater and
-  bug-report tests, including 51 account tests across token parsing, the
-  three-request sign-in, cookie scoping/rotation, session persistence/logout,
-  subscription parsing and work actions. The work-action tests cover the
-  website's form bodies, reading the work page's bookmarked/subscribed/
-  read-later state, one-time token reuse, bookmark and subscription ids
-  returned by AO3, already-done duplicates and the refusal to post twice.
+  author-page, work-page, account-screen, home-page, reader-hook, updater,
+  listing-filter and bug-report tests, including 51 account tests across token
+  parsing, the three-request sign-in, cookie scoping/rotation, session
+  persistence/logout, subscription parsing and work actions. The work-action
+  tests cover the website's form bodies, reading the work page's bookmarked/
+  subscribed/read-later state, one-time token reuse, bookmark and subscription
+  ids returned by AO3, already-done duplicates and the refusal to post twice.
+  The filter tests cover facet parsing (ids, names, counts, radio vs
+  checkbox), the apply URL's include/exclude params, pre-selected filters,
+  the dialog's rows and checkmarks, paging with filters, the button's
+  visibility and active state, and the reset on leaving the listing.
 
 **Current connectivity (checked 2026-11-23 14:20):** AO3's edge accepts the
 Firefox header set used for sign-in. `/token_dispenser.json` returned `200`
@@ -545,9 +578,11 @@ what made the 403 stick for the plugin while `curl` could still fetch pages.
 - **Snapshot, not live.** The fandom list is a point-in-time copy; tag names
   that were renamed on AO3 after the snapshot will 404 until it is
   regenerated. "Find a tag…" resolves any current tag by name.
-- **Simple search.** One query box. AO3's filter matrix (rating, warnings,
-  completion, word count, sort) is not exposed. Apps commonly have it; it
-  would need a filter screen and is intentionally out of scope here.
+- **Simple search.** One query box. Filters are the facets AO3 itself lists on
+  the results page (rating, warnings, categories, fandoms, characters,
+  relationships, tags), in an Include or Exclude group. Word count, completion
+  status, sort order and free-text tag filters are not exposed; they would
+  need their own controls and are intentionally out of scope.
 - **No infinite scroll.** 20 works per page.
 - **Untested on a physical Kindle.** Parsers, UI and rendering were tested
   in the emulator; a real-device pass is still recommended.

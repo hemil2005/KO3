@@ -401,6 +401,7 @@ local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
 local WorkPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "workpage.lua")))
 local HomePage = dofile((MAIN_SOURCE:gsub("main%.lua$", "homepage.lua")))
 local AccountPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "accountpage.lua")))
+local FilterPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "filterpage.lua")))
 local SettingsPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "settingspage.lua")))
 local Preferences = dofile((MAIN_SOURCE:gsub("main%.lua$", "preferences.lua")))
 local SearchHistory = dofile((MAIN_SOURCE:gsub("main%.lua$", "searchhistory.lua")))
@@ -413,6 +414,75 @@ Ao3.Updater = Updater
 -- Work blurbs are parsed in authorpage.lua so author bookmarks can reuse the
 -- same parser; listings, search results and bookmark pages share the markup.
 local parseWork = AuthorPage.parseWorkNode
+
+-- AO3's own filter dimensions, in the order the sidebar prints them. `single`
+-- mirrors the site's rating include control: a work has one rating, so that
+-- list is a radio group while everything else is a set of checkboxes.
+local FILTER_DIMENSIONS = {
+    { key = "rating", label = _("Rating"), single = true },
+    { key = "archive_warning", label = _("Archive Warning") },
+    { key = "category", label = _("Category") },
+    { key = "fandom", label = _("Fandom") },
+    { key = "character", label = _("Character") },
+    { key = "relationship", label = _("Relationship") },
+    { key = "freeform", label = _("Additional Tags") },
+}
+Ao3.FILTER_DIMENSIONS = FILTER_DIMENSIONS
+
+-- AO3 renders the filter sidebar as `form#work-filters` in the same page as
+-- the results. Every usable facet is one `input` whose name carries its
+-- dimension and whether it includes or excludes:
+--
+--     include_work_search[fandom_ids][]   value="136512"
+--
+-- The human name and the work count live in the row's label ("Harry Potter -
+-- J. K. Rowling (30)"). The free-text "Other tags" boxes and the sort controls
+-- use `work_search[...]` and are deliberately ignored: this round exposes the
+-- facets the page already offers, nothing typed.
+function Ao3:parseFilterFacets(root)
+    local facets = {}
+    local form = first(root:select("form#work-filters"))
+    if not form then return facets end
+
+    for _, input in ipairs(form:select("input")) do
+        local attrs = input.attributes or {}
+        local action, kind = (attrs.name or ""):match(
+            "^(include_work_search)%[([%w_]+)_ids%]%[%]$")
+        if not action then
+            action, kind = (attrs.name or ""):match(
+                "^(exclude_work_search)%[([%w_]+)_ids%]%[%]$")
+        end
+        local id = attrs.value
+        if action and kind and id and id ~= "" then
+            -- Walk out to the row that owns the label. AO3 has shipped both
+            -- <li><label><input>...<span>Name (n)</span></label></li> and the
+            -- input as a sibling of the label, so accept either.
+            local li = input.parent
+            while li and li.name ~= "li" do li = li.parent end
+            local label = li and first(li:select("label"))
+            if not label and input.parent and input.parent.name == "label" then
+                label = input.parent
+            end
+            local text = label and plain(label) or (li and plain(li) or "")
+            local name, count = text:match("^(.-)%s*%(([%d,]+)%)%s*$")
+            if not name or name == "" then
+                name = trim(text)
+                count = nil
+            end
+            local key = action == "include_work_search" and "include" or "exclude"
+            facets[kind] = facets[kind] or { include = {}, exclude = {} }
+            facets[kind][key][#facets[kind][key] + 1] = {
+                id = trim(id),
+                name = name,
+                count = count and tonumber((count:gsub(",", ""))) or nil,
+                type = kind,
+                action = key,
+                control = attrs.type or "checkbox",
+            }
+        end
+    end
+    return facets
+end
 
 function Ao3:parseListing(html)
     local ok, root = pcall(htmlparser.parse, html, 5000)
@@ -470,6 +540,9 @@ function Ao3:parseListing(html)
         next_url = next_url,
         prev_url = prev_url,
         count = count,
+        -- The sidebar's facets travel with the listing, so the filter screen
+        -- needs no extra request: Apply is the only load that adds one.
+        facets = self:parseFilterFacets(root),
     }
 end
 
@@ -695,11 +768,19 @@ function Ao3:fetchPage(url, parse, label, on_success, on_error, silent)
     end)
 end
 
-function Ao3:loadListing(url, fallback_title, replace)
+function Ao3:loadListing(url, fallback_title, replace, state)
     self:fetchPage(url, function(html)
         return self:parseListing(html)
     end, _("Loading works…"), function(listing)
-        self:showListing(listing, fallback_title, replace)
+        local filters = state
+        if not filters then
+            filters = self:newFilterState(listing, url, fallback_title)
+        elseif listing.facets and next(listing.facets) then
+            -- A filtered page recalculates AO3's facet counts; keep the
+            -- selection but show the fresh lists.
+            filters.facets = listing.facets
+        end
+        self:showListing(listing, fallback_title, replace, filters)
     end)
 end
 
@@ -1795,6 +1876,12 @@ function Ao3WorkMenu:setupItemHeights()
             -- A selectable block (action bar, section header); the extra
             -- line is the focus underline.
             item.height = item.ao3_panel:getSize().h + self.linesize
+        elseif item.role == "filter_dimension" then
+            -- The filter root is a matrix of fourteen dimension rows; they
+            -- are deliberately a step tighter than the native row so the
+            -- whole form and its Apply bar stay on one 600x800 page.
+            item.height = math.max(metrics.meta_h + 2 * Size.span.vertical_default,
+                math.floor((self.font_size or 20) * 2.0))
         elseif item.ao3_work then
             item.height = ao3CardHeight(item, metrics, self:fandomContentWidth())
         elseif item.ao3_fandom or item.ao3_series then
@@ -1847,6 +1934,19 @@ function Ao3WorkMenu:getPageNumber(item_number)
 end
 
 function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
+    -- A filter root that was left under a drilled-in dimension refreshes
+    -- itself on the way back: its selected counts and Clear button must match
+    -- what changed overleaf.
+    if self.item_table and self.item_table.ao3_rebuild then
+        local rebuild = self.item_table.ao3_rebuild
+        self.item_table.ao3_rebuild = nil
+        local rows = rebuild()
+        for i = #self.item_table, 1, -1 do self.item_table[i] = nil end
+        for _, row in ipairs(rows or {}) do
+            self.item_table[#self.item_table + 1] = row
+        end
+    end
+
     local old_dimen = self.dimen and self.dimen:copy()
     self.layout = {}
     self.item_group:clear()
@@ -1926,11 +2026,50 @@ function Ao3WorkMenu:updateItems(select_number, no_recalculate_dimen)
         self:mergeTitleBarIntoLayout()
     end
 
+    -- The filter button belongs to a work listing and nowhere else: it is
+    -- shown, hidden and marked active from the row table currently on screen.
+    self:ao3SyncFilterButton()
+
     UIManager:setDirty(self.show_parent, function()
         local refresh_dimen = old_dimen and old_dimen:combine(self.dimen)
             or self.dimen
         return "ui", refresh_dimen
     end)
+end
+
+-- The title bar's left button, opposite Close: a funnel for the facets the
+-- page already carries. It is hidden unless the current row table is a work
+-- listing with a parsed filter state, and filled when at least one facet is
+-- chosen. Its tap zone is trimmed to the bar, exactly like Close, so the
+-- first row below it keeps its whole width.
+function Ao3WorkMenu:ao3SyncFilterButton()
+    local button = self.ao3_filter_button
+    local icons = self.ao3_filter_icons
+    if not button or not icons then return end
+
+    local state = self.item_table and self.item_table.ao3_filter_state
+    local visible = state ~= nil
+    local active = visible and self.ao3_filter_count
+        and self.ao3_filter_count(state) > 0
+
+    local image = active and icons.on or icons.off
+    button.image = image
+    button.horizontal_group[2] = image
+    image.hide = not visible
+
+    self.ao3_filter_visible = visible
+    if visible then
+        button.ges_events = button.ao3_ges_events or button.ges_events
+    else
+        button.ao3_ges_events = button.ao3_ges_events or button.ges_events
+        button.ges_events = {}
+    end
+end
+
+function Ao3WorkMenu:onLeftButtonTap()
+    if self.ao3_filter_visible and self.ao3_open_filters then
+        self.ao3_open_filters()
+    end
 end
 
 -- One selectable card per work: title, author, bounded summary. Shared by
@@ -1952,7 +2091,7 @@ function Ao3:workRow(work)
     }
 end
 
-function Ao3:listingRows(listing, fallback_title)
+function Ao3:listingRows(listing, fallback_title, filters)
     local rows = {}
     for _, work in ipairs(listing.items) do
         rows[#rows + 1] = self:workRow(work)
@@ -1964,11 +2103,14 @@ function Ao3:listingRows(listing, fallback_title)
     -- Paging rows are only added when AO3 says there is another page. A
     -- paged fetch replaces this listing's rows so Back still returns to the
     -- screen that opened the listing, not to the previous page of results.
+    -- AO3's own links already carry the filters, but they are re-applied
+    -- from the listing's state so paging never loses a ticked facet.
     if listing.next_url then
         rows[#rows + 1] = {
             text = _("Next page →"),
             action = function()
-                self:loadListing(listing.next_url, fallback_title, true)
+                self:loadListing(self:filterUrl(listing.next_url, filters, true),
+                    fallback_title, true, filters)
             end,
         }
     end
@@ -1976,7 +2118,8 @@ function Ao3:listingRows(listing, fallback_title)
         rows[#rows + 1] = {
             text = _("← Previous page"),
             action = function()
-                self:loadListing(listing.prev_url, fallback_title, true)
+                self:loadListing(self:filterUrl(listing.prev_url, filters, true),
+                    fallback_title, true, filters)
             end,
         }
     end
@@ -1989,13 +2132,350 @@ function Ao3:listingRows(listing, fallback_title)
     return rows, title
 end
 
-function Ao3:showListing(listing, fallback_title, replace)
-    local rows, title = self:listingRows(listing, fallback_title)
+function Ao3:showListing(listing, fallback_title, replace, filters)
+    local rows, title = self:listingRows(listing, fallback_title, filters)
+    -- The filter state rides on the screen's own row table, so it lives
+    -- exactly as long as the listing is on the back stack: paging keeps it,
+    -- Back out of the listing drops it, and Settings never sees it.
+    rows.ao3_filter_state = filters
     if replace then
         self:replaceRows(title, rows)
     else
         self:pushRows(title, rows)
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- Listing filters
+-- ---------------------------------------------------------------------------
+--
+-- A listing page carries AO3's own filter sidebar, so the facets are parsed
+-- with the works and the dialog never fetches to discover them. The chosen
+-- facets live on the listing's row table; only Apply builds a URL and loads a
+-- page, and AO3's paging links are re-built from the same choice.
+
+local function isFilterParam(key)
+    key = util.urlDecode(key or "")
+    return key:match("^include_work_search%[") ~= nil
+        or key:match("^exclude_work_search%[") ~= nil
+end
+
+local function urlParts(url)
+    url = url or ""
+    local fragment
+    local before, after = url:match("^(.-)#(.*)$")
+    if before then
+        url, fragment = before, after
+    end
+    local path, query = url:match("^([^?]*)%??(.*)$")
+    return path or url, query, fragment
+end
+
+-- Rebuild `url` with exactly the current selection: a page's own filter
+-- params are dropped first so a paging link and an Apply can never carry two
+-- generations of the same facet. `page` is dropped for Apply (page 1) and
+-- kept for paging.
+function Ao3:filterUrl(url, state, keep_page)
+    if not url then return nil end
+    local path, query, fragment = urlParts(url)
+    local out = {}
+    for pair in (query or ""):gmatch("[^&]+") do
+        local key = pair:match("^([^=]*)") or pair
+        if (keep_page or util.urlDecode(key) ~= "page")
+                and not isFilterParam(key) then
+            out[#out + 1] = pair
+        end
+    end
+
+    local chosen = state and state.selected or { include = {}, exclude = {} }
+    local dimensions = self:filterDimensions(state and state.facets)
+    local covered = {}
+    for _, dimension in ipairs(dimensions) do covered[dimension.key] = true end
+
+    -- A filter adopted from a URL can name a dimension this page does not
+    -- offer; keep it rather than silently dropping the reader's choice.
+    local extra = {}
+    for _, action in ipairs({ "include", "exclude" }) do
+        for kind in pairs(chosen[action] or {}) do
+            if not covered[kind] then extra[kind] = true end
+        end
+    end
+    local extra_keys = {}
+    for kind in pairs(extra) do extra_keys[#extra_keys + 1] = kind end
+    table.sort(extra_keys)
+    for _, kind in ipairs(extra_keys) do
+        dimensions[#dimensions + 1] = { key = kind }
+    end
+
+    for _, dimension in ipairs(dimensions) do
+        for _, action in ipairs({ "include", "exclude" }) do
+            local ids = chosen[action] and chosen[action][dimension.key]
+            if ids then
+                local list = {}
+                for id in pairs(ids) do list[#list + 1] = id end
+                table.sort(list, function(a, b)
+                    return (tonumber(a) or 0) < (tonumber(b) or 0)
+                end)
+                for _, id in ipairs(list) do
+                    out[#out + 1] = util.urlEncode(action .. "_work_search["
+                        .. dimension.key .. "_ids][]") .. "=" .. util.urlEncode(id)
+                end
+            end
+        end
+    end
+
+    local result = path
+    if #out > 0 then result = result .. "?" .. table.concat(out, "&") end
+    if fragment then result = result .. "#" .. fragment end
+    return result
+end
+
+-- The dimensions present in this page's facets, AO3's order first and any
+-- unfamiliar dimension after it, so a new AO3 filter is never unreachable.
+function Ao3:filterDimensions(facets)
+    local dimensions, known = {}, {}
+    for _, dimension in ipairs(FILTER_DIMENSIONS) do
+        known[dimension.key] = true
+        local entry = facets and facets[dimension.key]
+        if entry and (#(entry.include or {}) > 0 or #(entry.exclude or {}) > 0) then
+            dimensions[#dimensions + 1] = {
+                key = dimension.key,
+                label = dimension.label,
+                single = dimension.single,
+                include = entry.include or {},
+                exclude = entry.exclude or {},
+            }
+        end
+    end
+
+    local extra = {}
+    for key in pairs(facets or {}) do
+        if not known[key] then extra[#extra + 1] = key end
+    end
+    table.sort(extra)
+    for _, key in ipairs(extra) do
+        local entry = facets[key]
+        if #(entry.include or {}) > 0 or #(entry.exclude or {}) > 0 then
+            dimensions[#dimensions + 1] = {
+                key = key,
+                label = (key:gsub("_", " "):gsub("^%l", string.upper)),
+                include = entry.include or {},
+                exclude = entry.exclude or {},
+            }
+        end
+    end
+    return dimensions
+end
+
+local function copyFilterSelection(selected)
+    local copy = { include = {}, exclude = {} }
+    for _, action in ipairs({ "include", "exclude" }) do
+        for kind, ids in pairs(selected and selected[action] or {}) do
+            copy[action][kind] = {}
+            for id, facet in pairs(ids) do copy[action][kind][id] = facet end
+        end
+    end
+    return copy
+end
+
+-- A pasted or previously filtered URL starts with its boxes already ticked:
+-- read the ids back into the selection and find their names in the page.
+function Ao3:adoptUrlFilters(state, url)
+    local _, query = urlParts(url)
+    for pair in (query or ""):gmatch("[^&]+") do
+        local raw_key, raw_value = pair:match("^([^=]*)=?(.*)$")
+        local prefix, kind = util.urlDecode(raw_key or ""):match(
+            "^(%a+)_work_search%[([%w_]+)_ids%]%[%]$")
+        local action = (prefix == "include" or prefix == "exclude") and prefix or nil
+        local id = util.urlDecode(raw_value or "")
+        if action and kind and id ~= "" then
+            local facet
+            local entry = state.facets[kind]
+            for _, candidate in ipairs(entry and entry[action] or {}) do
+                if candidate.id == id then facet = candidate break end
+            end
+            facet = facet or { id = id, name = id, type = kind, action = action }
+            state.selected[action][kind] = state.selected[action][kind] or {}
+            state.selected[action][kind][id] = facet
+        end
+    end
+end
+
+-- Nil when the page carries no usable facets: a listing without AO3's filter
+-- sidebar gets no filter button rather than a dialog with nothing in it.
+function Ao3:newFilterState(listing, url, title)
+    local facets = listing and listing.facets
+    if not facets or not next(facets) or #self:filterDimensions(facets) == 0 then
+        return nil
+    end
+    local state = {
+        facets = facets,
+        selected = { include = {}, exclude = {} },
+        -- The applied set is what the listing was actually loaded with.
+        -- Ticks made in the dialog stay pending until Apply, and Back out of
+        -- the dialog drops them, so the funnel never claims a filter the
+        -- results do not have.
+        applied = { include = {}, exclude = {} },
+        -- Apply always starts at page 1 of the unfiltered listing URL.
+        base_url = self:filterUrl(url, nil, false),
+        title = title,
+    }
+    self:adoptUrlFilters(state, url)
+    state.applied = copyFilterSelection(state.selected)
+    state.display = function(fetched)
+        self:showListing(fetched, state.title, true, state)
+    end
+    return state
+end
+
+function Ao3:filterSelectedCount(state, action, kind)
+    local ids = state and state.selected[action]
+        and state.selected[action][kind]
+    local count = 0
+    for _ in pairs(ids or {}) do count = count + 1 end
+    return count
+end
+
+function Ao3:filterCount(state)
+    local count = 0
+    for _, action in ipairs({ "include", "exclude" }) do
+        for _, ids in pairs(state and state.selected[action] or {}) do
+            for _ in pairs(ids) do count = count + 1 end
+        end
+    end
+    return count
+end
+
+function Ao3:filterAppliedCount(state)
+    local count = 0
+    for _, action in ipairs({ "include", "exclude" }) do
+        for _, ids in pairs(state and state.applied and state.applied[action] or {}) do
+            for _ in pairs(ids) do count = count + 1 end
+        end
+    end
+    return count
+end
+
+-- Back out of the dialog without Apply: the listing still shows the applied
+-- set, so the pending ticks go with the dialog.
+function Ao3:resetPendingFilters(state)
+    if not state then return end
+    state.selected = copyFilterSelection(state.applied)
+end
+
+function Ao3:filterDimension(state, kind)
+    for _, dimension in ipairs(self:filterDimensions(state and state.facets)) do
+        if dimension.key == kind then return dimension end
+    end
+end
+
+function Ao3:toggleFacet(state, facet)
+    local dimension = self:filterDimension(state, facet.type)
+    local chosen = state.selected[facet.action][facet.type] or {}
+    if chosen[facet.id] then
+        chosen[facet.id] = nil
+    else
+        -- Rating is single-select on AO3's own form; the input's type is the
+        -- authority when the page supplies one.
+        if facet.action == "include"
+                and (facet.control == "radio" or (dimension and dimension.single)) then
+            chosen = {}
+        end
+        chosen[facet.id] = facet
+    end
+    state.selected[facet.action][facet.type] = next(chosen) and chosen or nil
+end
+
+function Ao3:filterRootRows(state)
+    local menu = self.menu
+    local font_size = (menu and menu.font_size) or 19
+    local width = Screen:getWidth() - 2 * Size.padding.fullscreen
+    return FilterPage.build_root{
+        dimensions = self:filterDimensions(state.facets),
+        width = width,
+        font_size = font_size,
+        total = self:filterCount(state),
+        selected_count = function(action, kind)
+            return self:filterSelectedCount(state, action, kind)
+        end,
+        on_dimension = function(action, kind)
+            self:showFilterDimension(state, action, kind)
+        end,
+        on_clear = function()
+            self:clearFilters(state)
+        end,
+        on_apply = function()
+            self:applyFilters(state)
+        end,
+    }
+end
+
+function Ao3:filterFacetRows(state, action, kind)
+    local dimension = self:filterDimension(state, kind)
+    local facets = dimension and dimension[action] or {}
+    return FilterPage.build_dimension{
+        facets = facets,
+        selected = state.selected[action][kind] or {},
+        on_toggle = function(index)
+            local facet = facets[index]
+            if not facet then return end
+            self:toggleFacet(state, facet)
+            self:replaceRows(
+                FilterPage.dimensionTitle(action, dimension.label),
+                self:filterFacetRows(state, action, kind), index)
+        end,
+    }
+end
+
+function Ao3:showFilterRoot(state)
+    local rows = self:filterRootRows(state)
+    rows.ao3_filter_root = state
+    self:pushRows(FilterPage.ROOT_TITLE, rows)
+end
+
+function Ao3:showFilterDimension(state, action, kind)
+    local menu = self.menu
+    local dimension = self:filterDimension(state, kind)
+    if not menu or not dimension then return end
+    -- The root page is under this one; rebuild it on the way back so its
+    -- selected counts (and the Clear button) are current.
+    menu.item_table.ao3_rebuild = function()
+        return self:filterRootRows(state)
+    end
+    self:pushRows(FilterPage.dimensionTitle(action, dimension.label),
+        self:filterFacetRows(state, action, kind))
+end
+
+function Ao3:clearFilters(state)
+    state.selected = { include = {}, exclude = {} }
+    local rows = self:filterRootRows(state)
+    rows.ao3_filter_root = state
+    self:replaceRows(FilterPage.ROOT_TITLE, rows)
+end
+
+-- Apply is the only network action in the dialog: it closes the filter
+-- screen and replaces the listing it was opened from with page 1 of the
+-- filtered results. A failure leaves the dialog (and the old listing) alone.
+function Ao3:applyFilters(state)
+    local url = self:filterUrl(state.base_url, state, false)
+    self:fetchPage(url, function(html)
+        return self:parseListing(html)
+    end, _("Filtering works…"), function(listing)
+        -- The request succeeded, so these ticks are now the listing's truth.
+        state.applied = copyFilterSelection(state.selected)
+        local menu = self.menu
+        if menu and menu.item_table and menu.item_table.ao3_filter_root then
+            menu:onClose()
+        end
+        if listing.facets and next(listing.facets) then
+            state.facets = listing.facets
+        end
+        if state.display then
+            state.display(listing, state)
+        else
+            self:showListing(listing, state.title, true, state)
+        end
+    end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -2474,10 +2954,27 @@ function Ao3:renderAuthorTab(tab_id, replace)
     end)
 end
 
-function Ao3:showAuthorRows(tab_id, data, replace)
+function Ao3:showAuthorRows(tab_id, data, replace, filters)
     local author = self.author
     local font_size = (self.menu and self.menu.font_size) or 20
     local width = Screen:getWidth() - 2 * Size.padding.fullscreen
+
+    -- The Works shelf is a work listing like any other: its page carries
+    -- AO3's filter sidebar, so the same filter button and dialog serve it.
+    -- The state is rebuilt when the tab is entered (a tab switch leaves the
+    -- listing) and handed back by paging and by Apply.
+    if tab_id == "works" and not filters then
+        local url = AuthorPage.tabUrl(author.profile, "works")
+        filters = self:newFilterState(data, url, AuthorPage.tabTitle("works"))
+        if filters then
+            filters.display = function(fetched)
+                -- A filtered shelf is not a cache entry: leaving the tab and
+                -- returning fetches the unfiltered first page again.
+                if self.author then self.author.cache.works = nil end
+                self:showAuthorRows("works", fetched, true, filters)
+            end
+        end
+    end
 
     local rows = AuthorPage.build{
         tab = tab_id,
@@ -2489,9 +2986,15 @@ function Ao3:showAuthorRows(tab_id, data, replace)
         on_listing = function(url, title)
             self:loadListing(BASE_URL .. url, title)
         end,
-        on_page = function(url) self:loadAuthorPage(tab_id, url) end,
+        on_page = function(url)
+            -- Paging an unfiltered shelf keeps its cache entry; a filtered
+            -- shelf carries its state through and stays out of the cache.
+            local active = filters and self:filterCount(filters) > 0 and filters or nil
+            self:loadAuthorPage(tab_id, self:filterUrl(url, filters, true), active)
+        end,
         work_row = function(work) return self:workRow(work) end,
     }
+    rows.ao3_filter_state = filters
 
     -- The masthead names the author and the strip shows the tab, so the title
     -- bar names the shelf and nothing else.
@@ -2506,7 +3009,7 @@ end
 -- Another page of the open shelf replaces that shelf's rows, so the masthead,
 -- the strip and the title bar stay put and Back still returns to the screen
 -- that opened the author page.
-function Ao3:loadAuthorPage(tab_id, url)
+function Ao3:loadAuthorPage(tab_id, url, filters)
     local author = self.author
     if not author then return end
     local parse, label
@@ -2523,8 +3026,10 @@ function Ao3:loadAuthorPage(tab_id, url)
         return
     end
     self:fetchPage(url, parse, label, function(data)
-        author.cache[tab_id] = data
-        self:showAuthorRows(tab_id, data, true)
+        -- Filtered pages stay out of the tab cache, so the filters really do
+        -- reset when the reader leaves this shelf.
+        if not filters then author.cache[tab_id] = data end
+        self:showAuthorRows(tab_id, data, true, filters)
     end)
 end
 
@@ -3503,6 +4008,10 @@ function Ao3:ensureMenu()
         -- per-row A/S/D shortcut boxes gives the title, author and summary
         -- the full width on every device (Menu still keeps page-turn keys).
         is_enable_shortcut = false,
+        -- Reserve the top-left slot for the listing filter button. The icon
+        -- itself is installed below, from the plugin's own SVG set; the name
+        -- here only tells TitleBar to build the button.
+        title_bar_left_icon = "filter",
         onMenuSelect = function(menu_self, item)
             if item.sub_item_table then
                 self:menuPush(menu_self, item.text, item.sub_item_table)
@@ -3554,6 +4063,55 @@ function Ao3:ensureMenu()
         end
     end
 
+    -- The listing filter button, opposite Close. TitleBar can only resolve
+    -- icons from KOReader's own set, so the button is built with the reserved
+    -- slot and then given the plugin's two funnel states: outline for a
+    -- listing with no filters, filled once at least one facet is chosen.
+    local filter_button = menu.title_bar and menu.title_bar.left_button
+    if filter_button then
+        -- Until a funnel is installed, keep the reserved button invisible.
+        if filter_button.image then filter_button.image.hide = true end
+        menu.ao3_filter_visible = false
+        local size = filter_button.width or filter_button.dimen and filter_button.dimen.w
+            or Screen:scaleBySize(24)
+        local function funnel(name)
+            local ok, widget = pcall(ImageWidget.new, ImageWidget, {
+                file = menu.ao3_icons_dir .. name,
+                width = size,
+                height = size,
+                alpha = true,
+            })
+            return ok and widget or nil
+        end
+        local off = funnel("filter.svg")
+        local on = funnel("filter-active.svg")
+        if off and on then
+            menu.ao3_filter_icons = { off = off, on = on }
+            menu.ao3_filter_button = filter_button
+            filter_button.image = off
+            filter_button.horizontal_group[2] = off
+            off.hide = true
+            menu.ao3_filter_count = function(state) return self:filterAppliedCount(state) end
+            menu.ao3_open_filters = function()
+                local state = menu.item_table and menu.item_table.ao3_filter_state
+                if state then self:showFilterRoot(state) end
+            end
+            -- Same tap-zone correction as Close, or the button would swallow
+            -- the top-left of the first work card (its symbol grid).
+            if type(filter_button.padding_bottom) == "number"
+                    and filter_button.padding_bottom > 0 then
+                local pad = filter_button.padding_bottom
+                filter_button.padding_bottom = 0
+                if filter_button.button and filter_button.button[3] then
+                    filter_button.button[3].width = 0
+                end
+                if filter_button.dimen then
+                    filter_button.dimen.h = math.max(0, filter_button.dimen.h - pad)
+                end
+            end
+        end
+    end
+
     -- Menu's own back logic pops `item_table_stack`; keep the title stack, the
     -- listing's page and the footer arrow in sync with it. Closing the last
     -- menu hands the screen back to KOReader, and some builds free the widget
@@ -3563,7 +4121,11 @@ function Ao3:ensureMenu()
         if not stack or #stack == 0 then
             return Menu.onClose(menu_self)
         end
+        local leaving = menu_self.item_table
         local ret = Menu.onClose(menu_self)
+        if leaving and leaving.ao3_filter_root then
+            self:resetPendingFilters(leaving.ao3_filter_root)
+        end
         menu_self.ao3_title = table.remove(menu_self.ao3_title_stack) or _("AO3")
         -- Menu:onClose reopens the parent table with switchItemTable and no
         -- itemnumber, which resets it to page 1. The page the parent was left

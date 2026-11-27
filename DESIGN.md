@@ -260,6 +260,12 @@ Icons are 24×24 vector strokes drawn at 26px, in the same weight as KOReader's 
 - **Style:** one native row: "Expanded tags:" at the left, **On** or **Off** in the 15px Slate right column. No heading, no description, no second control.
 - **Behaviour:** the tap stores the choice and the row redraws with its new value; the next listing follows it. The choice lives in `settings/ao3_prefs.lua`, so Log out does not reset it.
 
+### Filter Screen (work listings)
+- **Entry:** a funnel at the left end of the native title bar, opposite Close, and only while a work listing is on screen. It is an outline with no applied filters and filled once the listing carries some; it never takes list space. It is hidden on Home, Settings, work details, the author page without its Works shelf, Fandoms, Downloads and the account lists.
+- **Root:** two quiet group labels, **Include** and **Exclude**, then one native row per dimension the page offers, with its selected count in the right column. One action row closes the screen: outlined **Clear** beside the screen's solid **Apply filters** bar, or Apply alone when there is nothing to clear. Fourteen dimension rows, both labels and the action row fit one 600×800 page.
+- **Dimension:** the title bar names group and dimension ("Include · Fandom"). Each facet is a native row: its name at the left, its work count at the right, and KOReader's checkmark prefixed to the count when chosen, so the states line up in one column and a long tag name never swallows its mark. Rating include is single-select; the other lists are sets.
+- **Behaviour:** a tick is pending, not a request. Apply makes the one request and replaces the listing at page 1; paging keeps the applied set; Back out of the dialog drops pending ticks; leaving the listing clears everything.
+
 ### Section Headers (folded content)
 - **Style:** bold 19px Ink label at the left, a bold 21px Graphite "+" or "−" flush right; 2px above, 5px below.
 - **Behaviour:** the row's focus underline doubles as the rule between sections. Summary and Tags start folded so the page stays one screen of decisions.

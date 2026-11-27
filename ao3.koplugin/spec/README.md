@@ -43,6 +43,13 @@ The tests are offline:
   path that lets a tap on the box open it without opening the work.
 - `ao3_preferences_spec.lua` covers the reader-preferences file: defaults, a
   round-trip, a non-boolean value, and its separation from the session file.
+- `ao3_filters_spec.lua` covers the listing filter against
+  `fixtures/filters.html`, a realistic work page carrying AO3's
+  `form#work-filters` sidebar: facet ids, names, counts and radio/checkbox
+  controls; the include/exclude apply URL; pre-selected filters from a URL;
+  the dialog's rows and checkmarks; paging with filters; the funnel's
+  visibility and active state; the author Works tab; and the reset when the
+  listing is popped.
 - The report flow is also exercised through the UI: the home row, the
   editor, the log-consent dialog and the saved bundle.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and
