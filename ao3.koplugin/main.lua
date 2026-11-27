@@ -434,6 +434,7 @@ local Preferences = dofile((MAIN_SOURCE:gsub("main%.lua$", "preferences.lua")))
 local SearchHistory = dofile((MAIN_SOURCE:gsub("main%.lua$", "searchhistory.lua")))
 local Uikit = dofile((MAIN_SOURCE:gsub("main%.lua$", "uikit.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
+local WorkUpdate = dofile((MAIN_SOURCE:gsub("main%.lua$", "workupdate.lua")))
 BugReport = dofile((MAIN_SOURCE:gsub("main%.lua$", "bugreport.lua")))
 Ao3.BugReport = BugReport
 Ao3.Updater = Updater
@@ -3869,6 +3870,18 @@ function Ao3:showWorkPage(work, replace, focus)
 
     local font_size = (self.menu and self.menu.font_size) or 20
     local width = Screen:getWidth() - 2 * Size.padding.fullscreen
+    -- The saved copy is already on disk, so its chapter stat can be compared
+    -- with the live page without a request. `update` is set only when the
+    -- live page really has something new; an up-to-date save looks exactly
+    -- as it did before.
+    local cached = findCachedWork(getDownloadDir(), work.id)
+    local update
+    if cached then
+        local old_current, old_total = WorkUpdate.cachedChapters(cached)
+        local result = WorkUpdate.compare(
+            { current = old_current, total = old_total }, work.chapters)
+        if WorkUpdate.isNew(result) then update = result end
+    end
     local rows = WorkPage.build{
         work = work,
         width = width,
@@ -3876,7 +3889,8 @@ function Ao3:showWorkPage(work, replace, focus)
         -- A menu row taller than a page is clipped, so the folded text is
         -- bounded and the remainder opens in a scrollable TextViewer.
         body_max_height = math.floor(Screen:getHeight() * 0.44),
-        cached = findCachedWork(getDownloadDir(), work.id),
+        cached = cached,
+        update = update,
         state = state,
         on_read = function() self:readWork(work.id, work.title) end,
         on_refresh = function() self:readWork(work.id, work.title, true) end,
@@ -5466,6 +5480,55 @@ function Ao3:findFandomDialog(category, letter, replace, current)
     dialog:onShowKeyboard()
 end
 
+-- A check is one work-page load and nothing else: the live chapter stat is
+-- compared with the saved copy's, and the reader decides whether to replace
+-- it. No retry, no polling, no automatic download.
+local function updateCheckDialog(text, on_ok)
+    -- Newer KOReader builds ship a titled ConfirmDialog; the reader this
+    -- plugin targets has ConfirmBox. Prefer the titled dialog when it exists
+    -- rather than requiring a widget the build may not have.
+    local ok, ConfirmDialog = pcall(require, "ui/widget/confirmdialog")
+    if ok and type(ConfirmDialog) == "table" then
+        return ConfirmDialog:new{
+            title = _("Update check"),
+            text = text,
+            ok_text = _("Get new chapters"),
+            cancel_text = _("Not now"),
+            ok_callback = on_ok,
+        }
+    end
+    return ConfirmBox:new{
+        -- ConfirmBox has no title field; the heading opens the message so the
+        -- two-button box still says what it is.
+        text = _("Update check") .. "\n\n" .. text,
+        ok_text = _("Get new chapters"),
+        cancel_text = _("Not now"),
+        ok_callback = on_ok,
+    }
+end
+
+function Ao3:checkWorkUpdates(item)
+    self:fetchPage(Account.workUrl(item.id), function(html)
+        return self:parseWorkPage(html, item.id)
+    end, _("Checking for updates…"), function(work)
+        local old_current, old_total = WorkUpdate.cachedChapters(item.path)
+        local result = WorkUpdate.compare(
+            { current = old_current, total = old_total }, work.chapters)
+        -- Up to date, or a count that cannot be read: either way there is
+        -- nothing to offer, so say so and stop.
+        if not WorkUpdate.isNew(result) then
+            UIManager:show(InfoMessage:new{
+                text = WorkUpdate.message(result),
+                timeout = 3,
+            })
+            return
+        end
+        UIManager:show(updateCheckDialog(WorkUpdate.message(result), function()
+            self:readWork(item.id, item.title, true)
+        end))
+    end)
+end
+
 function Ao3:downloadItemActions(item)
     local dialog
     local buttons = {
@@ -5489,6 +5552,21 @@ function Ao3:downloadItemActions(item)
                 end,
             },
         }
+        -- A saved work in progress can grow new chapters. The row appears
+        -- only for a WIP: a one-shot can never change, and reading the local
+        -- preface costs no request.
+        local current, total = WorkUpdate.cachedChapters(item.path)
+        if WorkUpdate.isWip{ current = current, total = total } then
+            buttons[#buttons + 1] = {
+                {
+                    text = _("Check for updates"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        self:checkWorkUpdates(item)
+                    end,
+                },
+            }
+        end
         buttons[#buttons + 1] = {
             {
                 text = _("Refresh from AO3"),

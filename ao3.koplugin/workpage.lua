@@ -45,6 +45,12 @@ local function hasText(s)
     return s ~= nil and s ~= ""
 end
 
+-- "3/7", or "3/?" when the work has no set end. Used only for the saved/live
+-- pair in the update row.
+local function chapterPair(current, total)
+    return T(_("%1/%2"), current or "?", total or "?")
+end
+
 -- Title, author, fandoms. The title wraps: AO3 titles are long, and a
 -- truncated title on a details page is worse than no title bar at all.
 function WorkPage.hero(work, width, font_size)
@@ -372,6 +378,20 @@ function WorkPage.build(o)
     local facts = WorkPage.facts(work, width, font_size)
     if facts then
         rows[#rows + 1] = { ao3_static = Uikit.padded(facts), role = "facts" }
+    end
+
+    -- A saved copy that has fallen behind is one tap from a refresh. The row
+    -- names the gap and never appears for an up-to-date save.
+    if o.update then
+        local update = o.update
+        rows[#rows + 1] = {
+            text = update.added > 0 and T(_("%1 new chapters"), update.added)
+                or _("Work complete"),
+            mandatory = chapterPair(update.old_current, update.old_total)
+                .. " → " .. chapterPair(update.new_current, update.new_total),
+            action = o.on_refresh,
+            role = "update",
+        }
     end
 
     -- Account actions sit below the metadata so Read keeps the top of the
