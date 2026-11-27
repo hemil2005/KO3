@@ -55,6 +55,7 @@ local T = ffiutil.template
 
 -- Assigned after the module files are loaded, but referenced by the network
 -- helpers defined before it.
+local Autocomplete
 local BugReport
 
 local BASE_URL = "https://archiveofourown.org"
@@ -393,6 +394,30 @@ function Ao3:fetchHtml(url, timeout)
     return body, err
 end
 
+-- A JSON GET beside fetchHtml, for AO3's autocomplete: same Firefox headers,
+-- `Accept: application/json`, identity encoding (a gzipped answer is inflated
+-- if one arrives anyway), and no 403 retry because a suggestion is never worth
+-- a second request. Non-200 and unusable bodies return nil quietly.
+function Ao3:getJson(url, timeout)
+    local body, err, code, headers = self:httpRequest(url, {
+        headers = {
+            ["Accept"] = "application/json",
+            ["Accept-Encoding"] = "identity",
+            ["X-Requested-With"] = "XMLHttpRequest",
+        },
+        retry_on_403 = false,
+    }, timeout)
+    if not body then return nil, err, code end
+    if code ~= 200 then
+        return nil, T(_("AO3 answered HTTP %1."), tostring(code)), code
+    end
+    local decoded = Autocomplete.decode(body, headers)
+    if not decoded then
+        return nil, _("AO3 sent a response that could not be read."), code
+    end
+    return decoded, nil, code
+end
+
 -- ---------------------------------------------------------------------------
 -- Listing parser
 -- ---------------------------------------------------------------------------
@@ -401,6 +426,7 @@ local AuthorPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "authorpage.lua")))
 local WorkPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "workpage.lua")))
 local HomePage = dofile((MAIN_SOURCE:gsub("main%.lua$", "homepage.lua")))
 local AccountPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "accountpage.lua")))
+Autocomplete = dofile((MAIN_SOURCE:gsub("main%.lua$", "autocomplete.lua")))
 local FilterPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "filterpage.lua")))
 local SettingsPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "settingspage.lua")))
 local Preferences = dofile((MAIN_SOURCE:gsub("main%.lua$", "preferences.lua")))
@@ -428,6 +454,7 @@ local FILTER_DIMENSIONS = {
     { key = "freeform", label = _("Additional Tags") },
 }
 Ao3.FILTER_DIMENSIONS = FILTER_DIMENSIONS
+Ao3.Autocomplete = Autocomplete
 
 -- AO3 renders the filter sidebar as `form#work-filters` in the same page as
 -- the results. Every usable facet is one `input` whose name carries its
@@ -437,8 +464,9 @@ Ao3.FILTER_DIMENSIONS = FILTER_DIMENSIONS
 --
 -- The human name and the work count live in the row's label ("Harry Potter -
 -- J. K. Rowling (30)"). The free-text "Other tags" boxes and the sort controls
--- use `work_search[...]` and are deliberately ignored: this round exposes the
--- facets the page already offers, nothing typed.
+-- use `work_search[...]` and are ignored here: a typed tag comes from AO3's
+-- autocomplete instead (see Autocomplete and showTagAutocomplete), because a
+-- page's embedded sidebar only names the top facets per dimension.
 function Ao3:parseFilterFacets(root)
     local facets = {}
     local form = first(root:select("form#work-filters"))
@@ -2154,10 +2182,29 @@ end
 -- facets live on the listing's row table; only Apply builds a URL and loads a
 -- page, and AO3's paging links are re-built from the same choice.
 
+-- The filter params: the facet ids and the two typed-name lists. A typed tag
+-- is a name AO3 resolves itself, so it lives beside the ids rather than under
+-- an `<type>_ids` key.
+local function isTypedFilterKey(key)
+    local decoded = util.urlDecode(key or ""):gsub("%+", " ")
+    return decoded == "work_search[other_tag_names]"
+        or decoded == "work_search[excluded_tag_names]"
+end
+
 local function isFilterParam(key)
     key = util.urlDecode(key or "")
     return key:match("^include_work_search%[") ~= nil
         or key:match("^exclude_work_search%[") ~= nil
+        or isTypedFilterKey(key)
+end
+
+local function splitTagNames(value)
+    local names = {}
+    for name in (value or ""):gmatch("[^,]+") do
+        name = trim((name:gsub("%+", " ")))
+        if name ~= "" then names[#names + 1] = name end
+    end
+    return names
 end
 
 local function urlParts(url)
@@ -2188,39 +2235,48 @@ function Ao3:filterUrl(url, state, keep_page)
     end
 
     local chosen = state and state.selected or { include = {}, exclude = {} }
-    local dimensions = self:filterDimensions(state and state.facets)
-    local covered = {}
-    for _, dimension in ipairs(dimensions) do covered[dimension.key] = true end
+    local dimensions = self:filterDimensions(state and state.facets, chosen)
 
-    -- A filter adopted from a URL can name a dimension this page does not
-    -- offer; keep it rather than silently dropping the reader's choice.
-    local extra = {}
-    for _, action in ipairs({ "include", "exclude" }) do
-        for kind in pairs(chosen[action] or {}) do
-            if not covered[kind] then extra[kind] = true end
-        end
-    end
-    local extra_keys = {}
-    for kind in pairs(extra) do extra_keys[#extra_keys + 1] = kind end
-    table.sort(extra_keys)
-    for _, kind in ipairs(extra_keys) do
-        dimensions[#dimensions + 1] = { key = kind }
-    end
+    -- Typed names collect per side, whatever dimension the reader typed them
+    -- under: AO3 resolves other_tag_names/excluded_tag_names without a type.
+    local named = { include = {}, exclude = {} }
 
     for _, dimension in ipairs(dimensions) do
         for _, action in ipairs({ "include", "exclude" }) do
             local ids = chosen[action] and chosen[action][dimension.key]
             if ids then
-                local list = {}
-                for id in pairs(ids) do list[#list + 1] = id end
-                table.sort(list, function(a, b)
+                local numeric = {}
+                for id, facet in pairs(ids) do
+                    if facet.typed then
+                        named[action][facet.name or id] = true
+                    else
+                        numeric[#numeric + 1] = id
+                    end
+                end
+                table.sort(numeric, function(a, b)
                     return (tonumber(a) or 0) < (tonumber(b) or 0)
                 end)
-                for _, id in ipairs(list) do
+                for _, id in ipairs(numeric) do
                     out[#out + 1] = util.urlEncode(action .. "_work_search["
                         .. dimension.key .. "_ids][]") .. "=" .. util.urlEncode(id)
                 end
             end
+        end
+    end
+
+    for _, action in ipairs({ "include", "exclude" }) do
+        local list = {}
+        for name in pairs(named[action]) do list[#list + 1] = name end
+        table.sort(list)
+        if #list > 0 then
+            local quoted = {}
+            for _, name in ipairs(list) do
+                quoted[#quoted + 1] = util.urlEncode(name)
+            end
+            local key = action == "include" and "work_search[other_tag_names]"
+                or "work_search[excluded_tag_names]"
+            out[#out + 1] = util.urlEncode(key) .. "="
+                .. table.concat(quoted, ",")
         end
     end
 
@@ -2232,38 +2288,62 @@ end
 
 -- The dimensions present in this page's facets, AO3's order first and any
 -- unfamiliar dimension after it, so a new AO3 filter is never unreachable.
-function Ao3:filterDimensions(facets)
-    local dimensions, known = {}, {}
+-- The four autocompletable dimensions are always present, even when the page
+-- carries no facet for them: that row is the way to any tag AO3's top-N list
+-- left out. Kinds that exist only in the pending selection are appended too, so
+-- a name adopted from a pasted URL keeps its row and its Remove.
+function Ao3:filterDimensions(facets, selected)
+    local dimensions, present = {}, {}
+    local known = {}
+    for _, dimension in ipairs(FILTER_DIMENSIONS) do known[dimension.key] = dimension end
+
+    local function add(key, entry)
+        local known_dimension = known[key]
+        local label = known_dimension and known_dimension.label
+            or (key == "tag" and _("Tags")
+                or (key:gsub("_", " "):gsub("^%l", string.upper)))
+        dimensions[#dimensions + 1] = {
+            key = key,
+            label = label,
+            single = known_dimension and known_dimension.single,
+            include = (entry and entry.include) or {},
+            exclude = (entry and entry.exclude) or {},
+        }
+        present[key] = true
+    end
+
     for _, dimension in ipairs(FILTER_DIMENSIONS) do
-        known[dimension.key] = true
         local entry = facets and facets[dimension.key]
-        if entry and (#(entry.include or {}) > 0 or #(entry.exclude or {}) > 0) then
-            dimensions[#dimensions + 1] = {
-                key = dimension.key,
-                label = dimension.label,
-                single = dimension.single,
-                include = entry.include or {},
-                exclude = entry.exclude or {},
-            }
+        local populated = entry
+            and (#(entry.include or {}) > 0 or #(entry.exclude or {}) > 0)
+        if populated or Autocomplete.isType(dimension.key) then
+            add(dimension.key, entry)
         end
     end
 
     local extra = {}
     for key in pairs(facets or {}) do
-        if not known[key] then extra[#extra + 1] = key end
+        if not present[key] then extra[#extra + 1] = key end
     end
     table.sort(extra)
     for _, key in ipairs(extra) do
         local entry = facets[key]
         if #(entry.include or {}) > 0 or #(entry.exclude or {}) > 0 then
-            dimensions[#dimensions + 1] = {
-                key = key,
-                label = (key:gsub("_", " "):gsub("^%l", string.upper)),
-                include = entry.include or {},
-                exclude = entry.exclude or {},
-            }
+            add(key, entry)
         end
     end
+
+    local chosen = {}
+    for _, action in ipairs({ "include", "exclude" }) do
+        for key in pairs(selected and selected[action] or {}) do
+            if not present[key] then chosen[key] = true end
+        end
+    end
+    local chosen_keys = {}
+    for key in pairs(chosen) do chosen_keys[#chosen_keys + 1] = key end
+    table.sort(chosen_keys)
+    for _, key in ipairs(chosen_keys) do add(key) end
+
     return dimensions
 end
 
@@ -2279,24 +2359,46 @@ local function copyFilterSelection(selected)
 end
 
 -- A pasted or previously filtered URL starts with its boxes already ticked:
--- read the ids back into the selection and find their names in the page.
+-- read the ids back into the selection and find their names in the page. The
+-- two typed-name lists are adopted as names under a "tag" bucket, because AO3
+-- does not say which dimension each one came from.
 function Ao3:adoptUrlFilters(state, url)
     local _, query = urlParts(url)
     for pair in (query or ""):gmatch("[^&]+") do
         local raw_key, raw_value = pair:match("^([^=]*)=?(.*)$")
-        local prefix, kind = util.urlDecode(raw_key or ""):match(
-            "^(%a+)_work_search%[([%w_]+)_ids%]%[%]$")
-        local action = (prefix == "include" or prefix == "exclude") and prefix or nil
-        local id = util.urlDecode(raw_value or "")
-        if action and kind and id ~= "" then
-            local facet
-            local entry = state.facets[kind]
-            for _, candidate in ipairs(entry and entry[action] or {}) do
-                if candidate.id == id then facet = candidate break end
+        local decoded_key = util.urlDecode(raw_key or ""):gsub("%+", " ")
+        local action
+        if decoded_key == "work_search[other_tag_names]" then
+            action = "include"
+        elseif decoded_key == "work_search[excluded_tag_names]" then
+            action = "exclude"
+        end
+        if action then
+            for _, name in ipairs(splitTagNames(util.urlDecode(raw_value or ""))) do
+                state.selected[action].tag = state.selected[action].tag or {}
+                state.selected[action].tag[name] = {
+                    id = name,
+                    name = name,
+                    type = "tag",
+                    action = action,
+                    typed = true,
+                }
             end
-            facet = facet or { id = id, name = id, type = kind, action = action }
-            state.selected[action][kind] = state.selected[action][kind] or {}
-            state.selected[action][kind][id] = facet
+        else
+            local prefix, kind = decoded_key:match(
+                "^(%a+)_work_search%[([%w_]+)_ids%]%[%]$")
+            action = (prefix == "include" or prefix == "exclude") and prefix or nil
+            local id = util.urlDecode(raw_value or "")
+            if action and kind and id ~= "" then
+                local facet
+                local entry = state.facets[kind]
+                for _, candidate in ipairs(entry and entry[action] or {}) do
+                    if candidate.id == id then facet = candidate break end
+                end
+                facet = facet or { id = id, name = id, type = kind, action = action }
+                state.selected[action][kind] = state.selected[action][kind] or {}
+                state.selected[action][kind][id] = facet
+            end
         end
     end
 end
@@ -2364,7 +2466,8 @@ function Ao3:resetPendingFilters(state)
 end
 
 function Ao3:filterDimension(state, kind)
-    for _, dimension in ipairs(self:filterDimensions(state and state.facets)) do
+    for _, dimension in ipairs(self:filterDimensions(state and state.facets,
+            state and state.selected)) do
         if dimension.key == kind then return dimension end
     end
 end
@@ -2386,12 +2489,90 @@ function Ao3:toggleFacet(state, facet)
     state.selected[facet.action][facet.type] = next(chosen) and chosen or nil
 end
 
+-- Add a canonical name chosen from the autocomplete. A name the page's own
+-- sidebar already lists selects that facet (by id) instead, so one tag never
+-- sits in the selection twice. Typed names are marked so filterUrl knows they
+-- travel as names and not as `<type>_ids`.
+function Ao3:addTypedTag(state, action, kind, name)
+    name = trim(name or "")
+    if name == "" then return false end
+    local lowered = name:lower()
+
+    for _, picks in pairs(state.selected[action] or {}) do
+        for _, facet in pairs(picks) do
+            if facet.typed and (facet.name or ""):lower() == lowered then
+                return true
+            end
+        end
+    end
+
+    local dimension = self:filterDimension(state, kind)
+    local chosen = state.selected[action][kind] or {}
+    for _, facet in ipairs(dimension and dimension[action] or {}) do
+        if (facet.name or ""):lower() == lowered then
+            if not chosen[facet.id] then
+                if action == "include"
+                        and (facet.control == "radio" or dimension.single) then
+                    chosen = {}
+                end
+                chosen[facet.id] = facet
+                state.selected[action][kind] = chosen
+            end
+            return true
+        end
+    end
+
+    chosen[name] = {
+        id = name,
+        name = name,
+        type = kind,
+        action = action,
+        typed = true,
+    }
+    state.selected[action][kind] = chosen
+    return true
+end
+
+-- The rows of one dimension page: AO3's embedded facets first, then the typed
+-- names pending on this side, without counts and in name order. A typed name
+-- that AO3's fresh facet list also happens to carry is shown once, as the typed
+-- row, so its tick and its Remove both keep working. Typed rows come from the
+-- selection, so removing one removes its row.
+function Ao3:filterTagFacets(state, action, kind)
+    local dimension = self:filterDimension(state, kind)
+    local picked = state.selected[action][kind] or {}
+    local typed_by_name = {}
+    for id, facet in pairs(picked) do
+        if facet.typed then
+            typed_by_name[(facet.name or id):lower()] = facet
+        end
+    end
+
+    local facets, seen = {}, {}
+    for _, facet in ipairs(dimension and dimension[action] or {}) do
+        local name = (facet.name or ""):lower()
+        if not typed_by_name[name] then
+            facets[#facets + 1] = facet
+            seen[name] = true
+        end
+    end
+    local typed = {}
+    for name, facet in pairs(typed_by_name) do
+        if not seen[name] then typed[#typed + 1] = facet end
+    end
+    table.sort(typed, function(a, b)
+        return (a.name or a.id) < (b.name or b.id)
+    end)
+    for _, facet in ipairs(typed) do facets[#facets + 1] = facet end
+    return facets
+end
+
 function Ao3:filterRootRows(state)
     local menu = self.menu
     local font_size = (menu and menu.font_size) or 19
     local width = Screen:getWidth() - 2 * Size.padding.fullscreen
     return FilterPage.build_root{
-        dimensions = self:filterDimensions(state.facets),
+        dimensions = self:filterDimensions(state.facets, state.selected),
         width = width,
         font_size = font_size,
         total = self:filterCount(state),
@@ -2412,10 +2593,16 @@ end
 
 function Ao3:filterFacetRows(state, action, kind)
     local dimension = self:filterDimension(state, kind)
-    local facets = dimension and dimension[action] or {}
+    if not dimension then return {} end
+    local facets = self:filterTagFacets(state, action, kind)
     return FilterPage.build_dimension{
         facets = facets,
         selected = state.selected[action][kind] or {},
+        -- Only the four dimensions with an autocomplete route get the typed
+        -- row; ratings, warnings and categories stay their fixed lists.
+        on_add_tag = Autocomplete.isType(kind) and function()
+            self:showTagAutocomplete(state, action, kind)
+        end or nil,
         on_toggle = function(index)
             local facet = facets[index]
             if not facet then return end
@@ -2451,6 +2638,199 @@ function Ao3:clearFilters(state)
     local rows = self:filterRootRows(state)
     rows.ao3_filter_root = state
     self:replaceRows(FilterPage.ROOT_TITLE, rows)
+end
+
+-- ---------------------------------------------------------------------------
+-- Typed tags
+-- ---------------------------------------------------------------------------
+--
+-- AO3's sidebar only lists the top facets per dimension, so the four tag
+-- dimensions also take a typed name from /autocomplete/<type>. Typing debounces
+-- one request; a tap on a suggestion is a pure state change, and only Apply
+-- fetches a listing.
+
+-- A quiet back-off after any failure. A 429/403 already parks httpRequest for
+-- its own interval; this keeps the dialog from even asking again on the next
+-- keystroke, so a refused suggestion is never retried.
+Ao3.TAG_SUGGEST_BACKOFF = 60
+
+function Ao3:newTagSuggestionToken()
+    self.tag_suggest_token = (self.tag_suggest_token or 0) + 1
+    return self.tag_suggest_token
+end
+
+-- One request, one answer. `token` is the generation the dialog is showing: if
+-- the reader typed again while the socket was busy, the older answer is
+-- dropped before it can repaint a stale list.
+function Ao3:tagSuggestions(kind, term, token)
+    if not Autocomplete.isType(kind) then return nil, "unsupported" end
+    term = trim(term or "")
+    if #term < Autocomplete.MIN_CHARS then return nil, "short" end
+    if token and token ~= self.tag_suggest_token then return nil, "stale" end
+
+    local now = socket.gettime()
+    if self.tag_suggest_off_until and now < self.tag_suggest_off_until then
+        return nil, "unavailable"
+    end
+
+    local url = Autocomplete.url(BASE_URL, kind, term)
+    local body, err, code = self:getJson(url, 12)
+    BugReport.log("http",
+        T("%1 -> %2", BugReport.sanitizeUrl(url), tostring(code)))
+
+    if token and token ~= self.tag_suggest_token then return nil, "stale" end
+    if not body then
+        self.tag_suggest_off_until = socket.gettime() + Ao3.TAG_SUGGEST_BACKOFF
+        return nil, err or "unavailable"
+    end
+    local names = Autocomplete.parse(body)
+    if not names then
+        self.tag_suggest_off_until = socket.gettime() + Ao3.TAG_SUGGEST_BACKOFF
+        return nil, "malformed"
+    end
+    self.tag_suggest_off_until = nil
+    return names
+end
+
+-- Suggestions are optional: offline is an answer, not an error the reader has
+-- to dismiss, and no request is made when there is no connection.
+function Ao3:fetchTagSuggestions(kind, term, token, on_done)
+    if NetworkMgr.isConnected and not NetworkMgr:isConnected() then
+        if on_done then on_done(nil, "offline", token) end
+        return
+    end
+    local names, err = self:tagSuggestions(kind, term, token)
+    if on_done then on_done(names, err, token) end
+end
+
+-- Debounce typing: the last keystroke owns the timer, so a burst of typing
+-- makes one request, not one per character.
+function Ao3:scheduleTagSuggestions(kind, term, token, on_done)
+    if self.tag_suggest_timer then
+        UIManager:unschedule(self.tag_suggest_timer)
+        self.tag_suggest_timer = nil
+    end
+    self.tag_suggest_timer = function()
+        self.tag_suggest_timer = nil
+        self:fetchTagSuggestions(kind, term, token, on_done)
+    end
+    UIManager:scheduleIn(Autocomplete.DELAY, self.tag_suggest_timer)
+end
+
+-- The native input and its fixed-height suggestion window. The window is added
+-- before the dialog is shown so its height is part of the layout; filling it
+-- later only replaces rows inside, it never grows the dialog off the screen.
+-- `dialog.ao3_tag_refresh` exposes the same strike path to a capture/test.
+function Ao3:buildTagAutocomplete(state, action, kind)
+    local dimension = self:filterDimension(state, kind)
+    if not dimension or not Autocomplete.isType(kind) then return nil end
+
+    local menu = self.menu
+    local font_size = (menu and menu.font_size) or 19
+    local width = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.8)
+    local panel_width = width - 2 * Size.padding.fullscreen
+    local closed = false
+
+    local dialog
+    local panel = FilterPage.suggestionArea{
+        width = panel_width,
+        font_size = font_size,
+    }
+
+    local function showHint(hint)
+        FilterPage.fillSuggestions(panel, nil, {
+            width = panel_width,
+            font_size = font_size,
+            hint = hint,
+        })
+        if dialog then UIManager:setDirty(dialog, "ui") end
+    end
+
+    local function add(name)
+        name = trim(name or "")
+        if name == "" then return end
+        self:addTypedTag(state, action, kind, name)
+        closed = true
+        UIManager:close(dialog)
+        self:replaceRows(FilterPage.dimensionTitle(action, dimension.label),
+            self:filterFacetRows(state, action, kind))
+    end
+
+    local function refresh()
+        local token = self:newTagSuggestionToken()
+        local text = trim(dialog:getInputText())
+        if #text < Autocomplete.MIN_CHARS then
+            showHint(_("Type at least two characters…"))
+            return
+        end
+        showHint(_("Looking for tags…"))
+        self:scheduleTagSuggestions(kind, text, token, function(names, err)
+            if closed or token ~= self.tag_suggest_token then return end
+            if not names then
+                showHint(err == "offline"
+                    and _("Offline. Type the tag and tap Add.")
+                    or _("AO3 couldn't suggest tags. Type the tag and tap Add."))
+                return
+            end
+            if #names == 0 then
+                showHint(_("No matching tags."))
+                return
+            end
+            FilterPage.fillSuggestions(panel, names, {
+                width = panel_width,
+                font_size = font_size,
+                on_pick = add,
+                show_parent = dialog,
+            })
+            UIManager:setDirty(dialog, "ui")
+        end)
+    end
+
+    dialog = InputDialog:new{
+        title = _("Add a tag"),
+        description = FilterPage.dimensionTitle(action, dimension.label),
+        input_hint = _("Tag name"),
+        input_face = Font:getFace("cfont", font_size),
+        width = width,
+        text_height = math.floor(font_size * 2 + 0.5),
+        strike_callback = function()
+            if dialog then refresh() end
+        end,
+        buttons = {
+            {
+                {
+                    text = _("Cancel"),
+                    id = "close",
+                    callback = function() UIManager:close(dialog) end,
+                },
+                {
+                    text = _("Add"),
+                    is_enter_default = true,
+                    callback = function() add(dialog:getInputText()) end,
+                },
+            },
+        },
+    }
+    dialog:addWidget(panel)
+    dialog.ao3_tag_refresh = refresh
+
+    local base_close = dialog.onCloseWidget
+    dialog.onCloseWidget = function(widget)
+        closed = true
+        if self.tag_suggest_timer then
+            UIManager:unschedule(self.tag_suggest_timer)
+            self.tag_suggest_timer = nil
+        end
+        if base_close then return base_close(widget) end
+    end
+    return dialog
+end
+
+function Ao3:showTagAutocomplete(state, action, kind)
+    local dialog = self:buildTagAutocomplete(state, action, kind)
+    if not dialog then return end
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
 end
 
 -- Apply is the only network action in the dialog: it closes the filter

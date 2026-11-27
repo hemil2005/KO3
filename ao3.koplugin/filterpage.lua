@@ -14,11 +14,14 @@ screen exists for.
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
+local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
+local ScrollableContainer = require("ui/widget/container/scrollablecontainer")
 local Size = require("ui/size")
+local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
@@ -71,12 +74,6 @@ function FilterPage.build_root(o)
     local selected_plural = _("%1 selected")
 
     local function addGroup(action, top)
-        local any = false
-        for _, dimension in ipairs(o.dimensions) do
-            if #dimension[action] > 0 then any = true break end
-        end
-        if not any then return end
-
         rows[#rows + 1] = {
             ao3_static = Uikit.padded(FilterPage.section_label(
                 group_name[action], o.width, o.font_size, top)),
@@ -85,20 +82,18 @@ function FilterPage.build_root(o)
             keep_with_next = true,
         }
         for _, dimension in ipairs(o.dimensions) do
-            if #dimension[action] > 0 then
-                local count = o.selected_count(action, dimension.key)
-                rows[#rows + 1] = {
-                    text = dimension.label,
-                    mandatory = count == 1 and selected_singular
-                        or (count > 1 and T(selected_plural, count) or nil),
-                    action = function()
-                        o.on_dimension(action, dimension.key)
-                    end,
-                    role = "filter_dimension",
-                    ao3_filter_action = action,
-                    ao3_filter_type = dimension.key,
-                }
-            end
+            local count = o.selected_count(action, dimension.key)
+            rows[#rows + 1] = {
+                text = dimension.label,
+                mandatory = count == 1 and selected_singular
+                    or (count > 1 and T(selected_plural, count) or nil),
+                action = function()
+                    o.on_dimension(action, dimension.key)
+                end,
+                role = "filter_dimension",
+                ao3_filter_action = action,
+                ao3_filter_type = dimension.key,
+            }
         end
     end
 
@@ -136,7 +131,9 @@ function FilterPage.build_root(o)
 end
 
 -- One dimension's facets. The native title bar names the group and dimension
--- ("Include · Fandom"), so the rows can be nothing but names and counts.
+-- ("Include · Fandom"), so the rows can be nothing but names and counts. The
+-- last row opens the typed autocomplete; only the four tag dimensions pass
+-- `on_add_tag`.
 function FilterPage.build_dimension(o)
     local rows = {}
     for index, facet in ipairs(o.facets) do
@@ -149,12 +146,88 @@ function FilterPage.build_dimension(o)
             end,
             role = "filter_facet",
             ao3_facet = facet,
+            ao3_typed = facet.typed or nil,
+        }
+    end
+    if o.on_add_tag then
+        rows[#rows + 1] = {
+            text = _("Search for a tag…"),
+            action = o.on_add_tag,
+            role = "filter_add_tag",
         }
     end
     if #rows == 0 then
         rows[1] = { text = _("No options on this page."), role = "filter_empty" }
     end
     return rows
+end
+
+-- Rows inside the typed-tag dialog. Same left inset and ink as a menu row,
+-- with a fixed height so the suggestion window keeps its size whatever the
+-- names are.
+local function suggestionTextRow(widget, o)
+    local height = math.floor(o.font_size * 2 + 0.5)
+    local content = VerticalGroup:new{ align = "left" }
+    local top = math.floor((height - widget:getSize().h) / 2)
+    if top > 0 then content[#content + 1] = VerticalSpan:new{ width = top } end
+    content[#content + 1] = Uikit.padded(widget)
+    local row = LeftContainer:new{
+        dimen = Geom:new{ w = o.width, h = height },
+        content,
+    }
+    row.show_parent = o.show_parent
+    return row
+end
+
+function FilterPage.suggestionHint(text, o)
+    return suggestionTextRow(Uikit.label(text, o.width - 2 * Size.padding.fullscreen,
+        o.font_size), o)
+end
+
+-- A fixed-height window into the live suggestions. It is added to the input
+-- dialog before it is shown, so ten matches can never grow the dialog off the
+-- screen: the extra rows scroll under the four visible ones.
+function FilterPage.suggestionArea(o)
+    local height = math.floor(o.font_size * 2 + 0.5)
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = FilterPage.suggestionHint(_("Type at least two characters…"), o)
+    local panel = ScrollableContainer:new{
+        dimen = Geom:new{ w = o.width, h = height * 4 },
+        scroll_bar_width = 0,
+        group,
+    }
+    panel.ao3_group = group
+    return panel
+end
+
+-- Replace the window's rows. `names` nil means "no list": show `o.hint` and
+-- keep the panel's height. A name row is a tap target that hands the canonical
+-- name to `o.on_pick`; nothing here talks to the network.
+function FilterPage.fillSuggestions(panel, names, o)
+    local group = panel.ao3_group
+    for index = #group, 1, -1 do group[index] = nil end
+
+    if not names or #names == 0 then
+        group[#group + 1] = FilterPage.suggestionHint(o.hint or "", o)
+    else
+        for _, name in ipairs(names) do
+            local text = TextWidget:new{
+                text = name,
+                face = Font:getFace("cfont", o.font_size),
+                max_width = o.width - 2 * Size.padding.fullscreen,
+                fgcolor = Blitbuffer.COLOR_BLACK,
+            }
+            local row = suggestionTextRow(text, o)
+            local area = Uikit.tapArea(row, o.width,
+                math.floor(o.font_size * 2 + 0.5), function()
+                    if o.on_pick then o.on_pick(name) end
+                end)
+            area.show_parent = o.show_parent
+            group[#group + 1] = area
+        end
+    end
+    -- The child size changed, so the window has to measure and crop it again.
+    panel:reset()
 end
 
 function FilterPage.groupTitle(action)
