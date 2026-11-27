@@ -49,6 +49,8 @@ details captured from a live work.
 | ![Filter button on a work listing](screenshots/46-work-filter-button.png) | ![Filter dialog with Include and Exclude groups](screenshots/47-work-filter-dialog.png) |
 | ![Typed tag search with live AO3 suggestions](screenshots/50-additional-tags.png) | ![Bookmark listing with the filter funnel](screenshots/51-bookmark-filters.png) |
 | ![Bookmark filter dialog with Bookmarker's Tags](screenshots/52-bookmark-filter-dialog.png) | ![Downloads narrowed by its local filter](screenshots/53-downloads-filter.png) |
+| ![A search filtered by AO3's fixed search dimensions](screenshots/54-search-filter.png) | ![The same search narrowed to Mature, complete works](screenshots/55-search-filter-applied.png) |
+| ![Bookmarker's Tags with a typed tag row](screenshots/56-bookmarker-tags.png) | ![Live bookmarker-tag suggestions](screenshots/57-bookmarker-tag-search.png) |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
