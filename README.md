@@ -12,8 +12,9 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
 - Optional kudos, bookmark, subscribe and Marked for Later from a work page
 - Filter a listing by the facets AO3 already puts on the page — rating,
   warnings, categories, fandoms, characters, relationships and tags — with
-  include and exclude groups. The filters apply on tap, page with you, and
-  reset when you leave the listing
+  include and exclude groups, plus a typed tag search for any fandom, character,
+  relationship or additional tag AO3's short lists leave out. The filters apply
+  on tap, page with you, and reset when you leave the listing
 - No images
 - No comments, no work posting, no third-party service
 - One page fetched per tap; only opened works are saved
@@ -42,6 +43,7 @@ details captured from a live work.
 | ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
 | ![Tag box open in the list](screenshots/40-work-list-tags.png) | ![Settings](screenshots/41-settings.png) |
 | ![Filter button on a work listing](screenshots/46-work-filter-button.png) | ![Filter dialog with Include and Exclude groups](screenshots/47-work-filter-dialog.png) |
+| ![Typed tag search with live AO3 suggestions](screenshots/50-additional-tags.png) | |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -73,6 +75,7 @@ koreader/
       account.lua
       accountpage.lua
       authorpage.lua
+      autocomplete.lua
       filterpage.lua
       homepage.lua
       settingspage.lua
@@ -157,7 +160,13 @@ opens the filters AO3 already puts on that page. The screen has two groups,
 (rating, archive warning, category, fandom, character, relationship, additional
 tags). Tapping a dimension opens its facets with their work counts, and a tap
 ticks or unticks one; rating is single-select on the include side, as it is on
-AO3. **Apply filters** refetches only page 1 of the listing with the chosen
+AO3. Fandom, character, relationship and additional tags also end with
+**Search for a tag…**: type at least two characters and AO3's autocomplete
+answers with canonical tags to tap. The typed name joins the same pending
+selection as the checkboxes (never the network), so one **Apply filters**
+commits everything. A 429, a dropped connection or no network only costs the
+suggestions; **Add** still takes the typed name, and Apply is unaffected.
+**Apply filters** refetches only page 1 of the listing with the chosen
 facets; nothing is requested while you tick boxes. The funnel fills and the
 dimension rows carry "1 selected" while filters are on. Paging keeps them, and
 leaving the listing clears them.
@@ -359,6 +368,9 @@ Listing:
     -> parse <form id="work-filters"> into the listing's include/exclude facets
   Filters (on Apply only; AO3's own page links keep them while paging):
   GET ...?include_work_search[rating_ids][]=10&exclude_work_search[fandom_ids][]=17
+  Typed tags (suggestion on pause, one request; Apply writes names, not ids):
+  GET /autocomplete/<fandom|character|relationship|freeform>?term=<text>
+  GET ...?work_search[other_tag_names]=Hannibal%20(TV),Hurt%2FComfort
 
 Author page (four tabs):
   GET /users/<name>?expand_fandoms=true       Dashboard: fandoms + counts
@@ -536,12 +548,13 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 364 tests passing across parser, navigation,
+- The offline `busted` suite: 376 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
-  listing-filter, background-update-check and bug-report tests, including 51
-  account tests across token parsing, the three-request sign-in, cookie
+  listing-filter, tag-autocomplete, background-update-check and bug-report
+  tests, including 51 account tests across token parsing, the three-request
+  sign-in, cookie
   scoping/rotation, session persistence/logout, subscription parsing and work
   actions. The work-action tests cover the website's form bodies, reading the
   work page's bookmarked/subscribed/read-later state, one-time token reuse,
@@ -552,7 +565,11 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   the button's visibility and active state, and the reset on leaving the
   listing. The update-check tests cover the once-a-day policy, the 15-minute
   offline retry, prompt gating on the top window, and the Update / Remind
-  later / Dismiss / Changelog actions.
+  later / Dismiss / Changelog actions. The autocomplete tests cover the
+  per-type request URL and its encoding, the JSON name list truncated to ten,
+  a gzipped answer, a dropped stale generation, the names written to
+  `other_tag_names`/`excluded_tag_names`, embedded-name de-duplication, and the
+  quiet back-off after a 429 or malformed answer.
 
 **Current connectivity (checked 2026-11-23 14:20):** AO3's edge accepts the
 Firefox header set used for sign-in. `/token_dispenser.json` returned `200`
@@ -606,9 +623,10 @@ what made the 403 stick for the plugin while `curl` could still fetch pages.
   regenerated. "Find a tag…" resolves any current tag by name.
 - **Simple search.** One query box. Filters are the facets AO3 itself lists on
   the results page (rating, warnings, categories, fandoms, characters,
-  relationships, tags), in an Include or Exclude group. Word count, completion
-  status, sort order and free-text tag filters are not exposed; they would
-  need their own controls and are intentionally out of scope.
+  relationships, tags), in an Include or Exclude group, plus typed tag names
+  from AO3's autocomplete for the four tag dimensions. Word count, completion
+  status, sort order and numeric ranges are not exposed; they would need their
+  own controls and are intentionally out of scope.
 - **No infinite scroll.** 20 works per page.
 - **Untested on a physical Kindle.** Parsers, UI and rendering were tested
   in the emulator; a real-device pass is still recommended.

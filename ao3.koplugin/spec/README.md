@@ -54,6 +54,12 @@ The tests are offline:
   the dialog's rows and checkmarks; paging with filters; the funnel's
   visibility and active state; the author Works tab; and the reset when the
   listing is popped.
+- `ao3_autocomplete_spec.lua` covers typed tag filtering: the
+  `/autocomplete/<type>` URL and its encoding, the JSON name list (truncated to
+  ten), a gzipped response, the generation token that drops a stale answer, the
+  `work_search[other_tag_names]`/`excluded_tag_names` apply URL, de-duplication
+  against embedded facets, and the quiet back-off after a 429 or a malformed
+  body. `fixtures/autocomplete/` holds representative AO3 answers.
 - The report flow is also exercised through the UI: the home row, the
   editor, the log-consent dialog and the saved bundle.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and

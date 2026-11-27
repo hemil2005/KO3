@@ -35,6 +35,12 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   KOReader's checkmark, and refetches page 1 only on **Apply filters**; paging
   keeps the filters and leaving the listing drops them. Author works, search,
   tag and fandom listings get it; no other screen does.
+- Fandom, character, relationship and additional tags also take a typed name:
+  `GET /autocomplete/<type>?term=<text>` (2 characters, 350 ms debounce, ten
+  suggestions). The canonical name joins the same pending selection and Apply
+  sends it as a name in `work_search[other_tag_names]` /
+  `work_search[excluded_tag_names]`, never as an `<type>_id`. A failed
+  suggestion is logged and backed off, never retried.
 - The author page is one screen: the author's masthead, the pill of four tabs,
   then a count line and the shelf. Every tab keeps the masthead and the tab
   strip sits at the same height; the native title bar names the shelf, not the
