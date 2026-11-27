@@ -62,6 +62,29 @@ describe("AO3 listing filters", function()
         end
     end
 
+    -- The root is a two-up grid: each static row carries the tiles it holds.
+    -- Dimension descriptors are the tiles themselves.
+    local function dimension_tile(rows, kind)
+        for _, row in ipairs(rows) do
+            for _, tile in ipairs(row.tiles or {}) do
+                if tile.role == "filter_dimension"
+                        and tile.ao3_filter_type == kind then
+                    return tile, row
+                end
+            end
+        end
+    end
+
+    local function dimension_tiles(rows)
+        local tiles = {}
+        for _, row in ipairs(rows) do
+            for _, tile in ipairs(row.tiles or {}) do
+                if tile.role == "filter_dimension" then tiles[#tiles + 1] = tile end
+            end
+        end
+        return tiles
+    end
+
     it("parses include and exclude facets with ids, names, counts and controls", function()
         local facets = fixture_listing().facets
         assert.is_truthy(facets)
@@ -125,7 +148,8 @@ describe("AO3 listing filters", function()
             "https://archiveofourown.org/tags/Time%20Travel/works"
                 .. "?include_work_search%5Brating_ids%5D%5B%5D=10"
                 .. "&exclude_work_search%5Barchive_warning_ids%5D%5B%5D=17"
-                .. "&exclude_work_search%5Bfreeform_ids%5D%5B%5D=44003",
+                .. "&exclude_work_search%5Bfreeform_ids%5D%5B%5D=44003"
+                .. "&work_search%5Bsort_column%5D=revised_at",
             url)
         assert.is_nil(url:find("category_ids", 1, true))
         assert.is_nil(url:find("character_ids", 1, true))
@@ -158,22 +182,59 @@ describe("AO3 listing filters", function()
         assert.are.equal(2, plugin:filterCount(state))
 
         local rows = plugin:filterRootRows(state)
-        local include_label = row_with(rows, "filter_group", { ao3_filter_group = "include" })
-        local exclude_label = row_with(rows, "filter_group", { ao3_filter_group = "exclude" })
-        assert.is_truthy(include_label)
-        assert.is_truthy(exclude_label)
+        -- The old Include/Exclude group rows are gone; the root is a tile
+        -- screen with quiet Sort and Filters labels.
+        assert.is_nil(row_with(rows, "filter_group"))
+        assert.is_truthy(row_with(rows, "filter_sort_label"))
+        assert.is_truthy(row_with(rows, "filter_label"))
 
-        local fandom = row_with(rows, "filter_dimension",
-            { ao3_filter_action = "include", ao3_filter_type = "fandom" })
+        local fandom = dimension_tile(rows, "fandom")
         assert.are.equal("Fandom", fandom.text)
-        assert.are.equal("1 selected", fandom.mandatory)
+        assert.are.equal("1 included", fandom.ao3_filter_hint)
 
-        local excluded_warning = row_with(rows, "filter_dimension",
-            { ao3_filter_action = "exclude", ao3_filter_type = "archive_warning" })
-        assert.are.equal("1 selected", excluded_warning.mandatory)
+        local excluded_warning = dimension_tile(rows, "archive_warning")
+        assert.are.equal("1 excluded", excluded_warning.ao3_filter_hint)
+
+        for _, tile in ipairs(dimension_tiles(rows)) do
+            assert.are.equal("filter_dimension", tile.role)
+            assert.is_nil(tile.mandatory)
+        end
+
+        local sort_tile = row_with(rows, "filter_sort")
+        assert.are.equal("Sort by", sort_tile.text)
+        assert.are.equal("Date Updated", sort_tile.ao3_filter_hint)
 
         assert.are.equal("filter_apply", rows[#rows].role)
         assert.is_true(rows[#rows].ao3_filter_clear)
+    end)
+
+    it("draws one tile per dimension and one sort tile, not fourteen rows", function()
+        local state = plugin:newFilterState(fixture_listing(),
+            "https://archiveofourown.org/tags/Time%20Travel/works", "Time Travel")
+        local rows = plugin:filterRootRows(state)
+        local tiles = dimension_tiles(rows)
+        assert.are.equal(7, #tiles)
+        local seen = {}
+        for _, tile in ipairs(tiles) do
+            assert.is_nil(seen[tile.ao3_filter_type])
+            seen[tile.ao3_filter_type] = true
+            assert.are.equal("None yet", tile.ao3_filter_hint)
+        end
+        assert.are.equal(4, (function()
+            local count = 0
+            for _, row in ipairs(rows) do
+                if row.role == "filter_grid" then count = count + 1 end
+            end
+            return count
+        end)())
+        -- One full-width sort tile above the grid.
+        assert.are.equal(1, (function()
+            local count = 0
+            for _, row in ipairs(rows) do
+                if row.role == "filter_sort" then count = count + 1 end
+            end
+            return count
+        end)())
     end)
 
     it("marks chosen facets with KOReader's checkmark and their count", function()
@@ -193,6 +254,32 @@ describe("AO3 listing filters", function()
         assert.is_nil(unchosen.mandatory:find("\u{2713}", 1, true))
     end)
 
+    it("puts the Include/Exclude switch on the dimension page", function()
+        local listing = fixture_listing()
+        local menu = open_listing(listing)
+        local state = menu.item_table.ao3_filter_state
+        plugin:showFilterDimension(state, "include", "fandom")
+
+        local include_side = row_with(menu.item_table, "filter_side",
+            { ao3_filter_action = "include" })
+        local exclude_side = row_with(menu.item_table, "filter_side",
+            { ao3_filter_action = "exclude" })
+        assert.are.equal("Include", include_side.text)
+        assert.are.equal("\u{2713}", include_side.mandatory)
+        assert.are.equal("Exclude", exclude_side.text)
+        assert.is_nil(exclude_side.mandatory)
+        assert.are.equal("filter_side_label", menu.item_table[1].role)
+
+        -- A tap rebuilds the same page for the other side, with its title.
+        exclude_side.action()
+        assert.are.equal("Exclude · Fandom", menu.ao3_title)
+        local switched = row_with(menu.item_table, "filter_side",
+            { ao3_filter_action = "exclude" })
+        assert.are.equal("\u{2713}", switched.mandatory)
+        assert.is_truthy(row_with(menu.item_table, "filter_facet",
+            { text = "Lucifer (TV)" }))
+    end)
+
     it("rebuilds the root's selected count after a facet is toggled", function()
         local listing = fixture_listing()
         local menu = open_listing(listing)
@@ -200,9 +287,8 @@ describe("AO3 listing filters", function()
         assert.is_truthy(state)
         plugin:showFilterRoot(state)
 
-        local include_fandom = row_with(menu.item_table, "filter_dimension",
-            { ao3_filter_action = "include", ao3_filter_type = "fandom" })
-        assert.is_nil(include_fandom.mandatory)
+        local include_fandom = dimension_tile(menu.item_table, "fandom")
+        assert.are.equal("None yet", include_fandom.ao3_filter_hint)
 
         plugin:showFilterDimension(state, "include", "fandom")
         local facet_row = row_with(menu.item_table, "filter_facet", { text = "Lucifer (TV)" })
@@ -213,9 +299,8 @@ describe("AO3 listing filters", function()
         assert.are.equal("\u{2713} 12", ticked.mandatory)
 
         menu:onClose()
-        include_fandom = row_with(menu.item_table, "filter_dimension",
-            { ao3_filter_action = "include", ao3_filter_type = "fandom" })
-        assert.are.equal("1 selected", include_fandom.mandatory)
+        include_fandom = dimension_tile(menu.item_table, "fandom")
+        assert.are.equal("1 included", include_fandom.ao3_filter_hint)
     end)
 
     it("preserves filters while paging and keeps the page number", function()

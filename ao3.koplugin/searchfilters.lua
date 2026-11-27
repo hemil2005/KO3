@@ -76,6 +76,48 @@ SearchFilters.DIMENSIONS = {
     { key = "freeform", label = _("Additional Tags") },
 }
 
+-- AO3's edit-search sort, read from `app/models/search/work_search_form.rb`.
+-- Unlike a tag sidebar's smaller subset this is the full list, and the form
+-- always sends a direction (desc/asc), so both rows are offered.
+SearchFilters.SORT_COLUMNS = {
+    { "_score", _("Best Match") },
+    { "authors_to_sort_on", _("Creator") },
+    { "title_to_sort_on", _("Title") },
+    { "created_at", _("Date Posted") },
+    { "revised_at", _("Date Updated") },
+    { "word_count", _("Word Count") },
+    { "hits", _("Hits") },
+    { "kudos_count", _("Kudos") },
+    { "comments_count", _("Comments") },
+    { "bookmarks_count", _("Bookmarks") },
+}
+
+SearchFilters.SORT_DIRECTIONS = {
+    { "desc", _("Descending") },
+    { "asc", _("Ascending") },
+}
+
+-- A fresh sort table on every call, shaped like a parsed page's select, with
+-- AO3's search default: Best Match, descending.
+function SearchFilters.sorts()
+    local columns, directions = {}, {}
+    for _, entry in ipairs(SearchFilters.SORT_COLUMNS) do
+        columns[#columns + 1] = { value = entry[1], label = entry[2] }
+    end
+    for _, entry in ipairs(SearchFilters.SORT_DIRECTIONS) do
+        directions[#directions + 1] = { value = entry[1], label = entry[2] }
+    end
+    return {
+        param = "work_search",
+        columns = columns,
+        directions = directions,
+        column = "_score",
+        direction = "desc",
+        default_column = "_score",
+        default_direction = "desc",
+    }
+end
+
 -- What the search action reads. `_ids` lists repeat; completion and crossovers
 -- are single values.
 SearchFilters.ID_KEYS = {

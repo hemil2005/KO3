@@ -57,6 +57,17 @@ describe("AO3 tag autocomplete", function()
             "Time Travel"))
     end
 
+    local function dimension_tile(rows, kind)
+        for _, row in ipairs(rows) do
+            for _, tile in ipairs(row.tiles or {}) do
+                if tile.role == "filter_dimension"
+                        and tile.ao3_filter_type == kind then
+                    return tile, row
+                end
+            end
+        end
+    end
+
     it("asks /autocomplete/<type> with an encoded term", function()
         assert.are.equal(
             "https://archiveofourown.org/autocomplete/fandom?term=Harry%20Potter",
@@ -200,7 +211,8 @@ describe("AO3 tag autocomplete", function()
         assert.are.equal(
             "https://archiveofourown.org/tags/Time%20Travel/works"
                 .. "?work_search%5Bother_tag_names%5D=Hannibal%20%28TV%29,Hurt%2FComfort"
-                .. "&work_search%5Bexcluded_tag_names%5D=Hades%20%28Video%20Game%29",
+                .. "&work_search%5Bexcluded_tag_names%5D=Hades%20%28Video%20Game%29"
+                .. "&work_search%5Bsort_column%5D=revised_at",
             url)
         -- A typed tag never becomes an id param.
         assert.is_nil(url:find("fandom_ids", 1, true))
@@ -240,9 +252,8 @@ describe("AO3 tag autocomplete", function()
         assert.is_nil(row_with(rating, "filter_add_tag"))
 
         local root = plugin:filterRootRows(state)
-        local freeform = row_with(root, "filter_dimension",
-            { ao3_filter_action = "include", ao3_filter_type = "freeform" })
-        assert.are.equal("1 selected", freeform.mandatory)
+        local freeform = dimension_tile(root, "freeform")
+        assert.are.equal("1 included", freeform.ao3_filter_hint)
     end)
 
     it("adopts typed names from a pasted URL and rewrites them on Apply", function()
@@ -255,7 +266,8 @@ describe("AO3 tag autocomplete", function()
         local url = plugin:filterUrl(state.base_url, state)
         assert.are.equal(
             "https://archiveofourown.org/tags/Time%20Travel/works"
-                .. "?work_search%5Bother_tag_names%5D=Angst,Fluff",
+                .. "?work_search%5Bother_tag_names%5D=Angst,Fluff"
+                .. "&work_search%5Bsort_column%5D=revised_at",
             url)
     end)
 

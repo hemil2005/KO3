@@ -53,6 +53,17 @@ describe("AO3 search filters", function()
         end
     end
 
+    local function dimension_tile(rows, kind)
+        for _, row in ipairs(rows) do
+            for _, tile in ipairs(row.tiles or {}) do
+                if tile.role == "filter_dimension"
+                        and tile.ao3_filter_type == kind then
+                    return tile, row
+                end
+            end
+        end
+    end
+
     it("recognises the search results URL and no other listing", function()
         assert.is_true(SearchFilters.isSearchUrl(SEARCH))
         assert.is_true(SearchFilters.isSearchUrl(
@@ -104,29 +115,31 @@ describe("AO3 search filters", function()
         local rows = plugin:filterRootRows(state)
 
         for _, kind in ipairs({ "rating", "archive_warning", "category",
-                "complete", "crossover" }) do
-            assert.is_truthy(row_with(rows, "filter_dimension", {
-                ao3_filter_action = "include", ao3_filter_type = kind }), kind)
+                "complete", "crossover", "fandom", "character",
+                "relationship", "freeform" }) do
+            assert.is_truthy(dimension_tile(rows, kind), kind)
         end
+        -- One tile per dimension, and no Include/Exclude group rows.
+        assert.is_nil(row_with(rows, "filter_group"))
         for _, kind in ipairs({ "fandom", "character", "relationship",
                 "freeform" }) do
-            assert.is_truthy(row_with(rows, "filter_dimension", {
-                ao3_filter_action = "include", ao3_filter_type = kind }), kind)
-            -- The typed row is the whole point of these dimensions.
             assert.is_truthy(row_with(
                 plugin:filterFacetRows(state, "include", kind), "filter_add_tag"),
                 kind)
         end
 
-        -- AO3's search form has no exclude side for the fixed lists, so those
-        -- rows stay off the exclude group; typed tags do have one.
-        for _, kind in ipairs({ "rating", "archive_warning", "category",
-                "complete", "crossover" }) do
-            assert.is_nil(row_with(rows, "filter_dimension", {
-                ao3_filter_action = "exclude", ao3_filter_type = kind }), kind)
-        end
-        assert.is_truthy(row_with(rows, "filter_dimension", {
-            ao3_filter_action = "exclude", ao3_filter_type = "freeform" }))
+        -- The side switch lives on the dimension page. AO3's search form has
+        -- no exclude side for its fixed lists, so that page simply has no
+        -- facets to tick, while the typed tag dimensions keep both sides.
+        local rating_rows = plugin:filterFacetRows(state, "include", "rating")
+        assert.is_truthy(row_with(rating_rows, "filter_facet"))
+        assert.are.equal("\u{2713}", row_with(rating_rows, "filter_side",
+            { ao3_filter_action = "include" }).mandatory)
+        assert.is_nil(row_with(plugin:filterFacetRows(state, "exclude", "rating"),
+            "filter_facet"))
+        assert.is_truthy(row_with(plugin:filterFacetRows(state, "exclude", "freeform"),
+            "filter_add_tag"))
+        assert.is_truthy(row_with(rows, "filter_sort"))
         assert.are.equal("filter_apply", rows[#rows].role)
     end)
 
@@ -154,7 +167,9 @@ describe("AO3 search filters", function()
                 .. "&work_search%5Barchive_warning_ids%5D%5B%5D=16"
                 .. "&work_search%5Bcategory_ids%5D%5B%5D=116"
                 .. "&work_search%5Bcomplete%5D=T"
-                .. "&work_search%5Bother_tag_names%5D=Hannibal%20%28TV%29",
+                .. "&work_search%5Bother_tag_names%5D=Hannibal%20%28TV%29"
+                .. "&work_search%5Bsort_column%5D=_score"
+                .. "&work_search%5Bsort_direction%5D=desc",
             url)
         -- A listing-filter parameter must never leak into a search.
         assert.is_nil(url:find("include_work_search", 1, true))
@@ -184,7 +199,9 @@ describe("AO3 search filters", function()
                 .. "&work_search%5Brating_ids%5D%5B%5D=13"
                 .. "&work_search%5Bcategory_ids%5D%5B%5D=23"
                 .. "&work_search%5Bcomplete%5D=F"
-                .. "&work_search%5Bother_tag_names%5D=Angst,Fluff",
+                .. "&work_search%5Bother_tag_names%5D=Angst,Fluff"
+                .. "&work_search%5Bsort_column%5D=_score"
+                .. "&work_search%5Bsort_direction%5D=desc",
             url)
     end)
 
@@ -194,9 +211,14 @@ describe("AO3 search filters", function()
             plugin:filterDimension(state, "complete").include[2])
         local url = plugin:filterUrl(SEARCH .. "&page=2", state, true)
         assert.are.equal(
-            SEARCH .. "&page=2&work_search%5Bcomplete%5D=F", url)
+            SEARCH .. "&page=2&work_search%5Bcomplete%5D=F"
+                .. "&work_search%5Bsort_column%5D=_score"
+                .. "&work_search%5Bsort_direction%5D=desc", url)
         local first = plugin:filterUrl(SEARCH .. "&page=2", state, false)
-        assert.are.equal(SEARCH .. "&work_search%5Bcomplete%5D=F", first)
+        assert.are.equal(
+            SEARCH .. "&work_search%5Bcomplete%5D=F"
+                .. "&work_search%5Bsort_column%5D=_score"
+                .. "&work_search%5Bsort_direction%5D=desc", first)
     end)
 
     it("shows the funnel on a search listing and drops it on leave", function()
