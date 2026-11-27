@@ -11,13 +11,19 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
   subscriptions
 - Optional kudos, bookmark, subscribe and Marked for Later from a work page
 - Filter a listing by the facets AO3 already puts on the page — rating,
-  warnings, categories, fandoms, characters, relationships and tags — with
-  include and exclude groups, plus a typed tag search for any fandom, character,
-  relationship or additional tag AO3's short lists leave out. Bookmark lists use
-  their own sidebar, which adds the bookmarker's tags, and the same typed search.
-  A keyword search filters by AO3's fixed search dimensions (rating, warnings,
-  categories, completion, crossovers) and typed tags. The filters apply on tap,
-  page with you, and reset when you leave the listing
+  warnings, categories, fandoms, characters, relationships and tags — on a
+  tile screen with include and exclude sides, plus a typed tag search for any
+  fandom, character, relationship or additional tag AO3's short lists leave
+  out. Bookmark lists use their own sidebar, which adds the bookmarker's tags,
+  and the same typed search. A keyword search filters by AO3's fixed search
+  dimensions (rating, warnings, categories, completion, crossovers) and typed
+  tags. **Sort by** is part of the same screen and uses AO3's own columns for
+  that listing. Filters and sort apply on tap, page with you, and reset when
+  you leave the listing
+- Pin fandoms to a **Favourites** shelf on the landing page by holding their
+  row in the index; **Continue reading** reopens the saved work you read last
+- Series membership on a work page: "Part 2 of …" opens the series' works
+- Check saved works in progress for new chapters without re-downloading them
 - Filter the Downloads list locally by title or work number; no request is made
 - No images
 - No comments, no work posting, no third-party service
@@ -46,12 +52,16 @@ details captured from a live work.
 | ![Log consent](screenshots/33-report-consent.png) | ![Report sent](screenshots/36-report-sent.png) |
 | ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
 | ![Tag box open in the list](screenshots/40-work-list-tags.png) | ![Settings](screenshots/41-settings.png) |
-| ![Filter button on a work listing](screenshots/46-work-filter-button.png) | ![Filter dialog with Include and Exclude groups](screenshots/47-work-filter-dialog.png) |
+| ![Filter button on a work listing](screenshots/46-work-filter-button.png) | ![The filter screen as a tile grid](screenshots/63-filter-tiles.png) |
 | ![Typed tag search with live AO3 suggestions](screenshots/50-additional-tags.png) | ![Bookmark listing with the filter funnel](screenshots/51-bookmark-filters.png) |
 | ![Bookmark filter dialog with Bookmarker's Tags](screenshots/52-bookmark-filter-dialog.png) | ![Downloads narrowed by its local filter](screenshots/53-downloads-filter.png) |
 | ![A search filtered by AO3's fixed search dimensions](screenshots/54-search-filter.png) | ![The same search narrowed to Mature, complete works](screenshots/55-search-filter-applied.png) |
 | ![Bookmarker's Tags with a typed tag row](screenshots/56-bookmarker-tags.png) | ![Live bookmarker-tag suggestions](screenshots/57-bookmarker-tag-search.png) |
 | ![Recent searches, shown with the keyboard hidden](screenshots/58-history-picker.png) | ![A past term filled in, keyboard back](screenshots/59-history-picked.png) |
+| ![One dimension with its Include/Exclude switch](screenshots/64-filter-dimension.png) | ![Sort by, using AO3's own columns](screenshots/65-filter-sort.png) |
+| ![Favourite fandoms on the landing page](screenshots/70-home-favourites.png) | ![Work details: new chapters and series membership](screenshots/71-work-series-update.png) |
+| ![Check for updates on a saved WIP](screenshots/72-downloads-check.png) | ![Continue reading under the Library shelf](screenshots/66-home-continue.png) |
+| ![All favourites as a native list](screenshots/69-favourite-fandoms-list.png) | |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -85,17 +95,20 @@ koreader/
       authorpage.lua
       autocomplete.lua
       filterpage.lua
+      fandompages.lua
       homepage.lua
+      searchfilters.lua
+      searchhistory.lua
       settingspage.lua
       preferences.lua
       workpage.lua
+      workupdate.lua
       uikit.lua
       updater.lua
       bugreport.lua
       assets/ao3-logo.png
       assets/ao3-logo.svg
       assets/icons/*.svg
-      fandompages.lua
       data/fandoms/index.lua
       data/fandoms/<category>/<letter>.tsv.z
 ```
@@ -108,19 +121,23 @@ the zip only has to be copied once.
 One menu entry opens the whole app. The landing page leads with the AO3 mark
 and name (the native title bar is left empty, so the wordmark is the only
 identity), with a settings gear at the right edge of that line, then one solid
-**Search works** bar. Everything else is an icon
-tile grouped under **Browse**, **Library** and **Plugin**. Each tile keeps its
-name beside the icon, with a one-line hint underneath:
+**Search works** bar. Pinned fandoms follow as a **Favourites** shelf, then the
+icon tiles grouped under **Browse**, **Account**, **Library** and **Plugin**.
+Each tile keeps its name beside the icon, with a one-line hint underneath. A
+**Continue reading** row appears under the Library shelf once a saved work has
+been opened; it reopens that copy at the position KOReader stored.
 
 | Tile or bar | What it does |
 |---|---|
 | **Search works** (solid bar) | Work title, author or keyword |
+| **Favourites** | Fandoms pinned by holding their row in the fandom index; a tap opens that fandom's works, a hold on a tile unpins it. Four tiles show at once, with **All favourites** beyond |
 | **Latest works** | Newest works across the archive (`/works`) |
 | **Fandoms** | Categorized fandom index, shipped with the plugin |
 | **Author** | A name searches AO3's people directory: an exact name opens that author, a partial one lists the accounts it matched. A profile URL opens directly |
 | **Tag** | A tag name, or paste a full `/tags/.../works` URL |
 | **Account** | Sign in to AO3, then your bookmarks, marked-for-later, history and subscriptions |
 | **Downloads** | Works already saved on this device |
+| **Continue reading** | The saved work opened most recently, when the file is still on the device |
 | **Open work** | Paste `https://archiveofourown.org/works/1234567` or just `1234567` |
 | **Update KO3** | Check GitHub Releases for a newer version |
 | **Report a bug** | Write what happened; optionally attach a diagnostic log |
@@ -137,7 +154,10 @@ contains the term — any part of a name matches, in any case, and the list is
 navigable with the same paging rows. A search with no matches says so and leaves
 the reader where they were; a search that finds something sits on top of the
 letter page, so Back returns to the page being browsed. Tapping a fandom
-fetches only its 20-work page. On the AO3 screens, the letter shortcut boxes
+fetches only its 20-work page. Holding a fandom row pins or unpins it in
+**Favourites**: the heart at the start of the row marks a pinned fandom, a
+short message confirms the change, and the row repaints in place without
+losing your place in the letter. On the AO3 screens, the letter shortcut boxes
 are hidden so the text gets the full touchscreen width.
 
 Every search dialog — works, author, tag, fandom letter and **Open work** —
@@ -169,39 +189,50 @@ separately from the AO3 session, so Log out does not reset them.
 
 On a work listing — search results, a tag, a fandom, or an author's **Works**
 tab — a funnel at the top-left of the title bar, opposite the close button,
-opens the filters AO3 already puts on that page. The screen has two groups,
-**Include** and **Exclude**, each listing the dimensions that page offers
-(rating, archive warning, category, fandom, character, relationship, additional
-tags). Tapping a dimension opens its facets with their work counts, and a tap
-ticks or unticks one; rating is single-select on the include side, as it is on
+opens the filters AO3 already puts on that page. The screen is a printed form,
+not a settings list: a **Sort by** tile, a two-column grid of dimension tiles
+(rating, archive warning, category, fandom, character, relationship,
+additional tags), then the Apply bar. Each tile carries the dimension's name
+and one quiet line saying what is chosen — "2 included · 1 excluded",
+"1 included", "None yet". Tapping a tile opens its facets with their work
+counts and a **Show** switch at the top: **Include** and **Exclude** are the
+same dimension page, with the active side ticked, so moving between them never
+means going back. Rating is single-select on the include side, as it is on
 AO3. Fandom, character, relationship and additional tags also end with
 **Search for a tag…**: type at least two characters and AO3's autocomplete
 answers with canonical tags to tap. The typed name joins the same pending
-selection as the checkboxes (never the network), so one **Apply filters**
-commits everything. A 429, a dropped connection or no network only costs the
-suggestions; **Add** still takes the typed name, and Apply is unaffected.
-**Apply filters** refetches only page 1 of the listing with the chosen
-facets; nothing is requested while you tick boxes. The funnel fills and the
-dimension rows carry "1 selected" while filters are on. Paging keeps them, and
-leaving the listing clears them.
+selection as the checkboxes (never the network). A 429, a dropped connection
+or no network only costs the suggestions; **Add** still takes the typed name,
+and Apply is unaffected.
+
+**Sort by** opens the columns AO3's own page offers for that listing — Date
+Updated, Kudos and Hits on a tag page, the full set on a search — with a
+Direction group only when the source has one (bookmarks are always newest
+first). A pick stays pending like a tick. **Apply filters** is the only network
+action: it refetches page 1 with the chosen facets and sort together, and
+nothing is requested while you tick or sort. The funnel fills while filters or
+a non-default sort are active. Paging keeps both, and leaving the listing
+clears them. **Default sort** at the foot of the sort page restores the page's
+own order.
 
 A keyword search is the exception: AO3 renders no filter sidebar on its results
 page, so the funnel is built from the advanced search form's own fixed lists
 instead — rating, archive warnings, categories, completion and crossovers —
-plus typed tags on both sides. Applying writes bare `work_search[...]`
+plus typed tags on both sides, and the full search sort list (Best Match,
+Creator, Title, Date Posted, Date Updated, Word Count, Hits, Kudos, Comments,
+Bookmarks) with Ascending/Descending. Applying writes bare `work_search[...]`
 parameters and keeps the query, so the result stays the search you made.
 
 The same funnel sits on a bookmark listing — your **Bookmarks**, **Marked for
 Later** and **History**, or an author's **Bookmarks** shelf. AO3 renders a
-bookmark sidebar there instead, so the dialog offers the same dimensions plus
+bookmark sidebar there instead, so the dialog offers the same tiles plus
 **Bookmarker's Tags**, the tags the bookmarker added rather than the work's
 own. Applying builds `bookmark_search[...]` parameters instead of
 `work_search[...]`; ticking, paging and leaving behave exactly as on a work
-listing. The extra dimension makes one more row per group, so the bookmark
-form uses slightly tighter rows to keep its Clear and Apply bar on one
-600×800 page. Typed tags work here too: **Search for a tag…** sits under each
-tag dimension, work tags go to `bookmark_search[other_tag_names]`, and a
-bookmarker's tag goes to `bookmark_search[other_bookmark_tag_names]`.
+listing. Its eight dimensions still fit one 600×800 page. Typed tags work here
+too: **Search for a tag…** sits under each tag dimension, work tags go to
+`bookmark_search[other_tag_names]`, and a bookmarker's tag goes to
+`bookmark_search[other_bookmark_tag_names]`.
 
 **Downloads** lists only files already on the device, so its filter is local:
 a search row at the top opens a small input box and narrows the list by title
@@ -212,10 +243,15 @@ Tap a result to drill in; tap a work for its details. The work screen leads
 with the title, author and fandom, then **Read** (the solid bar, which
 fetches the work and opens it in the KOReader reader) and **Refresh** (the
 outlined one), a four-number strip (words, chapters, kudos, hits) and a small
-table for rating, warnings, category, status and date. **Summary** and
-**Tags** stay folded until tapped; a summary too long for one page is elided
-and opens in full from **Read full summary**. Each author's name opens the
-author page (co-authors each get a row; Anonymous stays plain text).
+table for rating, warnings, category, status and date. When the saved copy has
+fallen behind the live page, a quiet row under those facts says how far — "2
+new chapters · 3/7 → 5/7" — and tapping it refreshes. A work that belongs to
+one or more series gets a **Series** group below the account actions: each row
+reads "Part 2 of Series Name" and opens that series' work listing, so Back
+returns to the work. **Summary** and **Tags** stay folded until tapped; a
+summary too long for one page is elided and opens in full from **Read full
+summary**. Each author's name opens the author page (co-authors each get a row;
+Anonymous stays plain text).
 
 **Author** on the landing page takes a profile URL or a name. A name is
 searched in AO3's people directory rather than guessed at: a name that is an
@@ -290,6 +326,14 @@ The first read downloads the whole work (usually 200 KB–1 MB); after that the
 cached copy opens instantly, offline. **Refresh** downloads and validates the
 latest version before replacing the saved copy, so a failed request leaves
 the offline book available.
+
+A saved work in progress can be checked without downloading it again:
+**Check for updates** in the Downloads actions makes one work-page request,
+compares the saved chapter count with AO3's live one, and either says
+"Up to date · 3/7" or offers **Get new chapters** with "2 new chapters ·
+3/7 → 5/7" before replacing the copy. The comparison reads the saved file's
+own preface, so opening Work details costs no request at all. Finished
+multi-chapter saves and one-shots keep only **Refresh from AO3**.
 
 Inside the reader, a work opened from AO3 has three ways back to the screen
 you left, instead of KOReader's file manager:
@@ -549,6 +593,13 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   first line, works are the usual summary card, and an empty shelf is a single
   grey sentence. A shelf longer than one page pages in place
   (`screenshots/10`–`13`, `38`–`39`).
+- The four new surfaces render together on the merged tree (600×800): the
+  Favourites shelf with four tiles and **All favourites**, **Continue reading**
+  under Library, the filter screen as a Sort tile plus seven dimension tiles,
+  one dimension's Include/Exclude switch, the Sort by page, a work details page
+  showing "2 new chapters · 3/7 → 5/7" and two series rows, and the Downloads
+  actions with **Check for updates** (`screenshots/63`–`72`). The demo seeds a
+  local preferences file and a saved preface; it makes no AO3 request.
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
 - Works opened from AO3 return to the plugin from the Back key, the reader
@@ -602,13 +653,14 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 409 tests passing across parser, navigation,
+- The offline `busted` suite: 505 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
   listing-filter, tag-autocomplete, search-filter, bookmark-filter,
-  Downloads-filter, search-history, background-update-check and bug-report
-  tests, including 51 account tests across token parsing, the three-request
+  Downloads-filter, search-history, background-update-check, bug-report,
+  favourite-fandom, series-navigation, filter-sort and saved-work-update tests,
+  including 51 account tests across token parsing, the three-request
   sign-in, cookie
   scoping/rotation, session persistence/logout, subscription parsing and work
   actions. The work-action tests cover the website's form bodies, reading the
@@ -616,15 +668,25 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   bookmark and subscription ids returned by AO3, already-done duplicates and
   the refusal to post twice. The filter tests cover facet parsing (ids, names,
   counts, radio vs checkbox), the apply URL's include/exclude params,
-  pre-selected filters, the dialog's rows and checkmarks, paging with filters,
-  the button's visibility and active state, and the reset on leaving the
+  pre-selected filters, the tile root and its two-column grid, the Include /
+  Exclude switch on a dimension page, checkmarks, paging with filters, the
+  button's visibility and active state, and the reset on leaving the
   listing; the bookmark-filter tests repeat that against `#bookmark-filters`,
   including the `tag` dimension and the absence of `work_search` params, and
   the Downloads-filter tests cover case-insensitive title and `#id` matching,
   clearing, the unchanged empty and storage rows, and that filtering makes no
-  request. The update-check tests cover the once-a-day policy, the 15-minute
-  offline retry, prompt gating on the top window, and the Update / Remind
-  later / Dismiss / Changelog actions. The autocomplete tests cover the
+  request. The sort tests pin AO3's columns and directions, the URL round trip,
+  adopting a sorted URL, Apply writing exactly one pair, paging keeping the
+  sort, and clearing facets without losing it. The favourite tests cover the
+  preference round trip and normalisation, hold-to-pin, the heart on an index
+  row, and the home shelf's four-tile cap and **All favourites** row. The
+  series tests cover the `dd.series` shapes (one series, several, the
+  `span.series` fallback), the details rows and the guarded open. The saved-work
+  update tests cover the chapter parser, the bounded preface read, the
+  comparison and its messages, the one-request Downloads check, and the
+  zero-request details row. The update-check tests cover the once-a-day policy,
+  the 15-minute offline retry, prompt gating on the top window, and the Update
+  / Remind later / Dismiss / Changelog actions. The autocomplete tests cover the
   per-type request URL and its encoding, the JSON name list truncated to ten,
   a gzipped answer, a dropped stale generation, the names written to
   `other_tag_names`/`excluded_tag_names`, embedded-name de-duplication, and the
@@ -682,11 +744,12 @@ what made the 403 stick for the plugin while `curl` could still fetch pages.
   regenerated. "Find a tag…" resolves any current tag by name.
 - **Simple search.** One query box. Search results have no AO3 filter sidebar,
   so the funnel offers AO3's fixed search dimensions instead — rating, archive
-  warnings, categories, completion and crossovers — in an Include group, plus
-  typed tag names on both sides from AO3's autocomplete. Tag, fandom and author
-  listings filter by the facets their own pages carry, in Include and Exclude
-  groups. Word count, sort order and numeric ranges are not exposed; they would
-  need their own controls and are intentionally out of scope.
+  warnings, categories, completion and crossovers — plus typed tag names on
+  both sides from AO3's autocomplete, and the full edit-search sort list. Tag,
+  fandom and author listings filter by the facets their own pages carry, with
+  include and exclude sides on one dimension page, and sort by the columns AO3
+  offers there. Word count and numeric ranges are not exposed; they would need
+  their own controls and are intentionally out of scope.
 - **No infinite scroll.** 20 works per page.
 - **Untested on a physical Kindle.** Parsers, UI and rendering were tested
   in the emulator; a real-device pass is still recommended.

@@ -28,13 +28,45 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - Card detail ink is `Uikit.CARD_DETAIL` (0x44), one tier darker than
   `Uikit.SECONDARY`, for the byline, fandom, ships, tags, summary and stats
   labels: the 0x66/0x88 greys wash out on e-ink under a bold black title.
+- The landing page may carry two personal shelves, both absent until used:
+  **Favourites** after Search and before Browse, and **Continue reading** under
+  the Library shelf. Favourite fandoms live in `settings/ao3_prefs.lua` (Log out
+  keeps them): hold a fandom row in the letter index to pin or unpin, a heart
+  marks it, the home shelf shows four tiles and then **All favourites**, and
+  holding a favourite tile unpins it. Only fandoms are pinnable, not tags. The
+  Continue reading row reopens the saved copy whose path `last_read_path`
+  records and disappears when that file is gone; opening any work records it.
+- Work details shows series membership as a quiet **Series** group: one row per
+  series, "Part 2 of …", built from `dd.series span.position` (only `/series/`
+  links in each position span; the Previous/Next Work links in the same `dd`
+  are works, not series) and opening that series as a work listing. When the
+  saved copy has fewer chapters than the live page, a row under the facts says
+  how far behind it is ("2 new chapters · 3/7 → 5/7") and refreshes on tap.
+  That comparison reads the saved file's preface and the work already in hand,
+  so it must never fetch anything.
 - A work listing carries a funnel at the top-left of the title bar, opposite
-  Close. It opens an Include/Exclude screen built only from the facets already
-  in AO3's `#work-filters` sidebar (rating, warning, category, fandom,
-  character, relationship, additional tags), marks chosen facets with
-  KOReader's checkmark, and refetches page 1 only on **Apply filters**; paging
-  keeps the filters and leaving the listing drops them. Author works, search,
-  tag and fandom listings get it; no other screen does.
+  Close. It opens a tile screen built only from the facets already in AO3's
+  `#work-filters` sidebar (rating, warning, category, fandom, character,
+  relationship, additional tags): a **Sort by** tile, then a two-column grid
+  of dimension tiles, then Apply. Each tile is paper with a 1px ink border, a
+  24px authored icon, the dimension's bold name and one `CARD_DETAIL` hint
+  ("2 included · 1 excluded", "1 included", "1 excluded", "None yet"). Tapping
+  a tile opens its facets with a **Show: Include / Exclude** checked row pair
+  at the top and KOReader's checkmark on chosen facets; rating is
+  single-select. **Apply filters** refetches page 1 only; paging keeps the
+  filters and leaving the listing drops them. Author works, search, tag and
+  fandom listings get it; no other screen does.
+- Sort is part of that screen, never a separate control. Parse the page's
+  `select[name="<param>[sort_column]"]` and `sort_direction` when the page has
+  one; never hard-code a listing's subset. A pick is pending until Apply, like
+  a facet. `filterUrl` drops old sort pairs and appends the state's once, so
+  paging keeps the sort; **Clear** resets facets only, and **Default sort** on
+  the sort page restores the page's own column/direction. A keyword search uses
+  AO3's fixed values (Best Match `_score`, Creator `authors_to_sort_on`, Title
+  `title_to_sort_on`, Date Posted `created_at`, Date Updated `revised_at`, Word
+  Count `word_count`, Hits `hits`, Kudos `kudos_count`, Comments
+  `comments_count`, Bookmarks `bookmarks_count`; `asc`/`desc`). Bookmark sorts
+  (`created_at`, `bookmarkable_date`, `word_count`) never write a direction.
 - Fandom, character, relationship and additional tags also take a typed name:
   `GET /autocomplete/<type>?term=<text>` (2 characters, 350 ms debounce, ten
   suggestions). The canonical name joins the same pending selection and Apply
@@ -48,8 +80,8 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   Bookmarks shelf) use the same funnel and dialog against
   `#bookmark-filters`, emit `include_bookmark_search[...]`/`exclude_...`
   instead of `work_search`, and add the bookmark-only `tag` dimension
-  (Bookmarker's Tags); their eight dimensions tighten the root rows so Apply
-  stays on one page. Downloads filters locally over saved files only: no
+  (Bookmarker's Tags); its eight tiles still fit one 600×800 page. Downloads
+  filters locally over saved files only: no
   facets, no request.
 - A keyword search has no `#work-filters`, so its funnel is built from the
   edit-search form's fixed lists — `work_search[rating_ids][]`,
@@ -96,6 +128,14 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   default so entries have some breathing room.
 - Opening a work from the plugin must return to the plugin screen (Back key,
   reader menu and end-of-document dialog), not to KOReader's file manager.
+- **Check for updates** is offered in the Downloads actions only for a saved
+  work that can still grow (unknown total, or fewer chapters than its total).
+  A tap makes exactly one work-page request, compares the saved preface's
+  `dl.stats dd.chapters` with the live page, says "Up to date · 3/7" when
+  nothing changed, and otherwise offers **Get new chapters** / **Not now**
+  before calling the existing validated refresh. Never download without the
+  confirmation, never poll, and never show the row for a finished save or a
+  one-shot (they keep **Refresh from AO3**).
 
 ## Account
 

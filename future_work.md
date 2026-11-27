@@ -4,26 +4,23 @@ Planned improvements and feature ideas for KO3, aligned with the native-widget, 
 
 ## Improvements to Existing Features
 
-### Reader "Back to AO3" / Post-Read Work Actions
-- **Problem:** When a reader opens a cached work from `Downloads` or `Open work` and finishes reading it, there is no direct shortcut from the reader's end-of-document dialog or reader menu to that work's **Work details** page to leave kudos, bookmark, subscribe, or toggle Marked for Later.
-- **Idea:** Record the work ID alongside the active reader path so the reader menu / end-of-document flow can offer a direct jump to **Work details** (`openWorkDetails(id)`).
+### Reader "Work details" from the reader
+- **Problem:** Finishing a work leaves the reader with **Back to AO3**, which returns to the listing or Downloads it was opened from, not that work's **Work details**. The landing page's **Continue reading** row reopens the copy, but leaving kudos, a bookmark or a subscription still takes a trip through the listing.
+- **Idea:** Record the work ID alongside the active reader path and add **Work details** to the reader menu and end-of-document dialog, jumping straight to `openWorkDetails(id)`.
 
-### Settings Discoverability & Local Cache Info
-- **Problem:** `Settings` currently exposes only `Expanded tags` and `Work cards`, leaving no place to see the installed plugin version or manage local storage.
-- **Idea:** Show the installed `_meta.lua` version in `Settings` (or on the `Update KO3` row) and consider a local cache/downloads summary row.
+### Settings cache info
+- **Problem:** `Settings` still exposes only **Expanded tags** and **Work cards**. The installed version is on the **Update KO3** tile, but there is no place to see how much space the saved works take or to clear them.
+- **Idea:** A small local-storage summary (count and bytes under `koreader/ao3`) with a **Clear saved works** action, without adding prose or a third display option to the settings page.
 
 ---
 
 ## New Features
 
-### 1. Pinned / Favorite Fandoms & Tags (Offline-First)
-- **Description:** Navigating `Fandoms → Media → Letter → Window → Fandom` or retyping a tag every session takes multiple taps. Allow readers to pin/favorite fandoms or tags locally (persisted in `settings/ao3_prefs.lua` or a separate local file, toggled via long-press on a fandom or tag listing) so they appear in a quick-access section on the Home or Browse screen.
+### 1. Pinned Tags
+- **Description:** Fandoms can now be pinned to the **Favourites** shelf by holding their index row. Tags cannot: pinning an arbitrary tag (a pairing, a trope, an additional tag) would need the same hold gesture on a tag listing and the same `settings/ao3_prefs.lua` record shape, with the tag's own works URL.
 
-### 2. Lightweight Sort & Completion Filter
-- **Description:** While `PRODUCT.md` intentionally excludes AO3's full filter matrix, adding a minimal **Sort by** (Date Updated, Kudos, Word Count, Hits) and **Completed only** option on Search and Tag listings would fit in a small native dialog and still fetch only one page per tap.
+### 2. Completion Filter on Tag and Fandom Listings
+- **Description:** Sorting now covers every listing that has a filter screen, and a keyword search already filters by completion. Tag and fandom listings still cannot narrow to completed works: AO3's sidebar does not ship that dimension, so it would be written as a bare `work_search[complete]=T` alongside the include/exclude facets, with the same pending-until-Apply rule.
 
-### 3. Series Navigation on Work Details
-- **Description:** `authorpage.lua` already parses series listings, but `workpage.lua` does not yet surface series membership for a work (e.g., *Part 2 of Series Name*). Adding a tappable series link on the Work Details screen would let readers jump directly to the series' work list and follow multi-part stories.
-
-### 4. Update Check for Downloaded WIPs
-- **Description:** For multi-chapter works-in-progress saved in `Downloads`, offer a manual **Check for updates** action (or show the cached chapter count alongside the live count when refreshed) so readers can tell when an in-progress fic has new chapters without blindly re-downloading.
+### 3. Series Order on the Series Listing
+- **Description:** A work's **Series** row now opens the series' works, but those cards do not say where each work sits. The series page carries the order; surfacing "Part 3" on the card (or sorting by it) would make following a long series easier.

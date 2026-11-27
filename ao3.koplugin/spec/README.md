@@ -46,14 +46,26 @@ The tests are offline:
   two-line fallback), the numbers, and the tag fold — including the gesture
   path that lets a tap on the box open it without opening the work.
 - `ao3_preferences_spec.lua` covers the reader-preferences file: defaults, a
-  round-trip, a non-boolean value, and its separation from the session file.
+  round-trip, a non-boolean value, its separation from the session file, and
+  the favourite-fandom list's normalisation (malformed entries, duplicate
+  url/name, the twelve-item cap).
 - `ao3_filters_spec.lua` covers the listing filter against
   `fixtures/filters.html`, a realistic work page carrying AO3's
   `form#work-filters` sidebar: facet ids, names, counts and radio/checkbox
   controls; the include/exclude apply URL; pre-selected filters from a URL;
-  the dialog's rows and checkmarks; paging with filters; the funnel's
-  visibility and active state; the author Works tab; and the reset when the
-  listing is popped.
+  the tile root, its two-column grid and the selected-count hints; the
+  dimension page's Include/Exclude side switch and checkmarks; paging with
+  filters; the funnel's visibility and active state; the author Works tab; and
+  the reset when the listing is popped.
+- `ao3_sort_spec.lua` covers sorting inside the filter screen: columns and
+  directions parsed from `filters.html` and `bookmark_filters.html`, the fixed
+  search list (`_score`, `authors_to_sort_on`, `title_to_sort_on`,
+  `created_at`, `revised_at`, `word_count`, `hits`, `kudos_count`,
+  `comments_count`, `bookmarks_count`), the URL round trip, adopting a sorted
+  URL, Apply writing exactly one column/direction pair, paging keeping it,
+  clearing facets without losing it, and the funnel lighting for a non-default
+  sort. It also measures the work, bookmark and search roots at 600×800 so the
+  Apply bar stays on one page.
 - `ao3_autocomplete_spec.lua` covers typed tag filtering: the
   `/autocomplete/<type>` URL and its encoding, the JSON name list (truncated to
   ten), a gzipped response, the generation token that drops a stale answer, the
@@ -62,12 +74,12 @@ The tests are offline:
   body. `fixtures/autocomplete/` holds representative AO3 answers.
 - `ao3_bookmarkfilter_spec.lua` repeats the filter contract against
   `fixtures/bookmark_filters.html`, a bookmark page carrying
-  `form#bookmark-filters`: all eight dimensions (including the extra `tag`),
-  the `bookmark_search` apply URL with no `work_search` params, the bookmark
-  dialog and its compact root, paging, the author Bookmarks shelf, and reset
-  on leave. Its typed-tag tests cover the add-tag row on the work and
-  bookmarker dimensions, the two separate name fields, and adopting both from
-  a pasted URL.
+  `form#bookmark-filters`: all eight dimensions (including the extra `tag`) as
+  tiles, the `bookmark_search` apply URL with no `work_search` params, the
+  bookmark dialog, paging, the author Bookmarks shelf, and reset on leave. Its
+  typed-tag tests cover the add-tag row on the work and bookmarker dimensions,
+  the two separate name fields, and adopting both from a pasted URL; its sort
+  tests pin `created_at`/`bookmarkable_date`/`word_count` with no direction.
 - `ao3_downloadsfilter_spec.lua` covers the local Downloads filter: title and
   `#id` matching in any case, narrowing and clearing on screen, the unchanged
   empty/storage rows, and that no request is made.
@@ -81,6 +93,20 @@ The tests are offline:
   is hidden before the picker opens and restored after a pick or a dismissal,
   the text is set once with the caret at the end, and a pick does not
   double-restore the keyboard.
+- `ao3_favourites_spec.lua` covers pinned fandoms: storing and reloading the
+  list, toggling from an index row (heart in place, page repaint), the home
+  shelf's four-tile cap and **All favourites** row, and the hold gesture that
+  unpins. No request is made.
+- `ao3_series_spec.lua` covers the work page's `dd.series` shapes (one series,
+  several `span.position` blocks, the `span.series` fallback, a malformed or
+  absent dd), the details rows and their carried entry, the guarded
+  `/series/<id>` open, and the series listing's blurbs and pagination with no
+  filter funnel.
+- `ao3_workupdate_spec.lua` covers saved-work update checks: the chapter
+  parser (`3/7`, `3/?`, a bare number), the bounded preface read, the
+  comparison and its messages, the WIP rule (unknown total or fewer chapters
+  than total), the single-request Downloads check with its confirmation before
+  `readWork(..., true)`, and the zero-request details row.
 - The report flow is also exercised through the UI: the home row, the
   editor, the log-consent dialog and the saved bundle.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and
