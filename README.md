@@ -49,6 +49,7 @@ details captured from a live work.
 | ![Account page](screenshots/28-account.png) | ![Chapter-only TOC](screenshots/14-reader-toc.png) |
 | ![Back to AO3 in menu](screenshots/15-reader-back-to-ao3.png) | ![Back to AO3 at end](screenshots/16-end-dialog-back.png) |
 | ![Back on the AO3 screen](screenshots/17-back-on-ao3-screen.png) | ![KO3 on the first Tools page](screenshots/34-tools-menu.png) |
+| ![The background check's update prompt on the landing page](screenshots/48-update-prompt.png) | ![The release notes the prompt opens](screenshots/49-update-changelog.png) |
 
 ## Install
 
@@ -278,6 +279,22 @@ version** appears on the home screen after an update and swaps it back.
 Updates are ~2.7 MB and come straight from `github.com`, so no Storefront
 or other plugin is required.
 
+**KO3 also looks for a release on its own.** While the plugin is open, a
+one-shot timer re-arms itself and asks GitHub at most once a day; offline, or
+after a failed request, it waits fifteen minutes and tries again. A check
+downloads nothing and draws nothing — it only notes the newer version. The
+prompt then appears the next time you are in the plugin (the landing page, or
+the screen **Back to AO3** returns you to), never over a book you are reading.
+It offers **Update**, **Remind later** (ask again in a day), **Dismiss**
+(never ask for that release again; the next one does) and **Changelog** (the
+release notes in a native scrollable viewer, so long ones page). The check can
+run while
+a work opened from the plugin is in the reader, but its result stays silent
+until the plugin is the visible screen. Closing the plugin cancels the timer
+and opening it again re-arms it, so no network work happens once you leave.
+The last check time and a dismissed version live in `settings/ao3_prefs.lua`
+with the display choices, and a failed check is only written to the log.
+
 GitHub serves release assets from its asset CDN
 (`release-assets.githubusercontent.com`), a different host from the one that
 answers the update check. Some Kindle networks reach the API but not that
@@ -499,6 +516,11 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   rejection, SHA-256 verification, staged install, failed-rename rollback and
   restore-previous; the update row, prompt and full changelog render in the
   emulator (`screenshots/29`–`30`, `37`).
+- The background update check: the 15-minute offline retry and the 24-hour
+  cadence are a pure function, a failed check logs instead of drawing, the
+  prompt appears only when the plugin menu is the top window (never over the
+  reader), and Update, Remind later, Dismiss and Changelog each keep their own
+  state. Captured in `screenshots/48`–`49`.
 - Bug reports: query stripping, consent-gated log inclusion, report bundle
   writing, relay submission and token handling; the four screens render in
   the emulator (`screenshots/31`–`33`, `36`). The relay was tested live end
@@ -514,20 +536,23 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 331 tests passing across parser, navigation,
+- The offline `busted` suite: 364 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
-  listing-filter and bug-report tests, including 51 account tests across token
-  parsing, the three-request sign-in, cookie scoping/rotation, session
-  persistence/logout, subscription parsing and work actions. The work-action
-  tests cover the website's form bodies, reading the work page's bookmarked/
-  subscribed/read-later state, one-time token reuse, bookmark and subscription
-  ids returned by AO3, already-done duplicates and the refusal to post twice.
-  The filter tests cover facet parsing (ids, names, counts, radio vs
-  checkbox), the apply URL's include/exclude params, pre-selected filters,
-  the dialog's rows and checkmarks, paging with filters, the button's
-  visibility and active state, and the reset on leaving the listing.
+  listing-filter, background-update-check and bug-report tests, including 51
+  account tests across token parsing, the three-request sign-in, cookie
+  scoping/rotation, session persistence/logout, subscription parsing and work
+  actions. The work-action tests cover the website's form bodies, reading the
+  work page's bookmarked/subscribed/read-later state, one-time token reuse,
+  bookmark and subscription ids returned by AO3, already-done duplicates and
+  the refusal to post twice. The filter tests cover facet parsing (ids, names,
+  counts, radio vs checkbox), the apply URL's include/exclude params,
+  pre-selected filters, the dialog's rows and checkmarks, paging with filters,
+  the button's visibility and active state, and the reset on leaving the
+  listing. The update-check tests cover the once-a-day policy, the 15-minute
+  offline retry, prompt gating on the top window, and the Update / Remind
+  later / Dismiss / Changelog actions.
 
 **Current connectivity (checked 2026-11-23 14:20):** AO3's edge accepts the
 Firefox header set used for sign-in. `/token_dispenser.json` returned `200`
@@ -569,7 +594,8 @@ what made the 403 stick for the plugin while `curl` could still fetch pages.
   `settings/ao3.lua`, like KOReader's other service settings. The password is
   never written. **Log out** deletes the session and its backup file; delete
   that file by hand if you want to be certain. Reader preferences (the tag
-  default) live in `settings/ao3_prefs.lua` and are kept by Log out.
+  default, the card design and the update-check bookkeeping) live in
+  `settings/ao3_prefs.lua` and are kept by Log out.
 - **The list's tag box opens to six lines.** A work with more tags than that
   shows the first six in the list; the work's details page carries the
   complete tag list.

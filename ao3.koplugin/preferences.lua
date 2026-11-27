@@ -2,9 +2,10 @@
 Reader preferences that belong to the app, not to a session.
 
 They live in their own settings file so Log out (which deletes
-`settings/ao3.lua`) cannot take the reader's display choices with it. Only
-display choices are stored here — booleans, plus the one card-design enum —
-never anything that identifies the reader; that stays in the session file.
+`settings/ao3.lua`) cannot take the reader's display choices with it. Two kinds
+of choice are stored here: how the app looks (booleans, plus the one card-design
+enum) and how often it may ask about updates (timestamps and a dismissed
+version). Neither identifies the reader; that stays in the session file.
 ]]
 
 local DataStorage = require("datastorage")
@@ -15,9 +16,17 @@ local Preferences = {}
 -- Work lists start with the tag box folded: a list is for choosing a work,
 -- and one line of tags is enough to recognise it. The modern card is the
 -- default design; the legacy one is the plain title/author/blurb card.
+--
+-- The update bookkeeping is here so Log out cannot make the plugin forget
+-- which release the reader dismissed: `last_check_ts` is the epoch second of
+-- the last manifest request, `remind_after_ts` the end of a "remind later"
+-- window, and `dismissed_version` the release that must not ask again.
 local DEFAULTS = {
     tags_expanded = false,
     card_style = "modern",
+    last_check_ts = 0,
+    remind_after_ts = 0,
+    dismissed_version = "",
 }
 
 local CARD_STYLES = {
@@ -30,6 +39,14 @@ local CARD_STYLES = {
 function Preferences.cardStyle(value)
     if type(value) == "string" and CARD_STYLES[value] then return value end
     return "modern"
+end
+
+-- Epoch seconds, or 0. A hand-edited file must not turn into a timer that
+-- fires in the past or never.
+function Preferences.timestamp(value)
+    local number = tonumber(value)
+    if not number or number < 0 then return 0 end
+    return math.floor(number)
 end
 
 function Preferences.path()
@@ -56,6 +73,12 @@ function Preferences.load(path)
         prefs.tags_expanded = expanded
     end
     prefs.card_style = Preferences.cardStyle(settings:readSetting("card_style"))
+    prefs.last_check_ts = Preferences.timestamp(settings:readSetting("last_check_ts"))
+    prefs.remind_after_ts = Preferences.timestamp(settings:readSetting("remind_after_ts"))
+    local dismissed = settings:readSetting("dismissed_version")
+    if type(dismissed) == "string" and dismissed ~= "" then
+        prefs.dismissed_version = dismissed
+    end
     return prefs
 end
 
@@ -67,6 +90,13 @@ function Preferences.save(prefs, path)
     settings:saveSetting("tags_expanded", prefs and prefs.tags_expanded == true)
     settings:saveSetting("card_style",
         Preferences.cardStyle(prefs and prefs.card_style))
+    settings:saveSetting("last_check_ts",
+        Preferences.timestamp(prefs and prefs.last_check_ts))
+    settings:saveSetting("remind_after_ts",
+        Preferences.timestamp(prefs and prefs.remind_after_ts))
+    settings:saveSetting("dismissed_version",
+        type(prefs and prefs.dismissed_version) == "string"
+            and prefs.dismissed_version or "")
     settings:flush()
     return true
 end

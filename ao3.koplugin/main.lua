@@ -3803,6 +3803,9 @@ function Ao3:installReaderHooks(reader)
         if menu and UIManager.isWidgetShown and not UIManager:isWidgetShown(menu) then
             UIManager:show(menu)
         end
+        -- Back from the reader is the moment an update found while reading may
+        -- be shown: the book is closed and the plugin is on screen again.
+        self:maybePromptUpdate()
     end
 
     -- Back key / Back gesture (through Event "Home"): return to AO3.
@@ -3974,6 +3977,9 @@ end
 -- UIManager quits. Put the file manager back so the X always lands in
 -- KOReader.
 function Ao3:onMenuClosed()
+    -- The plugin is leaving the screen, so its background timer leaves too:
+    -- no manifest request runs again until the reader opens it.
+    self:disarmUpdateCheck()
     -- Drop the closed widget tree so nothing is retained on a memory-tight
     -- device.
     FandomPages.clearCache()
@@ -4163,6 +4169,9 @@ function Ao3:menuPush(menu, title, rows)
 end
 
 function Ao3:showHome()
+    -- Opening the plugin (and returning to its landing page) resumes the
+    -- silent check; closing the menu cancels it.
+    self:startUpdateChecks()
     if self.menu then
         self.menu.item_table_stack = {}
         self.menu.ao3_title_stack = {}
@@ -4175,6 +4184,7 @@ function Ao3:showHome()
         if self.menu.page_return_arrow then
             self.menu.page_return_arrow:enableDisable(false)
         end
+        self:maybePromptUpdate()
         return
     end
     local menu = self:ensureMenu()
@@ -4182,6 +4192,7 @@ function Ao3:showHome()
     menu.ao3_title = ""
     menu:switchItemTable("", self:homeRows(), 1)
     UIManager:show(menu)
+    self:maybePromptUpdate()
 end
 
 -- Put a new item table on top of the current one (fetched pages, downloads).
@@ -5122,6 +5133,192 @@ function Ao3:pluginDir()
     return self.path or "plugins/ao3.koplugin"
 end
 
+-- ---------------------------------------------------------------------------
+-- Background update checks
+-- ---------------------------------------------------------------------------
+--
+-- The plugin can stay open for days, so a new release should be noticed
+-- without tapping Update. A one-shot timer re-arms itself and only records a
+-- newer manifest; the prompt waits for a moment when the plugin is the
+-- visible screen, so it can never cover the book the reader is in.
+
+-- UIManager:unschedule matches the scheduled function by identity, so the
+-- tick is one module-level function for the whole plugin. A fresh closure per
+-- arm could neither be cancelled nor kept from stacking.
+local update_armed_plugin
+
+local function updateTick()
+    local plugin = update_armed_plugin
+    if not plugin then return end
+    plugin:backgroundUpdateCheck()
+end
+
+Ao3.updateTick = updateTick
+
+-- Preferences are loaded once per process by init; the check reuses that
+-- table so a saved timestamp cannot race a display change.
+function Ao3:updatePrefs()
+    self.prefs = self.prefs or Preferences.load()
+    return self.prefs
+end
+
+-- A seam for tests, and one place that knows how preferences are written.
+function Ao3:savePrefs()
+    if self.prefs then Preferences.save(self.prefs) end
+end
+
+-- Replace any pending tick rather than adding to it. `delay` is seconds.
+function Ao3:armUpdateCheck(delay)
+    self:disarmUpdateCheck()
+    update_armed_plugin = self
+    self.update_timer_armed = true
+    if type(UIManager.scheduleIn) == "function" then
+        UIManager:scheduleIn(math.max(0, tonumber(delay) or 0), updateTick)
+    end
+end
+
+-- Cancel by the stable reference. Leaving the plugin must stop all background
+-- traffic with it.
+function Ao3:disarmUpdateCheck()
+    self.update_timer_armed = false
+    if update_armed_plugin == self then update_armed_plugin = nil end
+    if type(UIManager.unschedule) == "function" then
+        UIManager:unschedule(updateTick)
+    end
+end
+
+-- Called when the plugin opens (showHome). Returning to the landing page from
+-- inside the plugin keeps the running schedule.
+function Ao3:startUpdateChecks()
+    if self.update_timer_armed then return end
+    self:armUpdateCheck(0)
+end
+
+-- The timer body. Silent by contract: a failure is only logged and re-armed,
+-- because the reader may be midway through a page when it runs.
+function Ao3:backgroundUpdateCheck()
+    self.update_timer_armed = false
+    local prefs = self:updatePrefs()
+    local now = os.time()
+    local online = NetworkMgr:isConnected() and true or false
+    local action, delay = Updater.nextCheck(now, prefs.last_check_ts, online)
+    if action ~= "check" then
+        self:armUpdateCheck(delay)
+        return
+    end
+
+    local ok, manifest, err = pcall(Updater.fetchManifest, 15)
+    if not ok then
+        manifest, err = nil, tostring(manifest)
+    end
+    if not manifest then
+        BugReport.log("update", "background check failed: " .. tostring(err))
+        self:armUpdateCheck(Updater.RETRY_INTERVAL)
+        return
+    end
+
+    prefs.last_check_ts = now
+    self:savePrefs()
+    local current = Updater.currentVersion(self:pluginDir())
+    if Updater.isNewer(manifest.version, current) then
+        self.pending_update = manifest
+        BugReport.log("update",
+            T("installed %1, v%2 waiting", current, manifest.version))
+    end
+    self:armUpdateCheck(Updater.CHECK_INTERVAL)
+end
+
+-- True only while the plugin menu is the top window. The reader (or any
+-- dialog) above it means this is not a moment to draw an update prompt.
+function Ao3:pluginMenuOnTop()
+    local menu = self.menu
+    if not menu then return false end
+    local stack = UIManager._window_stack
+    if type(stack) ~= "table" or #stack == 0 then return false end
+    local entry = stack[#stack]
+    return (entry and entry.widget == menu) or false
+end
+
+-- The release notes are already plain text in the manifest (release.yml writes
+-- one changelog for the release page and the manifest, without Markdown), so
+-- the native scrollable viewer shows them as they are. Long notes scroll.
+function Ao3:showChangelog(manifest)
+    local notes = type(manifest and manifest.notes) == "string" and manifest.notes or ""
+    notes = notes:gsub("^%s+", ""):gsub("%s+$", "")
+    UIManager:show(TextViewer:new{
+        title = T(_("What's new in KO3 v%1"),
+            (manifest and manifest.version) or ""),
+        text = notes ~= "" and notes or _("This release has no changelog."),
+    })
+end
+
+-- Show the prompt for a pending release, if this is a safe moment. Returns
+-- true when a dialog was shown. The timer never calls this.
+function Ao3:maybePromptUpdate()
+    local manifest = self.pending_update
+    if not manifest then return false end
+    if not self:pluginMenuOnTop() then return false end
+    local dir = self:pluginDir()
+    -- A manual update, or an install from this prompt, makes the pending
+    -- manifest stale without the process reloading.
+    if not Updater.isNewer(manifest.version, Updater.currentVersion(dir)) then
+        self.pending_update = nil
+        return false
+    end
+    local prefs = self:updatePrefs()
+    local now = os.time()
+    if not Updater.promptDue(manifest.version, prefs.dismissed_version,
+            prefs.remind_after_ts, now) then
+        return false
+    end
+
+    local dialog
+    dialog = ButtonDialog:new{
+        title = T(_("KO3 v%1 is available.\nYou have v%2."),
+            manifest.version, Updater.currentVersion(dir)),
+        buttons = {
+            {{
+                text = _("Update"),
+                callback = function()
+                    UIManager:close(dialog)
+                    self.pending_update = nil
+                    self:installUpdate(dir, manifest)
+                end,
+            }},
+            {{
+                text = _("Remind later"),
+                callback = function()
+                    UIManager:close(dialog)
+                    -- The release stays pending: after the window, the next
+                    -- return to the plugin asks again without a new request.
+                    prefs.remind_after_ts = now + Updater.CHECK_INTERVAL
+                    self:savePrefs()
+                end,
+            }},
+            {{
+                text = _("Dismiss"),
+                callback = function()
+                    UIManager:close(dialog)
+                    prefs.dismissed_version = manifest.version
+                    prefs.remind_after_ts = 0
+                    self.pending_update = nil
+                    self:savePrefs()
+                end,
+            }},
+            {{
+                text = _("Changelog"),
+                -- The prompt stays underneath: closing the notes returns to
+                -- the same choices.
+                callback = function()
+                    self:showChangelog(manifest)
+                end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
+    return true
+end
+
 function Ao3:checkForUpdates()
     local dir = self:pluginDir()
     NetworkMgr:runWhenOnline(function()
@@ -5147,6 +5344,10 @@ function Ao3:checkForUpdates()
             return
         end
         local current = Updater.currentVersion(dir)
+        -- The tap is an explicit answer to the prompt: whatever the silent
+        -- check found is answered by this dialog, so do not ask again after
+        -- it closes.
+        self.pending_update = nil
         BugReport.log("update", T("installed %1, latest %2", current, manifest.version))
         if not Updater.isNewer(manifest.version, current) then
             UIManager:show(InfoMessage:new{

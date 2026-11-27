@@ -33,6 +33,10 @@ The tests are offline:
 - `ao3_updater_spec.lua` covers version comparison, manifest rejection,
   traversal-safe entry planning, staged install, failed-rename rollback,
   restore-previous and checksum verification, with no network or real zip.
+- `ao3_updatecheck_spec.lua` covers the background check: its 15-minute offline
+  retry and daily cadence as a pure function, the prompt's dismissal and
+  remind-later guards, the four choices (including the changelog viewer), and
+  the rule that it never draws while the reader is on top.
 - `ao3_bugreport_spec.lua` covers URL sanitising, log tails, consent-gated
   report bodies, bundle writing, token handling and relay submission
   (success, rate limit, missing configuration).
