@@ -2,12 +2,12 @@
 Reader preferences that belong to the app, not to a session.
 
 They live in their own settings file so Log out (which deletes
-`settings/ao3.lua`) cannot take the reader's display choices with it. Three
+`settings/ao3.lua`) cannot take the reader's display choices with it. Four
 kinds of choice are stored here: how the app looks (booleans, plus the one
 card-design enum), the fandoms the reader pinned to the landing page
-(`favourites`), and how often the app may ask about updates (timestamps and a
-dismissed version). None of them identifies the reader; that stays in the
-session file.
+(`favourites`), the saved work they opened last, and how often the app may ask
+about updates (timestamps and a dismissed version). None of them identifies
+the reader; that stays in the session file.
 ]]
 
 local DataStorage = require("datastorage")
@@ -23,6 +23,10 @@ local Preferences = {}
 -- which release the reader dismissed: `last_check_ts` is the epoch second of
 -- the last manifest request, `remind_after_ts` the end of a "remind later"
 -- window, and `dismissed_version` the release that must not ask again.
+--
+-- `last_read_path` and `last_read_title` are the saved copy the reader opened
+-- most recently. They are a reading fact, not a session, so logging out keeps
+-- the Continue reading row on the landing page.
 local DEFAULTS = {
     tags_expanded = false,
     card_style = "modern",
@@ -33,6 +37,8 @@ local DEFAULTS = {
     last_check_ts = 0,
     remind_after_ts = 0,
     dismissed_version = "",
+    last_read_path = "",
+    last_read_title = "",
 }
 
 local CARD_STYLES = {
@@ -140,6 +146,14 @@ function Preferences.load(path)
     if type(dismissed) == "string" and dismissed ~= "" then
         prefs.dismissed_version = dismissed
     end
+    local last_path = settings:readSetting("last_read_path")
+    if type(last_path) == "string" then
+        prefs.last_read_path = last_path
+    end
+    local last_title = settings:readSetting("last_read_title")
+    if type(last_title) == "string" then
+        prefs.last_read_title = last_title
+    end
     return prefs
 end
 
@@ -160,6 +174,12 @@ function Preferences.save(prefs, path)
     settings:saveSetting("dismissed_version",
         type(prefs and prefs.dismissed_version) == "string"
             and prefs.dismissed_version or "")
+    settings:saveSetting("last_read_path",
+        type(prefs and prefs.last_read_path) == "string"
+            and prefs.last_read_path or "")
+    settings:saveSetting("last_read_title",
+        type(prefs and prefs.last_read_title) == "string"
+            and prefs.last_read_title or "")
     settings:flush()
     return true
 end

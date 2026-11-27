@@ -14,6 +14,7 @@ e-ink instead of falling back to a missing-icon glyph on older builds.
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -257,6 +258,66 @@ local function rowBlock(row, space_below)
     return group
 end
 
+-- The Continue reading row: a full-width card in the tile family, with an open
+-- book on the left, the action's name over the work's own title, and a chevron
+-- at the right edge that says the row goes somewhere. It is a reading record,
+-- not a button, so it keeps the tiles' 7px card and 1px ink border.
+function HomePage.continueCard(entry, width, height, o)
+    local pad = Size.padding.large
+    local border = Size.border.default
+    local gap = Size.padding.large
+    local inner_w = math.max(1, width - 2 * (pad + border))
+    local inner_h = math.max(1, height - 2 * (pad + border))
+    local mark = icon(o, entry.icon, iconSize())
+    local mark_w = mark and iconSize() + gap or 0
+    local arrow_size = Screen:scaleBySize(22)
+    local arrow = icon(o, "arrow-right", arrow_size)
+    local arrow_w = arrow and arrow_size + gap or 0
+    local text_w = math.max(1, inner_w - mark_w - arrow_w)
+
+    local text = VerticalGroup:new{ align = "left" }
+    text[#text + 1] = TextWidget:new{
+        text = entry.text,
+        face = Font:getFace("smallinfofont", o.font_size),
+        bold = true,
+        max_width = text_w,
+    }
+    text[#text + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+    text[#text + 1] = TextWidget:new{
+        text = entry.hint,
+        face = Font:getFace("smallinfofont", HomePage.hint_size(o)),
+        fgcolor = Uikit.CARD_DETAIL,
+        max_width = text_w,
+    }
+
+    local row = HorizontalGroup:new{ align = "center" }
+    if mark then
+        row[#row + 1] = mark
+        row[#row + 1] = HorizontalSpan:new{ width = gap }
+    end
+    row[#row + 1] = LeftContainer:new{
+        dimen = Geom:new{ w = text_w, h = inner_h },
+        text,
+    }
+    if arrow then
+        row[#row + 1] = HorizontalSpan:new{ width = gap }
+        row[#row + 1] = CenterContainer:new{
+            dimen = Geom:new{ w = arrow_size, h = inner_h },
+            arrow,
+        }
+    end
+
+    local frame = FrameContainer:new{
+        bordersize = border,
+        color = Blitbuffer.COLOR_BLACK,
+        radius = Size.radius.button,
+        background = Blitbuffer.COLOR_WHITE,
+        padding = pad,
+        row,
+    }
+    return Uikit.tapArea(frame, width, height, entry.action)
+end
+
 -- Two tiles side by side. The pair is a static row; taps land on the tiles.
 function HomePage.tiles_row(entries, o, role, space_below)
     local gap = GUTTER
@@ -281,6 +342,17 @@ function HomePage.wide_tile(entry, o, role, space_below)
     local card = HomePage.card(entry, o.width, o.tile_height, o)
     return {
         ao3_static = rowBlock(card, space_below),
+        role = role,
+        tiles = { entry },
+    }
+end
+
+-- The one row that changes with reading rather than with the session. It uses
+-- the tile height so it sits in the Library shelf's rhythm.
+function HomePage.continue_row(entry, o, role)
+    local card = HomePage.continueCard(entry, o.width, o.tile_height, o)
+    return {
+        ao3_static = rowBlock(card, 0),
         role = role,
         tiles = { entry },
     }
@@ -418,7 +490,20 @@ function HomePage.build(o)
             text = _("Open work"), hint = _("URL or ID"), icon = "file",
             role = "open", action = o.on_open,
         },
-    }, o, "library_row")
+    }, o, "library_row", o.continue_work and GUTTER or nil)
+
+    -- Resume the work the reader opened last, directly under the Library
+    -- shelf it is saved in. Absent until something has been read, so a fresh
+    -- install shows the same four groups as before.
+    if o.continue_work then
+        rows[#rows + 1] = HomePage.continue_row({
+            text = _("Continue reading"),
+            hint = o.continue_work.title,
+            icon = "book",
+            role = "continue",
+            action = o.continue_work.action,
+        }, o, "continue")
+    end
 
     rows[#rows + 1] = {
         ao3_static = Uikit.padded(HomePage.section_label(_("Plugin"), o)),
@@ -445,6 +530,10 @@ function HomePage.build(o)
         }, o, "restore")
     end
 
+    -- Marks this table as the landing page, so a work opened later can refresh
+    -- the Continue reading row on the copy that waits at the bottom of the
+    -- menu's stack without rebuilding the whole screen.
+    rows.ao3_home = true
     return rows
 end
 

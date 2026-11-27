@@ -4511,7 +4511,55 @@ end
 -- exit paths skip that and jump to the file manager, so they are hooked for
 -- works opened from here.
 
+-- Saved works are named "Title [id].html"; the reader may open one without a
+-- title in hand, so recover the display name from the file itself.
+local function savedWorkTitle(path)
+    local name = tostring(path or ""):match("([^/\\]+)$") or ""
+    name = name:gsub("%.html$", ""):gsub("%s*%[%d+%]$", "")
+    if name ~= "" then return name end
+end
+
+-- The last saved copy opened in the reader, if it is still on disk. The home
+-- screen's Continue reading row is built from this, and the file is checked
+-- on every landing-page build so a deleted download never leaves a dead row.
+function Ao3:lastRead()
+    local prefs = self.prefs or Preferences.load()
+    local path = prefs.last_read_path
+    if type(path) ~= "string" or path == "" then return nil end
+    if lfs.attributes(path, "mode") ~= "file" then return nil end
+    local title = prefs.last_read_title
+    if type(title) ~= "string" or title == "" then
+        title = savedWorkTitle(path)
+    end
+    return { path = path, title = title }
+end
+
+-- Record the work as it opens. The landing page is built once and kept at the
+-- bottom of the menu's stack, so its rows are refreshed here too: returning
+-- from the reader then shows the Continue reading row already pointing at the
+-- work that was just closed, without a refetch.
+function Ao3:rememberLastRead(path, title)
+    if type(path) ~= "string" or path == "" then return end
+    local prefs = self.prefs or Preferences.load()
+    self.prefs = prefs
+    prefs.last_read_path = path
+    prefs.last_read_title = title or savedWorkTitle(path) or ""
+    Preferences.save(prefs)
+
+    local menu = self.menu
+    local home = menu and menu.item_table_stack and menu.item_table_stack[1]
+    if home and home.ao3_home then
+        local rows = self:homeRows()
+        for i = #home, 1, -1 do home[i] = nil end
+        for _, row in ipairs(rows) do home[#home + 1] = row end
+        home.ao3_home = true
+    end
+end
+
 function Ao3:openWorkReader(path, title)
+    -- The reader resumes at the position KOReader already stored for this
+    -- file; the landing page only has to remember which file that was.
+    self:rememberLastRead(path, title)
     local ReaderUI = require("apps/reader/readerui")
     ReaderUI:showReader(path, nil, nil, nil, function()
         -- ReaderUI.instance is assigned after after_open_callback returns.
@@ -4974,6 +5022,8 @@ function Ao3:homeRows()
         logo = nil
     end
 
+    local last_read = self:lastRead()
+
     return HomePage.build{
         width = Screen:getWidth() - 2 * Size.padding.fullscreen,
         font_size = (self.menu and self.menu.font_size) or 20,
@@ -4984,6 +5034,13 @@ function Ao3:homeRows()
         signed_in = self.session ~= nil,
         account_name = self.session and self.session.username or nil,
         favourites = self:ensurePrefs().favourites,
+        -- The last work opened from the reader, when its saved copy is still
+        -- there. The row goes under Downloads and Open work, not in a group of
+        -- its own: it belongs to the shelf the work was read from.
+        continue_work = last_read and {
+            title = last_read.title,
+            action = function() self:openWorkReader(last_read.path, last_read.title) end,
+        } or nil,
         on_account = function() self:showAccount() end,
         on_settings = function() self:showSettings() end,
         on_search = function() self:searchDialog() end,
