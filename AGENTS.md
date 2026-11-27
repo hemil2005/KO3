@@ -40,7 +40,17 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   suggestions). The canonical name joins the same pending selection and Apply
   sends it as a name in `work_search[other_tag_names]` /
   `work_search[excluded_tag_names]`, never as an `<type>_id`. A failed
-  suggestion is logged and backed off, never retried.
+  suggestion is logged and backed off, never retried. Bookmark listings offer
+  the same typed rows, with work tags in `bookmark_search[other_tag_names]` and
+  bookmarker's tags (`/autocomplete/tag`) in
+  `bookmark_search[other_bookmark_tag_names]`.
+- Bookmark listings (Bookmarks, Marked for Later, History, an author's
+  Bookmarks shelf) use the same funnel and dialog against
+  `#bookmark-filters`, emit `include_bookmark_search[...]`/`exclude_...`
+  instead of `work_search`, and add the bookmark-only `tag` dimension
+  (Bookmarker's Tags); their eight dimensions tighten the root rows so Apply
+  stays on one page. Downloads filters locally over saved files only: no
+  facets, no request.
 - The author page is one screen: the author's masthead, the pill of four tabs,
   then a count line and the shelf. Every tab keeps the masthead and the tab
   strip sits at the same height; the native title bar names the shelf, not the

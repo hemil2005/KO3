@@ -13,8 +13,10 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
 - Filter a listing by the facets AO3 already puts on the page — rating,
   warnings, categories, fandoms, characters, relationships and tags — with
   include and exclude groups, plus a typed tag search for any fandom, character,
-  relationship or additional tag AO3's short lists leave out. The filters apply
-  on tap, page with you, and reset when you leave the listing
+  relationship or additional tag AO3's short lists leave out. Bookmark lists use
+  their own sidebar, which adds the bookmarker's tags, and the same typed search.
+  The filters apply on tap, page with you, and reset when you leave the listing
+- Filter the Downloads list locally by title or work number; no request is made
 - No images
 - No comments, no work posting, no third-party service
 - One page fetched per tap; only opened works are saved
@@ -43,7 +45,8 @@ details captured from a live work.
 | ![Work summary expanded](screenshots/18-work-summary.png) | ![Work tags expanded](screenshots/19-work-tags.png) |
 | ![Tag box open in the list](screenshots/40-work-list-tags.png) | ![Settings](screenshots/41-settings.png) |
 | ![Filter button on a work listing](screenshots/46-work-filter-button.png) | ![Filter dialog with Include and Exclude groups](screenshots/47-work-filter-dialog.png) |
-| ![Typed tag search with live AO3 suggestions](screenshots/50-additional-tags.png) | |
+| ![Typed tag search with live AO3 suggestions](screenshots/50-additional-tags.png) | ![Bookmark listing with the filter funnel](screenshots/51-bookmark-filters.png) |
+| ![Bookmark filter dialog with Bookmarker's Tags](screenshots/52-bookmark-filter-dialog.png) | ![Downloads narrowed by its local filter](screenshots/53-downloads-filter.png) |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -170,6 +173,23 @@ suggestions; **Add** still takes the typed name, and Apply is unaffected.
 facets; nothing is requested while you tick boxes. The funnel fills and the
 dimension rows carry "1 selected" while filters are on. Paging keeps them, and
 leaving the listing clears them.
+
+The same funnel sits on a bookmark listing — your **Bookmarks**, **Marked for
+Later** and **History**, or an author's **Bookmarks** shelf. AO3 renders a
+bookmark sidebar there instead, so the dialog offers the same dimensions plus
+**Bookmarker's Tags**, the tags the bookmarker added rather than the work's
+own. Applying builds `bookmark_search[...]` parameters instead of
+`work_search[...]`; ticking, paging and leaving behave exactly as on a work
+listing. The extra dimension makes one more row per group, so the bookmark
+form uses slightly tighter rows to keep its Clear and Apply bar on one
+600×800 page. Typed tags work here too: **Search for a tag…** sits under each
+tag dimension, work tags go to `bookmark_search[other_tag_names]`, and a
+bookmarker's tag goes to `bookmark_search[other_bookmark_tag_names]`.
+
+**Downloads** lists only files already on the device, so its filter is local:
+a search row at the top opens a small input box and narrows the list by title
+or work number as you type. Clearing it — or emptying the box — restores every
+saved work. It never makes a request, and the storage-folder row stays put.
 
 Tap a result to drill in; tap a work for its details. The work screen leads
 with the title, author and fandom, then **Read** (the solid bar, which
@@ -461,6 +481,16 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   checkmark. Ticking changes only local state; Apply makes the single request
   and replaces the listing at page 1, AO3's paging links keep the filters, and
   leaving the listing clears them. Captured in `screenshots/46`–`47`.
+- Bookmark listings reuse that screen against `#bookmark-filters`: eight
+  dimensions in both groups (the work dimensions plus **Bookmarker's Tags**),
+  emitted as `bookmark_search[...]`, with the dimension rows one notch tighter
+  so the same Clear/Apply bar still closes the form on one page. The funnel is
+  absent everywhere else. Captured in `screenshots/51`–`52`.
+- Downloads has no AO3 page, so its filter is local: a magnifier row over the
+  saved files opens a native input box whose every keystroke narrows the list
+  by title or `#id`, and clearing it restores the shelf without a request. The
+  storage-folder row and the empty state are unchanged. Captured in
+  `screenshots/53`.
 - The work screen is one page, not a key/value list: title/author/fandom,
   Read and Refresh, a four-number strip, an aligned metadata table, four
   account actions (Kudos, Bookmark, Subscribe, Mark for later), and folded
@@ -548,13 +578,13 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 376 tests passing across parser, navigation,
+- The offline `busted` suite: 393 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
-  listing-filter, tag-autocomplete, background-update-check and bug-report
-  tests, including 51 account tests across token parsing, the three-request
-  sign-in, cookie
+  listing-filter, tag-autocomplete, bookmark-filter, Downloads-filter,
+  background-update-check and bug-report tests, including 51 account tests
+  across token parsing, the three-request sign-in, cookie
   scoping/rotation, session persistence/logout, subscription parsing and work
   actions. The work-action tests cover the website's form bodies, reading the
   work page's bookmarked/subscribed/read-later state, one-time token reuse,
@@ -563,7 +593,11 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   counts, radio vs checkbox), the apply URL's include/exclude params,
   pre-selected filters, the dialog's rows and checkmarks, paging with filters,
   the button's visibility and active state, and the reset on leaving the
-  listing. The update-check tests cover the once-a-day policy, the 15-minute
+  listing; the bookmark-filter tests repeat that against `#bookmark-filters`,
+  including the `tag` dimension and the absence of `work_search` params, and
+  the Downloads-filter tests cover case-insensitive title and `#id` matching,
+  clearing, the unchanged empty and storage rows, and that filtering makes no
+  request. The update-check tests cover the once-a-day policy, the 15-minute
   offline retry, prompt gating on the top window, and the Update / Remind
   later / Dismiss / Changelog actions. The autocomplete tests cover the
   per-type request URL and its encoding, the JSON name list truncated to ten,

@@ -720,7 +720,9 @@ function AuthorPage.parseSubscriptions(html)
     return { items = items, count = count, next_url = pag.next_url, prev_url = pag.prev_url }
 end
 
-function AuthorPage.parseBookmarks(html)
+-- `facet_parser` is optional: main.lua passes its bookmark-sidebar parser so
+-- the same page parse yields the listing and its facets, with no second read.
+function AuthorPage.parseBookmarks(html, facet_parser)
     local ok, root = pcall(htmlparser.parse, html, 5000)
     if not ok or not root then
         return nil, _("Could not parse the AO3 page.")
@@ -763,7 +765,16 @@ function AuthorPage.parseBookmarks(html)
         if count then break end
     end
     local pag = AuthorPage.pagination(root)
-    return { items = items, count = count, next_url = pag.next_url, prev_url = pag.prev_url }
+    local result = {
+        items = items,
+        count = count,
+        next_url = pag.next_url,
+        prev_url = pag.prev_url,
+    }
+    if facet_parser then
+        result.bookmark_facets = facet_parser(root) or {}
+    end
+    return result
 end
 
 return AuthorPage

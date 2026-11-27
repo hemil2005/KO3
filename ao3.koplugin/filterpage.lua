@@ -240,4 +240,8 @@ end
 
 FilterPage.ROOT_TITLE = _("Filter works")
 
+function FilterPage.rootTitle(scope)
+    return scope == "bookmark" and _("Filter bookmarks") or FilterPage.ROOT_TITLE
+end
+
 return FilterPage

@@ -9,7 +9,9 @@ AO3 serves the tag picker as JSON at `/autocomplete/<type>?term=<text>`:
 carry. So a chosen tag travels as a name, not an id: the filter dialog keeps
 the name in its pending selection, and Apply writes it to
 `work_search[other_tag_names]` (include) or `work_search[excluded_tag_names]`
-(exclude), where AO3 resolves it server-side.
+(exclude), where AO3 resolves it server-side. A bookmark page substitutes
+`bookmark_search[...]`, and a bookmarker's tag uses its own
+`other_bookmark_tag_names`/`excluded_bookmark_tag_names` field.
 
 This module owns only the URL, the JSON parsing and the optional gzip decode;
 main.lua owns the request, the debounce and the dialog. Keeping it pure makes
@@ -27,13 +29,17 @@ Autocomplete.MIN_CHARS = 2
 Autocomplete.LIMIT = 10
 Autocomplete.DELAY = 0.35
 
--- The four dimensions AO3's autocomplete routes exist for. Ratings, warnings
--- and categories are short fixed lists and keep their embedded facets.
+-- The dimensions AO3's autocomplete routes exist for: the four work-tag
+-- dimensions on every listing, plus `tag` for a bookmark page's bookmarker's
+-- tags (AO3's own bookmark filter uses `/autocomplete/tag` for that field).
+-- Ratings, warnings and categories are short fixed lists and keep their
+-- embedded facets.
 Autocomplete.TYPES = {
     fandom = true,
     character = true,
     relationship = true,
     freeform = true,
+    tag = true,
 }
 
 function Autocomplete.isType(kind)
