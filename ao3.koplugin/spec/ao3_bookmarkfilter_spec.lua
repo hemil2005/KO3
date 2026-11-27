@@ -70,6 +70,27 @@ describe("AO3 bookmark filters", function()
         end
     end
 
+    local function dimension_tile(rows, kind)
+        for _, row in ipairs(rows) do
+            for _, tile in ipairs(row.tiles or {}) do
+                if tile.role == "filter_dimension"
+                        and tile.ao3_filter_type == kind then
+                    return tile, row
+                end
+            end
+        end
+    end
+
+    local function dimension_tiles(rows)
+        local tiles = {}
+        for _, row in ipairs(rows) do
+            for _, tile in ipairs(row.tiles or {}) do
+                if tile.role == "filter_dimension" then tiles[#tiles + 1] = tile end
+            end
+        end
+        return tiles
+    end
+
     it("parses the bookmark sidebar's eight dimensions, including bookmarker tags", function()
         local listing = fixture_listing()
         local facets = listing.bookmark_facets
@@ -133,7 +154,8 @@ describe("AO3 bookmark filters", function()
             "https://archiveofourown.org/users/demo_reader/bookmarks"
                 .. "?include_bookmark_search%5Brating_ids%5D%5B%5D=10"
                 .. "&include_bookmark_search%5Bfandom_ids%5D%5B%5D=12345"
-                .. "&exclude_bookmark_search%5Btag_ids%5D%5B%5D=55003",
+                .. "&exclude_bookmark_search%5Btag_ids%5D%5B%5D=55003"
+                .. "&bookmark_search%5Bsort_column%5D=created_at",
             url)
         assert.is_nil(url:find("work_search", 1, true))
     end)
@@ -155,18 +177,23 @@ describe("AO3 bookmark filters", function()
             "https://archiveofourown.org/users/demo_reader/bookmarks", "Bookmarks")
         local rows = plugin:filterRootRows(state)
 
-        local include_tag = row_with(rows, "filter_dimension",
-            { ao3_filter_action = "include", ao3_filter_type = "tag" })
-        assert.is_truthy(include_tag)
-        assert.are.equal("Bookmarker's Tags", include_tag.text)
+        -- Eight dimensions, one tile each: the seven work dimensions plus the
+        -- bookmarker's own tags. No Include/Exclude group rows remain.
+        assert.are.equal(8, #dimension_tiles(rows))
+        for _, kind in ipairs({ "rating", "archive_warning", "category",
+                "fandom", "character", "relationship", "freeform", "tag" }) do
+            assert.is_truthy(dimension_tile(rows, kind), kind)
+        end
+        assert.is_nil(row_with(rows, "filter_group"))
 
-        local exclude_tag = row_with(rows, "filter_dimension",
-            { ao3_filter_action = "exclude", ao3_filter_type = "tag" })
-        assert.is_truthy(exclude_tag)
+        local tag = dimension_tile(rows, "tag")
+        assert.are.equal("Bookmarker's Tags", tag.text)
+        assert.are.equal("None yet", tag.ao3_filter_hint)
 
-        local include_rating = row_with(rows, "filter_dimension",
-            { ao3_filter_action = "include", ao3_filter_type = "rating" })
-        assert.is_truthy(include_rating)
+        local sort_tile = row_with(rows, "filter_sort")
+        assert.are.equal("Sort by", sort_tile.text)
+        -- A bookmark sort has no direction control, so only the column shows.
+        assert.are.equal("Date Bookmarked", sort_tile.ao3_filter_hint)
         assert.are.equal("filter_apply", rows[#rows].role)
 
         local menu = open_listing(listing, state)
@@ -178,6 +205,10 @@ describe("AO3 bookmark filters", function()
         local facet_rows = plugin:filterFacetRows(state, "include", "tag")
         local reread = row_with(facet_rows, "filter_facet", { text = "Reread" })
         assert.are.equal("\u{2713} 6", reread.mandatory)
+        -- The dimension page carries the side switch too.
+        local include_side = row_with(facet_rows, "filter_side",
+            { ao3_filter_action = "include" })
+        assert.are.equal("\u{2713}", include_side.mandatory)
     end)
 
     it("preserves bookmark filters while paging", function()
@@ -310,7 +341,8 @@ describe("AO3 bookmark filters", function()
                 .. "?bookmark_search%5Bother_tag_names%5D=Hannibal%20%28TV%29"
                 .. "&bookmark_search%5Bother_bookmark_tag_names%5D=Time%20Loop"
                 .. "&bookmark_search%5Bexcluded_tag_names%5D=Hades%20%28Video%20Game%29"
-                .. "&bookmark_search%5Bexcluded_bookmark_tag_names%5D=Dropped",
+                .. "&bookmark_search%5Bexcluded_bookmark_tag_names%5D=Dropped"
+                .. "&bookmark_search%5Bsort_column%5D=created_at",
             url)
         assert.is_nil(url:find("work_search", 1, true))
     end)
@@ -327,7 +359,8 @@ describe("AO3 bookmark filters", function()
         assert.are.equal(
             "https://archiveofourown.org/users/demo_reader/bookmarks"
                 .. "?bookmark_search%5Bother_tag_names%5D=Angst"
-                .. "&bookmark_search%5Bother_bookmark_tag_names%5D=Fluff,Reread",
+                .. "&bookmark_search%5Bother_bookmark_tag_names%5D=Fluff,Reread"
+                .. "&bookmark_search%5Bsort_column%5D=created_at",
             url)
     end)
 end)

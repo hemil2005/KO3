@@ -551,6 +551,14 @@ function Ao3:parseBookmarkFacets(root)
     return self:parseFilterFacets(root, "bookmark-filters", "bookmark")
 end
 
+-- The listing's own sort controls. Bookmark pages parse their sidebar in
+-- authorpage.lua too, so the parser lives there and is shared here; `param`
+-- names the scope ("work_search" or "bookmark_search") and defaults to
+-- whichever select the page actually carries.
+function Ao3:parseSortOptions(root, param)
+    return AuthorPage.parseSortOptions(root, param)
+end
+
 function Ao3:parseListing(html)
     local ok, root = pcall(htmlparser.parse, html, 5000)
     if not ok or not root then
@@ -614,6 +622,10 @@ function Ao3:parseListing(html)
         -- different parameter scope; both are parsed so callers can tell the
         -- two apart without a second request.
         bookmark_facets = self:parseBookmarkFacets(root),
+        -- AO3's own sort select, when the page has one. A tag/fandom sidebar
+        -- prints a smaller subset than the search form, so the page is the
+        -- only authority for its options.
+        sort = self:parseSortOptions(root),
     }
 end
 
@@ -2451,16 +2463,21 @@ end
 
 -- Rebuild `url` with exactly the current selection: a page's own filter
 -- params are dropped first so a paging link and an Apply can never carry two
--- generations of the same facet. `page` is dropped for Apply (page 1) and
--- kept for paging.
+-- generations of the same facet. Sorting is state too: when `state` is passed
+-- its sort pairs replace whatever the URL carried, and are appended once at
+-- the end. `page` is dropped for Apply (page 1) and kept for paging.
 function Ao3:filterUrl(url, state, keep_page)
     if not url then return nil end
     local path, query, fragment = urlParts(url)
     local out = {}
     for pair in (query or ""):gmatch("[^&]+") do
         local key = pair:match("^([^=]*)") or pair
-        if (keep_page or util.urlDecode(key) ~= "page")
-                and not isFilterParam(key) then
+        local decoded = util.urlDecode(key)
+        local sort_key = state ~= nil
+            and (decoded:match("^%a+_search%[sort_column%]$") ~= nil
+                or decoded:match("^%a+_search%[sort_direction%]$") ~= nil)
+        if (keep_page or decoded ~= "page")
+                and not isFilterParam(key) and not sort_key then
             out[#out + 1] = pair
         end
     end
@@ -2532,6 +2549,19 @@ function Ao3:filterUrl(url, state, keep_page)
                 out[#out + 1] = util.urlEncode(spec.param .. "[" .. field .. "]")
                     .. "=" .. table.concat(quoted, ",")
             end
+        end
+    end
+
+    -- A sort is kept as an explicit pair only when a column is chosen. The
+    -- direction is written when the page has a direction control at all: AO3's
+    -- bookmark sort is hard-coded descending and carries no such field.
+    local sort = state and state.sort
+    if sort and sort.column and sort.column ~= "" then
+        out[#out + 1] = util.urlEncode(spec.param .. "[sort_column]")
+            .. "=" .. util.urlEncode(sort.column)
+        if sort.directions and sort.direction and sort.direction ~= "" then
+            out[#out + 1] = util.urlEncode(spec.param .. "[sort_direction]")
+                .. "=" .. util.urlEncode(sort.direction)
         end
     end
 
@@ -2618,6 +2648,85 @@ local function copyFilterSelection(selected)
     return copy
 end
 
+-- Sorting is pending state like the facets: `sort` is what the screen shows,
+-- `applied_sort` is what the listing in front of the reader was loaded with.
+local function copySort(sort)
+    if not sort then return nil end
+    local copy = {
+        param = sort.param,
+        columns = {},
+        directions = nil,
+        column = sort.column,
+        direction = sort.direction,
+        default_column = sort.default_column,
+        default_direction = sort.default_direction,
+    }
+    for _, option in ipairs(sort.columns or {}) do
+        copy.columns[#copy.columns + 1] = {
+            value = option.value,
+            label = option.label,
+        }
+    end
+    if sort.directions then
+        copy.directions = {}
+        for _, option in ipairs(sort.directions) do
+            copy.directions[#copy.directions + 1] = {
+                value = option.value,
+                label = option.label,
+            }
+        end
+    end
+    return copy
+end
+
+local function sortOption(options, value)
+    for _, option in ipairs(options or {}) do
+        if option.value == value then return option end
+    end
+end
+
+-- Read `<param>[sort_column|sort_direction]` back into the state. A value the
+-- page's own select does not list becomes a synthetic option labelled with the
+-- raw value, so a pasted URL never silently loses its sort. AO3's bookmark
+-- sort has no direction field at all, so a stray one is dropped there.
+function Ao3:adoptUrlSort(state, key, value)
+    local param = (FILTER_SCOPES[state.scope] or FILTER_SCOPES.work).param
+    local column_key = param .. "[sort_column]"
+    local direction_key = param .. "[sort_direction]"
+    local sort = state.sort
+    if not sort then
+        if key ~= column_key and key ~= direction_key then return false end
+        sort = {
+            param = param,
+            columns = {},
+            directions = nil,
+            column = nil,
+            direction = nil,
+            default_column = nil,
+            default_direction = nil,
+        }
+        state.sort = sort
+    end
+
+    if key == column_key then
+        sort.column = value
+        if value ~= "" and not sortOption(sort.columns, value) then
+            sort.columns[#sort.columns + 1] = { value = value, label = value }
+        end
+        return true
+    elseif key == direction_key then
+        if state.scope ~= "bookmark" then
+            sort.direction = value
+            sort.directions = sort.directions or {}
+            if value ~= "" and not sortOption(sort.directions, value) then
+                sort.directions[#sort.directions + 1] = { value = value, label = value }
+            end
+        end
+        return true
+    end
+    return false
+end
+
 -- A pasted or previously filtered URL starts with its boxes already ticked:
 -- read the ids back into the selection and find their names in the page. The
 -- two typed-name lists are adopted as names under a "tag" bucket, because AO3
@@ -2628,7 +2737,10 @@ function Ao3:adoptUrlFilters(state, url)
     for pair in (query or ""):gmatch("[^&]+") do
         local raw_key, raw_value = pair:match("^([^=]*)=?(.*)$")
         local typed = typedFilterKey(raw_key)
-        if typed then
+        local decoded_key = util.urlDecode(raw_key or ""):gsub("%+", " ")
+        if self:adoptUrlSort(state, decoded_key, util.urlDecode(raw_value or "")) then
+            -- The sort pair is state, not a facet.
+        elseif typed then
             for _, name in ipairs(splitTagNames(util.urlDecode(raw_value or ""))) do
                 state.selected[typed.action].tag = state.selected[typed.action].tag or {}
                 state.selected[typed.action].tag[name] = {
@@ -2641,7 +2753,6 @@ function Ao3:adoptUrlFilters(state, url)
                 }
             end
         else
-            local decoded_key = util.urlDecode(raw_key or ""):gsub("%+", " ")
             local search_kind = state.scope == "search"
                 and SearchFilters.adoptKey(decoded_key) or nil
             if search_kind then
@@ -2703,12 +2814,16 @@ function Ao3:newFilterState(listing, url, title, display)
         -- the dialog drops them, so the funnel never claims a filter the
         -- results do not have.
         applied = { include = {}, exclude = {} },
+        -- The page's own sort select, when it has one. A listing without it
+        -- gets no Sort tile and no sort pairs on its rebuilt URLs.
+        sort = copySort(listing and listing.sort),
         -- Apply always starts at page 1 of the unfiltered listing URL.
         base_url = self:filterUrl(url, nil, false),
         title = title,
     }
     self:adoptUrlFilters(state, url)
     state.applied = copyFilterSelection(state.selected)
+    state.applied_sort = copySort(state.sort)
     state.display = display or function(fetched)
         self:showListing(fetched, state.title, true, state)
     end
@@ -2726,11 +2841,15 @@ function Ao3:newSearchFilterState(url, title)
         facets = SearchFilters.facets(),
         selected = { include = {}, exclude = {} },
         applied = { include = {}, exclude = {} },
+        -- Search results have no page sort form; the fixed list is AO3's
+        -- edit-search form, always written with a direction.
+        sort = SearchFilters.sorts(),
         base_url = self:filterUrl(url, nil, false),
         title = title,
     }
     self:adoptUrlFilters(state, url)
     state.applied = copyFilterSelection(state.selected)
+    state.applied_sort = copySort(state.sort)
     state.display = function(fetched)
         self:showListing(fetched, state.title, true, state)
     end
@@ -2766,10 +2885,20 @@ function Ao3:filterAppliedCount(state)
 end
 
 -- Back out of the dialog without Apply: the listing still shows the applied
--- set, so the pending ticks go with the dialog.
+-- set, so the pending ticks (and a pending sort) go with the dialog.
 function Ao3:resetPendingFilters(state)
     if not state then return end
     state.selected = copyFilterSelection(state.applied)
+    state.sort = copySort(state.applied_sort)
+end
+
+-- True when the pending sort differs from the page's own default. The funnel
+-- reads this beside the facet count: a sorted listing is a changed listing.
+function Ao3:sortChanged(state)
+    local sort = state and state.sort
+    if not sort then return false end
+    return sort.column ~= sort.default_column
+        or sort.direction ~= sort.default_direction
 end
 
 function Ao3:filterDimension(state, kind)
@@ -2886,12 +3015,17 @@ function Ao3:filterRootRows(state)
         dimensions = dimensions,
         width = width,
         font_size = font_size,
+        icons_dir = self:pluginDir() .. "/assets/icons/",
         total = self:filterCount(state),
+        sort = state.sort,
         selected_count = function(action, kind)
             return self:filterSelectedCount(state, action, kind)
         end,
-        on_dimension = function(action, kind)
-            self:showFilterDimension(state, action, kind)
+        on_dimension = function(kind)
+            self:showFilterDimension(state, "include", kind)
+        end,
+        on_sort = function()
+            self:showFilterSort(state)
         end,
         on_clear = function()
             self:clearFilters(state)
@@ -2900,20 +3034,28 @@ function Ao3:filterRootRows(state)
             self:applyFilters(state)
         end,
     }
-    -- A bookmark page offers eight dimensions in both groups: two more rows
-    -- than the fourteen the row height was tuned for. Tighten those rows a
-    -- little so the Apply bar still closes the form on one 600x800 page.
-    rows.ao3_filter_compact = #dimensions > 7
     return rows
 end
 
 function Ao3:filterFacetRows(state, action, kind)
     local dimension = self:filterDimension(state, kind)
     if not dimension then return {} end
+    local menu = self.menu
+    local font_size = (menu and menu.font_size) or 19
     local facets = self:filterTagFacets(state, action, kind)
     return FilterPage.build_dimension{
         facets = facets,
         selected = state.selected[action][kind] or {},
+        action = action,
+        width = Screen:getWidth() - 2 * Size.padding.fullscreen,
+        font_size = font_size,
+        -- The Include / Exclude switch at the top rebuilds this same page for
+        -- the other side; the title follows it.
+        on_side = function(next_action)
+            self:replaceRows(
+                FilterPage.dimensionTitle(next_action, dimension.label),
+                self:filterFacetRows(state, next_action, kind))
+        end,
         -- Only the four dimensions with an autocomplete route get the typed
         -- row; ratings, warnings and categories stay their fixed lists.
         on_add_tag = Autocomplete.isType(kind) and function()
@@ -2925,7 +3067,35 @@ function Ao3:filterFacetRows(state, action, kind)
             self:toggleFacet(state, facet)
             self:replaceRows(
                 FilterPage.dimensionTitle(action, dimension.label),
-                self:filterFacetRows(state, action, kind), index)
+                self:filterFacetRows(state, action, kind),
+                index + FilterPage.DIMENSION_HEADER_ROWS)
+        end,
+    }
+end
+
+-- The sort page: native rows, one per column, a Direction section only when
+-- the source has one, and the page's own default at the foot. A pick is
+-- pending state; the page rebuilds in place and only Apply fetches.
+function Ao3:filterSortRows(state)
+    local menu = self.menu
+    local font_size = (menu and menu.font_size) or 19
+    local width = Screen:getWidth() - 2 * Size.padding.fullscreen
+    return FilterPage.build_sort{
+        sort = state.sort,
+        width = width,
+        font_size = font_size,
+        on_column = function(value)
+            state.sort.column = value
+            self:replaceRows(_("Sort by"), self:filterSortRows(state))
+        end,
+        on_direction = function(value)
+            state.sort.direction = value
+            self:replaceRows(_("Sort by"), self:filterSortRows(state))
+        end,
+        on_default = function()
+            state.sort.column = state.sort.default_column
+            state.sort.direction = state.sort.default_direction
+            self:replaceRows(_("Sort by"), self:filterSortRows(state))
         end,
     }
 end
@@ -2934,6 +3104,17 @@ function Ao3:showFilterRoot(state)
     local rows = self:filterRootRows(state)
     rows.ao3_filter_root = state
     self:pushRows(FilterPage.rootTitle(state.scope), rows)
+end
+
+function Ao3:showFilterSort(state)
+    local menu = self.menu
+    if not menu or not state or not state.sort then return end
+    -- The root page is under this one; rebuild it on the way back so its Sort
+    -- hint and Clear button are current.
+    menu.item_table.ao3_rebuild = function()
+        return self:filterRootRows(state)
+    end
+    self:pushRows(_("Sort by"), self:filterSortRows(state))
 end
 
 function Ao3:showFilterDimension(state, action, kind)
@@ -2950,6 +3131,8 @@ function Ao3:showFilterDimension(state, action, kind)
 end
 
 function Ao3:clearFilters(state)
+    -- Clear means the facets: a sort is a view, and the sort page owns its own
+    -- Default sort row.
     state.selected = { include = {}, exclude = {} }
     local rows = self:filterRootRows(state)
     rows.ao3_filter_root = state
@@ -3169,6 +3352,7 @@ function Ao3:applyFilters(state)
     end, _("Filtering works…"), function(listing)
         -- The request succeeded, so these ticks are now the listing's truth.
         state.applied = copyFilterSelection(state.selected)
+        state.applied_sort = copySort(state.sort)
         local menu = self.menu
         if menu and menu.item_table and menu.item_table.ao3_filter_root then
             menu:onClose()
@@ -4894,7 +5078,12 @@ function Ao3:ensureMenu()
             filter_button.image = off
             filter_button.horizontal_group[2] = off
             off.hide = true
-            menu.ao3_filter_count = function(state) return self:filterAppliedCount(state) end
+            menu.ao3_filter_count = function(state)
+                -- The funnel is filled by facets or by a sort that differs
+                -- from the page's own default.
+                return self:filterAppliedCount(state)
+                    + (self:sortChanged(state) and 1 or 0)
+            end
             menu.ao3_open_filters = function()
                 local state = menu.item_table and menu.item_table.ao3_filter_state
                 if state then self:showFilterRoot(state) end

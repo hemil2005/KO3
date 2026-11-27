@@ -720,6 +720,54 @@ function AuthorPage.parseSubscriptions(html)
     return { items = items, count = count, next_url = pag.next_url, prev_url = pag.prev_url }
 end
 
+-- AO3's own sort controls, read from the page already in hand. Listings carry
+-- `select[name="<param>[sort_column]"]` and sometimes a matching
+-- `sort_direction` select. The options are AO3's to choose (tag and fandom
+-- sidebars print a different subset from the full search form), so nothing is
+-- hard-coded here; the selected option, or the first one when AO3 marks none,
+-- is the page's own current sort.
+function AuthorPage.parseSortOptions(root, param)
+    if not root then return nil end
+
+    local function readSelect(name)
+        local select = first(root:select('select[name="' .. name .. '"]'))
+        if not select then return nil end
+        local options, chosen = {}, nil
+        for _, option in ipairs(select:select("option")) do
+            local attrs = option.attributes or {}
+            local value = attrs.value
+            if value == nil then value = trim(plain(option)) end
+            local label = trim(plain(option))
+            options[#options + 1] = {
+                value = value,
+                label = label ~= "" and label or value,
+            }
+            if attrs.selected ~= nil then chosen = value end
+        end
+        if #options == 0 then return nil end
+        return options, chosen or options[1].value
+    end
+
+    for _, candidate in ipairs(param and { param }
+            or { "work_search", "bookmark_search" }) do
+        local columns, column = readSelect(candidate .. "[sort_column]")
+        if columns then
+            local directions, direction =
+                readSelect(candidate .. "[sort_direction]")
+            return {
+                param = candidate,
+                columns = columns,
+                directions = directions,
+                column = column,
+                direction = direction,
+                -- The page's own default, so "Default sort" can restore it.
+                default_column = column,
+                default_direction = direction,
+            }
+        end
+    end
+end
+
 -- `facet_parser` is optional: main.lua passes its bookmark-sidebar parser so
 -- the same page parse yields the listing and its facets, with no second read.
 function AuthorPage.parseBookmarks(html, facet_parser)
@@ -770,6 +818,9 @@ function AuthorPage.parseBookmarks(html, facet_parser)
         count = count,
         next_url = pag.next_url,
         prev_url = pag.prev_url,
+        -- The bookmark sidebar's own sort select, so the filter screen can
+        -- offer it without a second request.
+        sort = AuthorPage.parseSortOptions(root, "bookmark_search"),
     }
     if facet_parser then
         result.bookmark_facets = facet_parser(root) or {}
