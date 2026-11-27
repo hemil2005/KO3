@@ -2830,6 +2830,14 @@ function Ao3:tagSuggestions(kind, term, token)
         return nil, "unavailable"
     end
 
+    -- A repaint or a repeated strike must not become a second request for the
+    -- page AO3 already answered. The cache lives for the dialog's lifetime.
+    local cache_key = kind .. "|" .. term:lower()
+    self.tag_suggest_cache = self.tag_suggest_cache or {}
+    if self.tag_suggest_cache[cache_key] then
+        return self.tag_suggest_cache[cache_key]
+    end
+
     local url = Autocomplete.url(BASE_URL, kind, term)
     local body, err, code = self:getJson(url, 12)
     BugReport.log("http",
@@ -2846,6 +2854,7 @@ function Ao3:tagSuggestions(kind, term, token)
         return nil, "malformed"
     end
     self.tag_suggest_off_until = nil
+    self.tag_suggest_cache[cache_key] = names
     return names
 end
 
@@ -2974,6 +2983,7 @@ function Ao3:buildTagAutocomplete(state, action, kind)
     local base_close = dialog.onCloseWidget
     dialog.onCloseWidget = function(widget)
         closed = true
+        self.tag_suggest_cache = nil
         if self.tag_suggest_timer then
             UIManager:unschedule(self.tag_suggest_timer)
             self.tag_suggest_timer = nil

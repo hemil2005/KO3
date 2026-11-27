@@ -101,6 +101,23 @@ describe("AO3 tag autocomplete", function()
         assert.is_false(requested.opts.retry_on_403)
     end)
 
+    it("does not repeat a request for the same term", function()
+        local calls = 0
+        plugin.httpRequest = function()
+            calls = calls + 1
+            return read_fixture("autocomplete/fandom.json"), nil, 200, {}
+        end
+        assert.are.equal(10, #plugin:tagSuggestions("fandom", "har"))
+        -- A repaint, a repeated strike or a typed echo of the same text is the
+        -- same page AO3 already answered.
+        assert.are.equal(10, #plugin:tagSuggestions("fandom", "HAR"))
+        assert.are.equal(1, calls)
+
+        -- A different term is a new page.
+        plugin:tagSuggestions("fandom", "harr")
+        assert.are.equal(2, calls)
+    end)
+
     it("inflates a gzipped answer before decoding it", function()
         local gz = read_fixture("autocomplete/fandom.json.gz")
         plugin.httpRequest = function()
