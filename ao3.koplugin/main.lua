@@ -709,6 +709,51 @@ function Ao3:parseWorkPage(html, fallback_id)
     local summary_node = first(root:select("div.summary.module blockquote.userstuff"))
         or first(root:select("blockquote.userstuff"))
 
+    -- Series membership lives in the work meta as one `dd.series` holding a
+    -- `span.series` (and `span.position`) per series, because a work can
+    -- belong to several. Each position span carries its own "Part N of"
+    -- prefix and its own series link; the Previous/Next Work links sit in the
+    -- same dd but point at works, so only the first /series/ link in a
+    -- position counts. Older or partial markup may lack `span.position`, so
+    -- the enclosing `span.series` is the fallback. The repeated module under
+    -- the work text is a last resort, read only when the meta is absent.
+    local series
+    local function addSeries(position, link)
+        local name = plain(link)
+        local href = link and link.attributes and link.attributes.href or ""
+        if name == "" or href == ""
+                or not href:find("/series/", 1, true) then
+            return
+        end
+        series = series or {}
+        series[#series + 1] = {
+            name = name,
+            url = util.htmlEntitiesToUtf8(href),
+            position = tonumber(position),
+        }
+    end
+
+    local positions = root:select("dl.work.meta dd.series span.position")
+    if #positions > 0 then
+        for _, span in ipairs(positions) do
+            addSeries(plain(span):match("Part%s+(%d+)"),
+                first(span:select("a[href*='/series/']")))
+        end
+    else
+        local spans = root:select("dl.work.meta dd.series span.series")
+        if #spans > 0 then
+            for _, span in ipairs(spans) do
+                addSeries(plain(span):match("Part%s+(%d+)"),
+                    first(span:select("a[href*='/series/']")))
+            end
+        elseif #root:select("dl.work.meta dd.series") == 0 then
+            for _, li in ipairs(root:select("div#series.series.module li")) do
+                addSeries(plain(li):match("Part%s+(%d+)"),
+                    first(li:select("a[href*='/series/']")))
+            end
+        end
+    end
+
     return {
         id = id,
         title = title_node and plain(title_node) or (id and T(_("Work %1"), id) or _("Untitled")),
@@ -721,6 +766,9 @@ function Ao3:parseWorkPage(html, fallback_id)
         relationships = table.concat(relationships, " · "),
         relationship_list = #relationships > 0 and relationships or nil,
         summary = plain(summary_node),
+        -- Nil when the work belongs to no series, so the details page can tell
+        -- "no series" from "series not parsed".
+        series = series,
         rating = table.concat(ratings, ", "),
         warnings = table.concat(warnings, ", "),
         category = table.concat(categories, ", "),
@@ -939,6 +987,19 @@ function Ao3:loadListing(url, fallback_title, replace, state)
         end
         self:showListing(listing, fallback_title, replace, filters)
     end)
+end
+
+-- A series row on Work details carries the path AO3 printed in the work meta
+-- (`/series/12345`). Only that path is opened: the row is built from the page,
+-- but a listing must never follow an arbitrary href, and a series link
+-- without an id is not a series. The series name names the title bar.
+function Ao3:openSeries(entry)
+    if type(entry) ~= "table" then return end
+    local url = type(entry.url) == "string" and entry.url or ""
+    if not url:match("^/series/%d+") then return end
+    self:loadListing(BASE_URL .. url,
+        type(entry.name) == "string" and entry.name ~= ""
+            and entry.name or _("Series"))
 end
 
 -- ---------------------------------------------------------------------------
@@ -3827,6 +3888,9 @@ function Ao3:showWorkPage(work, replace, focus)
             UIManager:show(TextViewer:new{ title = title, text = text })
         end,
         on_author = function(name, url) self:showAuthor(name, url) end,
+        -- A series row opens the series' own work listing. It is pushed, not
+        -- replaced, so Back returns to this work page.
+        on_series = function(entry) self:openSeries(entry) end,
         signed_in = Account.isSignedIn(self.session),
         social = self:workSocial(work),
         on_action = function(action) self:workSocialAction(work, action) end,

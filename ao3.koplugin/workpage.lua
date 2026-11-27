@@ -210,6 +210,20 @@ function WorkPage.facts(work, width, font_size)
     return group
 end
 
+-- A quiet "Series" label above the series rows: the same group label the
+-- account page uses, so the rows below read as one group rather than as more
+-- work facts. The rows themselves stay native menu rows.
+function WorkPage.series_label(width, font_size)
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
+    group[#group + 1] = Uikit.label(_("Series"), width, font_size)
+    group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_large }
+    return LeftContainer:new{
+        dimen = Geom:new{ w = width, h = group:getSize().h },
+        group,
+    }
+end
+
 -- The four things an AO3 account does with a work. Read stays the page's one
 -- solid bar, so these are a 2x2 grid of outlined buttons: a second primary
 -- would cancel the first. The pressed state is KOReader's own checkmark, the
@@ -368,6 +382,40 @@ function WorkPage.build(o)
             o.on_action or function() end)),
         role = "social",
     }
+
+    -- Series membership is navigation, like the author rows, but it belongs on
+    -- the first screen with the work's other facts: it sits below the account
+    -- grid and above the folded text, so Summary and Tags cannot bury the way
+    -- into the series. The row carries its entry so the caller needs no second
+    -- fetch to know which series was tapped.
+    local series = {}
+    for _, entry in ipairs(work.series or {}) do
+        if entry and hasText(entry.name) then series[#series + 1] = entry end
+    end
+    if #series > 0 then
+        rows[#rows + 1] = {
+            ao3_static = Uikit.padded(WorkPage.series_label(width, font_size)),
+            role = "series_label",
+            -- A page must not end on a label whose rows are overleaf.
+            keep_with_next = true,
+        }
+        local on_series = o.on_series or function() end
+        -- Translate before the loop: `for _, entry` shadows gettext `_`.
+        local part_format = _("Part %1 of %2")
+        local of_format = _("Part of %1")
+        for _, entry in ipairs(series) do
+            local position = tonumber(entry.position)
+            local text = position
+                and T(part_format, position, entry.name)
+                or T(of_format, entry.name)
+            rows[#rows + 1] = {
+                text = text,
+                entry = entry,
+                action = function() on_series(entry) end,
+                role = "series",
+            }
+        end
+    end
 
     if hasText(work.summary) then
         rows[#rows + 1] = {
