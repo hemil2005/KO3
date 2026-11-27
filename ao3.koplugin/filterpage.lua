@@ -74,6 +74,18 @@ function FilterPage.build_root(o)
     local selected_plural = _("%1 selected")
 
     local function addGroup(action, top)
+        -- A dimension with no facets on this side is only worth a row when it
+        -- can still take a typed tag. Search's fixed lists are include-only,
+        -- so their exclude rows (and the whole group, when nothing is typed)
+        -- stay off the screen.
+        local visible = {}
+        for _, dimension in ipairs(o.dimensions) do
+            if #(dimension[action] or {}) > 0 or dimension.typed then
+                visible[#visible + 1] = dimension
+            end
+        end
+        if #visible == 0 then return end
+
         rows[#rows + 1] = {
             ao3_static = Uikit.padded(FilterPage.section_label(
                 group_name[action], o.width, o.font_size, top)),
@@ -81,7 +93,7 @@ function FilterPage.build_root(o)
             ao3_filter_group = action,
             keep_with_next = true,
         }
-        for _, dimension in ipairs(o.dimensions) do
+        for _, dimension in ipairs(visible) do
             local count = o.selected_count(action, dimension.key)
             rows[#rows + 1] = {
                 text = dimension.label,
@@ -206,6 +218,10 @@ end
 function FilterPage.fillSuggestions(panel, names, o)
     local group = panel.ao3_group
     for index = #group, 1, -1 do group[index] = nil end
+    -- The group caches each child's offset on its first measure. Replacing the
+    -- rows and repainting without dropping that cache leaves offsets for the
+    -- old, shorter list, and the next paint walks off the end of it.
+    group:resetLayout()
 
     if not names or #names == 0 then
         group[#group + 1] = FilterPage.suggestionHint(o.hint or "", o)
@@ -241,7 +257,9 @@ end
 FilterPage.ROOT_TITLE = _("Filter works")
 
 function FilterPage.rootTitle(scope)
-    return scope == "bookmark" and _("Filter bookmarks") or FilterPage.ROOT_TITLE
+    if scope == "bookmark" then return _("Filter bookmarks") end
+    if scope == "search" then return _("Filter search results") end
+    return FilterPage.ROOT_TITLE
 end
 
 return FilterPage

@@ -15,7 +15,9 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
   include and exclude groups, plus a typed tag search for any fandom, character,
   relationship or additional tag AO3's short lists leave out. Bookmark lists use
   their own sidebar, which adds the bookmarker's tags, and the same typed search.
-  The filters apply on tap, page with you, and reset when you leave the listing
+  A keyword search filters by AO3's fixed search dimensions (rating, warnings,
+  categories, completion, crossovers) and typed tags. The filters apply on tap,
+  page with you, and reset when you leave the listing
 - Filter the Downloads list locally by title or work number; no request is made
 - No images
 - No comments, no work posting, no third-party service
@@ -173,6 +175,12 @@ suggestions; **Add** still takes the typed name, and Apply is unaffected.
 facets; nothing is requested while you tick boxes. The funnel fills and the
 dimension rows carry "1 selected" while filters are on. Paging keeps them, and
 leaving the listing clears them.
+
+A keyword search is the exception: AO3 renders no filter sidebar on its results
+page, so the funnel is built from the advanced search form's own fixed lists
+instead — rating, archive warnings, categories, completion and crossovers —
+plus typed tags on both sides. Applying writes bare `work_search[...]`
+parameters and keeps the query, so the result stays the search you made.
 
 The same funnel sits on a bookmark listing — your **Bookmarks**, **Marked for
 Later** and **History**, or an author's **Bookmarks** shelf. AO3 renders a
@@ -389,8 +397,15 @@ Listing:
   Filters (on Apply only; AO3's own page links keep them while paging):
   GET ...?include_work_search[rating_ids][]=10&exclude_work_search[fandom_ids][]=17
   Typed tags (suggestion on pause, one request; Apply writes names, not ids):
-  GET /autocomplete/<fandom|character|relationship|freeform>?term=<text>
+  GET /autocomplete/<fandom|character|relationship|freeform|tag>?term=<text>
   GET ...?work_search[other_tag_names]=Hannibal%20(TV),Hurt%2FComfort
+
+Search results (no #work-filters on the page; fixed lists from the edit form):
+  GET .../works/search?work_search[rating_ids][]=10&archive_warning_ids[]=16
+      &category_ids[]=23&complete=T&crossover=F&other_tag_names=...
+      &work_search[query]=...
+  GET .../users/<name>/bookmarks?include_bookmark_search[tag_ids][]=55001
+  Bookmarker's typed tags: bookmark_search[other_bookmark_tag_names]=...
 
 Author page (four tabs):
   GET /users/<name>?expand_fandoms=true       Dashboard: fandoms + counts
@@ -578,7 +593,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 393 tests passing across parser, navigation,
+- The offline `busted` suite: 403 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,

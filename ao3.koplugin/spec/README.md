@@ -71,6 +71,12 @@ The tests are offline:
 - `ao3_downloadsfilter_spec.lua` covers the local Downloads filter: title and
   `#id` matching in any case, narrowing and clearing on screen, the unchanged
   empty/storage rows, and that no request is made.
+- `ao3_searchfilters_spec.lua` covers the search funnel, which has no sidebar:
+  the search-URL test, every static id and name pinned to
+  `fixtures/search_form.html` (a trimmed copy of AO3's live edit-search form),
+  the include-only fixed rows, applying `work_search[...]` params beside the
+  query, adopting a pasted filtered search, paging, and the funnel's life on a
+  search listing.
 - The report flow is also exercised through the UI: the home row, the
   editor, the log-consent dialog and the saved bundle.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and

@@ -241,4 +241,27 @@ describe("AO3 tag autocomplete", function()
                 .. "?work_search%5Bother_tag_names%5D=Angst,Fluff",
             url)
     end)
+
+    it("repaints a suggestion window after the list grows", function()
+        -- The hint row measures the window first; replacing it with ten names
+        -- must drop the cached offsets, or the next paint walks off the end.
+        local FilterPage = dofile("plugins/ao3.koplugin/filterpage.lua")
+        local Blitbuffer = require("ffi/blitbuffer")
+        local panel = FilterPage.suggestionArea{ width = 300, font_size = 20 }
+        local bb = Blitbuffer.new(300, 400)
+
+        FilterPage.fillSuggestions(panel, nil,
+            { width = 300, font_size = 20, hint = "Type…" })
+        panel:paintTo(bb, 0, 0)
+
+        FilterPage.fillSuggestions(panel,
+            { "One", "Two", "Three", "Four", "Five", "Six" },
+            { width = 300, font_size = 20, on_pick = function() end })
+        panel:paintTo(bb, 0, 0)
+
+        FilterPage.fillSuggestions(panel, nil,
+            { width = 300, font_size = 20, hint = "No matching tags." })
+        panel:paintTo(bb, 0, 0)
+        bb:free()
+    end)
 end)

@@ -51,6 +51,14 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   (Bookmarker's Tags); their eight dimensions tighten the root rows so Apply
   stays on one page. Downloads filters locally over saved files only: no
   facets, no request.
+- A keyword search has no `#work-filters`, so its funnel is built from the
+  edit-search form's fixed lists — `work_search[rating_ids][]`,
+  `archive_warning_ids[]`, `category_ids[]`, `complete`, `crossover` — plus the
+  four typed tag dimensions. Search filters are written bare
+  (`work_search[rating_ids][]`, never `include_work_search`), keep
+  `work_search[query]`, and are Include-only on the fixed lists because AO3's
+  form has no exclude side for them. `spec/fixtures/search_form.html` pins every
+  id and name to the live form.
 - The author page is one screen: the author's masthead, the pill of four tabs,
   then a count line and the shelf. Every tab keeps the masthead and the tab
   strip sits at the same height; the native title bar names the shelf, not the

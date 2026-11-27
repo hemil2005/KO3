@@ -427,6 +427,7 @@ local WorkPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "workpage.lua")))
 local HomePage = dofile((MAIN_SOURCE:gsub("main%.lua$", "homepage.lua")))
 local AccountPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "accountpage.lua")))
 Autocomplete = dofile((MAIN_SOURCE:gsub("main%.lua$", "autocomplete.lua")))
+local SearchFilters = dofile((MAIN_SOURCE:gsub("main%.lua$", "searchfilters.lua")))
 local FilterPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "filterpage.lua")))
 local SettingsPage = dofile((MAIN_SOURCE:gsub("main%.lua$", "settingspage.lua")))
 local Preferences = dofile((MAIN_SOURCE:gsub("main%.lua$", "preferences.lua")))
@@ -468,11 +469,17 @@ BOOKMARK_FILTER_DIMENSIONS[#BOOKMARK_FILTER_DIMENSIONS + 1] =
     { key = "tag", label = _("Bookmarker's Tags") }
 Ao3.BOOKMARK_FILTER_DIMENSIONS = BOOKMARK_FILTER_DIMENSIONS
 
+-- A keyword search has no sidebar (see SearchFilters), so its dialog is built
+-- from the advanced form's fixed lists plus the four typed tag dimensions.
+Ao3.SearchFilters = SearchFilters
+
 local FILTER_SCOPES = {
     work = { form_id = "work-filters", param = "work_search",
         dimensions = FILTER_DIMENSIONS },
     bookmark = { form_id = "bookmark-filters", param = "bookmark_search",
         dimensions = BOOKMARK_FILTER_DIMENSIONS },
+    search = { param = "work_search", search = true,
+        dimensions = SearchFilters.DIMENSIONS },
 }
 
 -- AO3 renders a listing's filter sidebar in the same page as the results:
@@ -837,7 +844,10 @@ function Ao3:loadListing(url, fallback_title, replace, state)
     end, _("Loading works…"), function(listing)
         local filters = state
         if not filters then
+            -- A search page has no sidebar, so it falls back to the fixed
+            -- search facets; every other listing uses its own.
             filters = self:newFilterState(listing, url, fallback_title)
+                or self:newSearchFilterState(url, fallback_title)
         else
             -- A filtered page recalculates AO3's facet counts; keep the
             -- selection but show the fresh lists.
@@ -2240,13 +2250,16 @@ local function typedFilterKey(key)
     return TYPED_FILTER_KEYS[util.urlDecode(key or ""):gsub("%+", " ")]
 end
 
--- Both scopes are dropped: a bookmark page must not keep a work page's stale
--- facets, and vice versa, when its paging links are rebuilt.
+-- Both listing scopes are dropped: a bookmark page must not keep a work page's
+-- stale facets, and vice versa, when its paging links are rebuilt. A search
+-- page's own filter params are dropped the same way; `work_search[query]` and
+-- the sort keys are not filters and survive.
 local function isFilterParam(key)
     local decoded = util.urlDecode(key or "")
     return decoded:match("^include_%a+_search%[") ~= nil
         or decoded:match("^exclude_%a+_search%[") ~= nil
         or typedFilterKey(key) ~= nil
+        or SearchFilters.isFilterKey(decoded)
 end
 
 local function splitTagNames(value)
@@ -2321,8 +2334,18 @@ function Ao3:filterUrl(url, state, keep_page)
                     return (tonumber(a) or 0) < (tonumber(b) or 0)
                 end)
                 for _, id in ipairs(numeric) do
-                    out[#out + 1] = util.urlEncode(action .. "_" .. spec.param .. "["
-                        .. dimension.key .. "_ids][]") .. "=" .. util.urlEncode(id)
+                    if spec.search then
+                        -- AO3's search form takes its filters bare:
+                        -- `work_search[rating_ids][]`, not include_work_search.
+                        if action == "include" then
+                            out[#out + 1] = util.urlEncode(
+                                SearchFilters.paramKey(dimension.key))
+                                .. "=" .. util.urlEncode(id)
+                        end
+                    else
+                        out[#out + 1] = util.urlEncode(action .. "_" .. spec.param .. "["
+                            .. dimension.key .. "_ids][]") .. "=" .. util.urlEncode(id)
+                    end
                 end
             end
         end
@@ -2383,6 +2406,9 @@ function Ao3:filterDimensions(facets, selected, scope)
             single = known_dimension and known_dimension.single,
             include = (entry and entry.include) or {},
             exclude = (entry and entry.exclude) or {},
+            -- The dialog uses this to keep a typed-only dimension visible (and
+            -- to hide a fixed dimension that has no facets on that side).
+            typed = Autocomplete.isType(key),
         }
         present[key] = true
     end
@@ -2456,19 +2482,38 @@ function Ao3:adoptUrlFilters(state, url)
                 }
             end
         else
-            local prefix, kind = util.urlDecode(raw_key or ""):match(
-                "^(%a+)_" .. param .. "%[([%w_]+)_ids%]%[%]$")
-            local action = (prefix == "include" or prefix == "exclude") and prefix or nil
-            local id = util.urlDecode(raw_value or "")
-            if action and kind and id ~= "" then
-                local facet
-                local entry = state.facets and state.facets[kind]
-                for _, candidate in ipairs(entry and entry[action] or {}) do
-                    if candidate.id == id then facet = candidate break end
+            local decoded_key = util.urlDecode(raw_key or ""):gsub("%+", " ")
+            local search_kind = state.scope == "search"
+                and SearchFilters.adoptKey(decoded_key) or nil
+            if search_kind then
+                local id = util.urlDecode(raw_value or "")
+                if id ~= "" then
+                    local facet
+                    local entry = state.facets and state.facets[search_kind]
+                    for _, candidate in ipairs(entry and entry.include or {}) do
+                        if candidate.id == id then facet = candidate break end
+                    end
+                    facet = facet or { id = id, name = id, type = search_kind,
+                        action = "include" }
+                    state.selected.include[search_kind] =
+                        state.selected.include[search_kind] or {}
+                    state.selected.include[search_kind][id] = facet
                 end
-                facet = facet or { id = id, name = id, type = kind, action = action }
-                state.selected[action][kind] = state.selected[action][kind] or {}
-                state.selected[action][kind][id] = facet
+            else
+                local prefix, kind = decoded_key:match(
+                    "^(%a+)_" .. param .. "%[([%w_]+)_ids%]%[%]$")
+                local action = (prefix == "include" or prefix == "exclude") and prefix or nil
+                local id = util.urlDecode(raw_value or "")
+                if action and kind and id ~= "" then
+                    local facet
+                    local entry = state.facets and state.facets[kind]
+                    for _, candidate in ipairs(entry and entry[action] or {}) do
+                        if candidate.id == id then facet = candidate break end
+                    end
+                    facet = facet or { id = id, name = id, type = kind, action = action }
+                    state.selected[action][kind] = state.selected[action][kind] or {}
+                    state.selected[action][kind][id] = facet
+                end
             end
         end
     end
@@ -2506,6 +2551,28 @@ function Ao3:newFilterState(listing, url, title, display)
     self:adoptUrlFilters(state, url)
     state.applied = copyFilterSelection(state.selected)
     state.display = display or function(fetched)
+        self:showListing(fetched, state.title, true, state)
+    end
+    return state
+end
+
+-- Search results carry no sidebar, so their state is built from the fixed
+-- lists in SearchFilters instead of the page. Everything else about the dialog
+-- is the parsed-facet path: the same selected/applied shape, the same Apply and
+-- the same reset when the listing is left.
+function Ao3:newSearchFilterState(url, title)
+    if not SearchFilters.isSearchUrl(url) then return nil end
+    local state = {
+        scope = "search",
+        facets = SearchFilters.facets(),
+        selected = { include = {}, exclude = {} },
+        applied = { include = {}, exclude = {} },
+        base_url = self:filterUrl(url, nil, false),
+        title = title,
+    }
+    self:adoptUrlFilters(state, url)
+    state.applied = copyFilterSelection(state.selected)
+    state.display = function(fetched)
         self:showListing(fetched, state.title, true, state)
     end
     return state
