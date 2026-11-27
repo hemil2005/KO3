@@ -4751,6 +4751,11 @@ end
 -- Dialogs
 -- ---------------------------------------------------------------------------
 
+-- AO3's keyword search renders the search-results page, which carries no
+-- filter sidebar (`#work-filters` only exists on tag/fandom/author indexes), so
+-- facets cannot be offered here. A search filter would have to be built from
+-- static dimensions and the `work_search[...]` params the search action
+-- accepts; that is tracked separately.
 function Ao3:searchUrl(query)
     return BASE_URL .. "/works/search?work_search%5Bquery%5D=" .. util.urlEncode(query)
 end
