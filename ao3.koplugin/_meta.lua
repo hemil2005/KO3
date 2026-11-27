@@ -1,5 +1,5 @@
 return {
     fullname = "KO3",
     description = "Browse, search and read works from Archive of Our Own.",
-    version = "1.6.0",
+    version = "1.7.0",
 }
