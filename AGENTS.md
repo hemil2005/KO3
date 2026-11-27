@@ -35,6 +35,13 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   KOReader's checkmark, and refetches page 1 only on **Apply filters**; paging
   keeps the filters and leaving the listing drops them. Author works, search,
   tag and fandom listings get it; no other screen does.
+- Bookmark listings (Bookmarks, Marked for Later, History, an author's
+  Bookmarks shelf) use the same funnel and dialog against
+  `#bookmark-filters`, emit `include_bookmark_search[...]`/`exclude_...`
+  instead of `work_search`, and add the bookmark-only `tag` dimension
+  (Bookmarker's Tags); their eight dimensions tighten the root rows so Apply
+  stays on one page. Downloads filters locally over saved files only: no
+  facets, no request.
 - The author page is one screen: the author's masthead, the pill of four tabs,
   then a count line and the shelf. Every tab keeps the masthead and the tab
   strip sits at the same height; the native title bar names the shelf, not the

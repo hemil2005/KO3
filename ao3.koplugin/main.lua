@@ -429,28 +429,52 @@ local FILTER_DIMENSIONS = {
 }
 Ao3.FILTER_DIMENSIONS = FILTER_DIMENSIONS
 
--- AO3 renders the filter sidebar as `form#work-filters` in the same page as
--- the results. Every usable facet is one `input` whose name carries its
--- dimension and whether it includes or excludes:
+-- Bookmark listings carry the work dimensions plus the bookmarker's own tags
+-- (`tag_ids`), which are not the work's additional tags. The parameter scope
+-- is `bookmark_search` instead of `work_search`; everything else about the
+-- form is the same shape.
+local BOOKMARK_FILTER_DIMENSIONS = {}
+for _, dimension in ipairs(FILTER_DIMENSIONS) do
+    BOOKMARK_FILTER_DIMENSIONS[#BOOKMARK_FILTER_DIMENSIONS + 1] = dimension
+end
+BOOKMARK_FILTER_DIMENSIONS[#BOOKMARK_FILTER_DIMENSIONS + 1] =
+    { key = "tag", label = _("Bookmarker's Tags") }
+Ao3.BOOKMARK_FILTER_DIMENSIONS = BOOKMARK_FILTER_DIMENSIONS
+
+local FILTER_SCOPES = {
+    work = { form_id = "work-filters", param = "work_search",
+        dimensions = FILTER_DIMENSIONS },
+    bookmark = { form_id = "bookmark-filters", param = "bookmark_search",
+        dimensions = BOOKMARK_FILTER_DIMENSIONS },
+}
+
+-- AO3 renders a listing's filter sidebar in the same page as the results:
+-- `form#work-filters` for works, `form#bookmark-filters` for bookmarks. Every
+-- usable facet is one `input` whose name carries its dimension and whether it
+-- includes or excludes:
 --
---     include_work_search[fandom_ids][]   value="136512"
+--     include_work_search[fandom_ids][]      value="136512"
+--     exclude_bookmark_search[tag_ids][]     value="7788"
 --
--- The human name and the work count live in the row's label ("Harry Potter -
+-- The human name and the count live in the row's label ("Harry Potter -
 -- J. K. Rowling (30)"). The free-text "Other tags" boxes and the sort controls
--- use `work_search[...]` and are deliberately ignored: this round exposes the
--- facets the page already offers, nothing typed.
-function Ao3:parseFilterFacets(root)
+-- are deliberately ignored: this round exposes the facets the page already
+-- offers, nothing typed.
+function Ao3:parseFilterFacets(root, form_id, scope)
     local facets = {}
-    local form = first(root:select("form#work-filters"))
+    local spec = FILTER_SCOPES[scope or "work"]
+    form_id = form_id or (spec and spec.form_id) or "work-filters"
+    local param = (spec and spec.param) or "work_search"
+    local form = first(root:select("form#" .. form_id))
     if not form then return facets end
 
     for _, input in ipairs(form:select("input")) do
         local attrs = input.attributes or {}
         local action, kind = (attrs.name or ""):match(
-            "^(include_work_search)%[([%w_]+)_ids%]%[%]$")
+            "^(include)_" .. param .. "%[([%w_]+)_ids%]%[%]$")
         if not action then
             action, kind = (attrs.name or ""):match(
-                "^(exclude_work_search)%[([%w_]+)_ids%]%[%]$")
+                "^(exclude)_" .. param .. "%[([%w_]+)_ids%]%[%]$")
         end
         local id = attrs.value
         if action and kind and id and id ~= "" then
@@ -469,7 +493,7 @@ function Ao3:parseFilterFacets(root)
                 name = trim(text)
                 count = nil
             end
-            local key = action == "include_work_search" and "include" or "exclude"
+            local key = action == "include" and "include" or "exclude"
             facets[kind] = facets[kind] or { include = {}, exclude = {} }
             facets[kind][key][#facets[kind][key] + 1] = {
                 id = trim(id),
@@ -482,6 +506,13 @@ function Ao3:parseFilterFacets(root)
         end
     end
     return facets
+end
+
+-- Bookmark pages carry their own sidebar (`form#bookmark-filters`) with
+-- `bookmark_search` params. Facets are identical in shape except the extra
+-- `tag` dimension (the bookmarker's own tags).
+function Ao3:parseBookmarkFacets(root)
+    return self:parseFilterFacets(root, "bookmark-filters", "bookmark")
 end
 
 function Ao3:parseListing(html)
@@ -543,6 +574,10 @@ function Ao3:parseListing(html)
         -- The sidebar's facets travel with the listing, so the filter screen
         -- needs no extra request: Apply is the only load that adds one.
         facets = self:parseFilterFacets(root),
+        -- A bookmark page is the same listing with a different sidebar and a
+        -- different parameter scope; both are parsed so callers can tell the
+        -- two apart without a second request.
+        bookmark_facets = self:parseBookmarkFacets(root),
     }
 end
 
@@ -775,10 +810,13 @@ function Ao3:loadListing(url, fallback_title, replace, state)
         local filters = state
         if not filters then
             filters = self:newFilterState(listing, url, fallback_title)
-        elseif listing.facets and next(listing.facets) then
+        else
             -- A filtered page recalculates AO3's facet counts; keep the
             -- selection but show the fresh lists.
-            filters.facets = listing.facets
+            local facets = self:listingFacets(listing, filters.scope)
+            if facets and next(facets) then
+                filters.facets = facets
+            end
         end
         self:showListing(listing, fallback_title, replace, filters)
     end)
@@ -1879,9 +1917,13 @@ function Ao3WorkMenu:setupItemHeights()
         elseif item.role == "filter_dimension" then
             -- The filter root is a matrix of fourteen dimension rows; they
             -- are deliberately a step tighter than the native row so the
-            -- whole form and its Apply bar stay on one 600x800 page.
+            -- whole form and its Apply bar stay on one 600x800 page. A
+            -- bookmark listing has eight dimensions (sixteen rows), so its
+            -- root shrinks one more notch to keep the bar on the same page.
+            local factor = self.item_table and self.item_table.ao3_filter_compact
+                and 1.85 or 2.0
             item.height = math.max(metrics.meta_h + 2 * Size.span.vertical_default,
-                math.floor((self.font_size or 20) * 2.0))
+                math.floor((self.font_size or 20) * factor))
         elseif item.ao3_work then
             item.height = ao3CardHeight(item, metrics, self:fandomContentWidth())
         elseif item.ao3_fandom or item.ao3_series then
@@ -2154,10 +2196,20 @@ end
 -- facets live on the listing's row table; only Apply builds a URL and loads a
 -- page, and AO3's paging links are re-built from the same choice.
 
+-- Both scopes are dropped: a bookmark page must not keep a work page's stale
+-- facets, and vice versa, when its paging links are rebuilt.
 local function isFilterParam(key)
     key = util.urlDecode(key or "")
-    return key:match("^include_work_search%[") ~= nil
-        or key:match("^exclude_work_search%[") ~= nil
+    return key:match("^include_%a+_search%[") ~= nil
+        or key:match("^exclude_%a+_search%[") ~= nil
+end
+
+-- The facets a listing carries for one scope. A bookmark listing's sidebar is
+-- `bookmark_facets`; work listings use `facets`, exactly as before.
+function Ao3:listingFacets(listing, scope)
+    if not listing then return nil end
+    if scope == "bookmark" then return listing.bookmark_facets end
+    return listing.facets
 end
 
 local function urlParts(url)
@@ -2188,7 +2240,9 @@ function Ao3:filterUrl(url, state, keep_page)
     end
 
     local chosen = state and state.selected or { include = {}, exclude = {} }
-    local dimensions = self:filterDimensions(state and state.facets)
+    local scope = state and state.scope or "work"
+    local spec = FILTER_SCOPES[scope] or FILTER_SCOPES.work
+    local dimensions = self:filterDimensions(state and state.facets, scope)
     local covered = {}
     for _, dimension in ipairs(dimensions) do covered[dimension.key] = true end
 
@@ -2217,7 +2271,7 @@ function Ao3:filterUrl(url, state, keep_page)
                     return (tonumber(a) or 0) < (tonumber(b) or 0)
                 end)
                 for _, id in ipairs(list) do
-                    out[#out + 1] = util.urlEncode(action .. "_work_search["
+                    out[#out + 1] = util.urlEncode(action .. "_" .. spec.param .. "["
                         .. dimension.key .. "_ids][]") .. "=" .. util.urlEncode(id)
                 end
             end
@@ -2232,9 +2286,10 @@ end
 
 -- The dimensions present in this page's facets, AO3's order first and any
 -- unfamiliar dimension after it, so a new AO3 filter is never unreachable.
-function Ao3:filterDimensions(facets)
+function Ao3:filterDimensions(facets, scope)
+    local spec = FILTER_SCOPES[scope or "work"] or FILTER_SCOPES.work
     local dimensions, known = {}, {}
-    for _, dimension in ipairs(FILTER_DIMENSIONS) do
+    for _, dimension in ipairs(spec.dimensions) do
         known[dimension.key] = true
         local entry = facets and facets[dimension.key]
         if entry and (#(entry.include or {}) > 0 or #(entry.exclude or {}) > 0) then
@@ -2282,10 +2337,11 @@ end
 -- read the ids back into the selection and find their names in the page.
 function Ao3:adoptUrlFilters(state, url)
     local _, query = urlParts(url)
+    local param = (FILTER_SCOPES[state.scope] or FILTER_SCOPES.work).param
     for pair in (query or ""):gmatch("[^&]+") do
         local raw_key, raw_value = pair:match("^([^=]*)=?(.*)$")
         local prefix, kind = util.urlDecode(raw_key or ""):match(
-            "^(%a+)_work_search%[([%w_]+)_ids%]%[%]$")
+            "^(%a+)_" .. param .. "%[([%w_]+)_ids%]%[%]$")
         local action = (prefix == "include" or prefix == "exclude") and prefix or nil
         local id = util.urlDecode(raw_value or "")
         if action and kind and id ~= "" then
@@ -2303,12 +2359,22 @@ end
 
 -- Nil when the page carries no usable facets: a listing without AO3's filter
 -- sidebar gets no filter button rather than a dialog with nothing in it.
-function Ao3:newFilterState(listing, url, title)
+-- Bookmark pages are recognised by their own sidebar, so the same state and
+-- dialog serve both scopes; `display` overrides the default listing redraw
+-- for the account and author screens that own their list layout.
+function Ao3:newFilterState(listing, url, title, display)
+    local scope = "work"
     local facets = listing and listing.facets
-    if not facets or not next(facets) or #self:filterDimensions(facets) == 0 then
+    if not (facets and next(facets))
+            and listing and listing.bookmark_facets and next(listing.bookmark_facets) then
+        scope, facets = "bookmark", listing.bookmark_facets
+    end
+    if not facets or not next(facets)
+            or #self:filterDimensions(facets, scope) == 0 then
         return nil
     end
     local state = {
+        scope = scope,
         facets = facets,
         selected = { include = {}, exclude = {} },
         -- The applied set is what the listing was actually loaded with.
@@ -2322,7 +2388,7 @@ function Ao3:newFilterState(listing, url, title)
     }
     self:adoptUrlFilters(state, url)
     state.applied = copyFilterSelection(state.selected)
-    state.display = function(fetched)
+    state.display = display or function(fetched)
         self:showListing(fetched, state.title, true, state)
     end
     return state
@@ -2364,7 +2430,8 @@ function Ao3:resetPendingFilters(state)
 end
 
 function Ao3:filterDimension(state, kind)
-    for _, dimension in ipairs(self:filterDimensions(state and state.facets)) do
+    for _, dimension in ipairs(self:filterDimensions(state and state.facets,
+            state and state.scope)) do
         if dimension.key == kind then return dimension end
     end
 end
@@ -2390,8 +2457,9 @@ function Ao3:filterRootRows(state)
     local menu = self.menu
     local font_size = (menu and menu.font_size) or 19
     local width = Screen:getWidth() - 2 * Size.padding.fullscreen
-    return FilterPage.build_root{
-        dimensions = self:filterDimensions(state.facets),
+    local dimensions = self:filterDimensions(state.facets, state.scope)
+    local rows = FilterPage.build_root{
+        dimensions = dimensions,
         width = width,
         font_size = font_size,
         total = self:filterCount(state),
@@ -2408,6 +2476,11 @@ function Ao3:filterRootRows(state)
             self:applyFilters(state)
         end,
     }
+    -- A bookmark page offers eight dimensions in both groups: two more rows
+    -- than the fourteen the row height was tuned for. Tighten those rows a
+    -- little so the Apply bar still closes the form on one 600x800 page.
+    rows.ao3_filter_compact = #dimensions > 7
+    return rows
 end
 
 function Ao3:filterFacetRows(state, action, kind)
@@ -2430,7 +2503,7 @@ end
 function Ao3:showFilterRoot(state)
     local rows = self:filterRootRows(state)
     rows.ao3_filter_root = state
-    self:pushRows(FilterPage.ROOT_TITLE, rows)
+    self:pushRows(FilterPage.rootTitle(state.scope), rows)
 end
 
 function Ao3:showFilterDimension(state, action, kind)
@@ -2450,7 +2523,7 @@ function Ao3:clearFilters(state)
     state.selected = { include = {}, exclude = {} }
     local rows = self:filterRootRows(state)
     rows.ao3_filter_root = state
-    self:replaceRows(FilterPage.ROOT_TITLE, rows)
+    self:replaceRows(FilterPage.rootTitle(state.scope), rows)
 end
 
 -- Apply is the only network action in the dialog: it closes the filter
@@ -2467,8 +2540,9 @@ function Ao3:applyFilters(state)
         if menu and menu.item_table and menu.item_table.ao3_filter_root then
             menu:onClose()
         end
-        if listing.facets and next(listing.facets) then
-            state.facets = listing.facets
+        local facets = self:listingFacets(listing, state.scope)
+        if facets and next(facets) then
+            state.facets = facets
         end
         if state.display then
             state.display(listing, state)
@@ -2792,7 +2866,9 @@ function Ao3:accountParser(kind)
         end
         self:learnAccountName(html)
         if kind == "bookmarks" then
-            return AuthorPage.parseBookmarks(html)
+            return AuthorPage.parseBookmarks(html, function(root)
+                return self:parseBookmarkFacets(root)
+            end)
         elseif kind == "subscriptions" then
             return AuthorPage.parseSubscriptions(html)
         end
@@ -2800,7 +2876,7 @@ function Ao3:accountParser(kind)
     end
 end
 
-function Ao3:loadAccountList(kind, url, replace)
+function Ao3:loadAccountList(kind, url, replace, filters)
     local meta = ACCOUNT_LISTS[kind]
     if not meta then return end
     if not Account.isSignedIn(self.session) then
@@ -2814,7 +2890,20 @@ function Ao3:loadAccountList(kind, url, replace)
     url = url or Account.listUrl(self.session.username, meta.path)
     if not url then return end
     self:fetchPage(url, self:accountParser(kind), meta.loading, function(data)
-        self:showAccountRows(kind, data, replace)
+        -- Bookmark lists (Bookmarks, Marked for Later, History) carry AO3's
+        -- bookmark sidebar; the same filter state and dialog serve them.
+        if not filters then
+            filters = self:newFilterState(data, url, meta.label)
+            if filters then
+                filters.display = function(fetched)
+                    self:showAccountRows(kind, fetched, true, filters)
+                end
+            end
+        else
+            local facets = self:listingFacets(data, filters.scope)
+            if facets and next(facets) then filters.facets = facets end
+        end
+        self:showAccountRows(kind, data, replace, filters)
     end, function()
         -- accountParser drops the stale session, so return to a Home screen
         -- that offers Sign in rather than leaving a dead Account page open.
@@ -2828,7 +2917,7 @@ function Ao3:showAccountList(kind)
     self:loadAccountList(kind, nil, false)
 end
 
-function Ao3:accountRows(kind, data)
+function Ao3:accountRows(kind, data, filters)
     local meta = ACCOUNT_LISTS[kind]
     -- Translate outside the loop: `for _, item` shadows gettext `_`.
     local series_label = _("Series")
@@ -2863,7 +2952,8 @@ function Ao3:accountRows(kind, data)
         rows[#rows + 1] = {
             text = _("Next page →"),
             action = function()
-                self:loadAccountList(kind, data.next_url, true)
+                self:loadAccountList(kind,
+                    self:filterUrl(data.next_url, filters, true), true, filters)
             end,
         }
     end
@@ -2871,17 +2961,19 @@ function Ao3:accountRows(kind, data)
         rows[#rows + 1] = {
             text = _("← Previous page"),
             action = function()
-                self:loadAccountList(kind, data.prev_url, true)
+                self:loadAccountList(kind,
+                    self:filterUrl(data.prev_url, filters, true), true, filters)
             end,
         }
     end
     return rows
 end
 
-function Ao3:showAccountRows(kind, data, replace)
+function Ao3:showAccountRows(kind, data, replace, filters)
     local meta = ACCOUNT_LISTS[kind]
     local name = self.session and self.session.username or _("Account")
-    local rows = self:accountRows(kind, data)
+    local rows = self:accountRows(kind, data, filters)
+    rows.ao3_filter_state = filters
 
     local title = T(_("%1 · %2"), meta.label, name)
     if data.count then
@@ -2943,7 +3035,11 @@ function Ao3:renderAuthorTab(tab_id, replace)
         label = _("Loading series…")
     elseif tab_id == "bookmarks" then
         url = AuthorPage.tabUrl(author.profile, "bookmarks")
-        parse = function(html) return AuthorPage.parseBookmarks(html) end
+        parse = function(html)
+            return AuthorPage.parseBookmarks(html, function(root)
+                return self:parseBookmarkFacets(root)
+            end)
+        end
         label = _("Loading bookmarks…")
     end
     if not url then return end
@@ -2959,19 +3055,19 @@ function Ao3:showAuthorRows(tab_id, data, replace, filters)
     local font_size = (self.menu and self.menu.font_size) or 20
     local width = Screen:getWidth() - 2 * Size.padding.fullscreen
 
-    -- The Works shelf is a work listing like any other: its page carries
-    -- AO3's filter sidebar, so the same filter button and dialog serve it.
-    -- The state is rebuilt when the tab is entered (a tab switch leaves the
-    -- listing) and handed back by paging and by Apply.
-    if tab_id == "works" and not filters then
-        local url = AuthorPage.tabUrl(author.profile, "works")
-        filters = self:newFilterState(data, url, AuthorPage.tabTitle("works"))
+    -- The Works shelf and the Bookmarks shelf are AO3 listings like any
+    -- other: their pages carry a filter sidebar, so the same button and dialog
+    -- serve them. The state is rebuilt when the tab is entered (a tab switch
+    -- leaves the listing) and handed back by paging and by Apply.
+    if (tab_id == "works" or tab_id == "bookmarks") and not filters then
+        local url = AuthorPage.tabUrl(author.profile, tab_id)
+        filters = self:newFilterState(data, url, AuthorPage.tabTitle(tab_id))
         if filters then
             filters.display = function(fetched)
                 -- A filtered shelf is not a cache entry: leaving the tab and
                 -- returning fetches the unfiltered first page again.
-                if self.author then self.author.cache.works = nil end
-                self:showAuthorRows("works", fetched, true, filters)
+                if self.author then self.author.cache[tab_id] = nil end
+                self:showAuthorRows(tab_id, fetched, true, filters)
             end
         end
     end
@@ -3020,7 +3116,11 @@ function Ao3:loadAuthorPage(tab_id, url, filters)
         parse = function(html) return AuthorPage.parseSeries(html) end
         label = _("Loading series…")
     elseif tab_id == "bookmarks" then
-        parse = function(html) return AuthorPage.parseBookmarks(html) end
+        parse = function(html)
+            return AuthorPage.parseBookmarks(html, function(root)
+                return self:parseBookmarkFacets(root)
+            end)
+        end
         label = _("Loading bookmarks…")
     else
         return
@@ -4706,11 +4806,94 @@ function Ao3:downloadItemActions(item)
     UIManager:show(dialog)
 end
 
-function Ao3:showDownloads(replace)
+-- Downloads is a local list, so its filter is local too: a case-insensitive
+-- substring match on the saved title and its work number. Empty means all.
+function Ao3:filterDownloads(items, query)
+    local wanted = trim(query or ""):lower()
+    if wanted == "" then return items end
+    local out = {}
+    for _, item in ipairs(items) do
+        local title = tostring(item.title or ""):lower()
+        local id = item.id and tostring(item.id) or ""
+        if title:find(wanted, 1, true)
+                or (id ~= "" and (id:find(wanted, 1, true)
+                    or ("#" .. id):find(wanted, 1, true))) then
+            out[#out + 1] = item
+        end
+    end
+    return out
+end
+
+-- The filter dialog is a native InputDialog whose edited_callback redraws the
+-- list underneath on every keystroke. Cancel keeps the typed query (the list
+-- already narrowed); Clear empties it and restores the full shelf.
+function Ao3:downloadsFilterDialog()
+    local dialog
+    local function apply(text)
+        text = trim(text or "")
+        self.downloads_query = text ~= "" and text or nil
+        if self.menu then self:showDownloads(true) end
+    end
+    dialog = InputDialog:new{
+        title = _("Filter saved works"),
+        description = _("Title or work number"),
+        input = self.downloads_query or "",
+        buttons = {{
+            {
+                text = _("Clear"),
+                callback = function()
+                    dialog:setInputText("")
+                    apply("")
+                end,
+            },
+            {
+                text = _("Done"),
+                is_enter_default = true,
+                callback = function()
+                    apply(dialog:getInputValue())
+                    UIManager:close(dialog)
+                end,
+            },
+        }},
+        edited_callback = function(edited)
+            -- Called with false when the widget is initialised; only a real
+            -- keystroke changes the shelf.
+            if edited == false then return end
+            apply(dialog:getInputValue())
+        end,
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function Ao3:showDownloads(replace, query)
+    if query ~= nil then
+        query = trim(query)
+        self.downloads_query = query ~= "" and query or nil
+    end
     local downloads = self:listDownloads()
+    local visible = self:filterDownloads(downloads, self.downloads_query)
     local rows = {}
 
-    for _, item in ipairs(downloads) do
+    if #downloads > 0 or self.downloads_query then
+        local filtering = self.downloads_query ~= nil
+        rows[#rows + 1] = {
+            text = filtering and T(_("Filter: %1"), self.downloads_query)
+                or _("Filter saved works…"),
+            mandatory = filtering and T(_("%1 of %2"), #visible, #downloads) or nil,
+            ao3_icon = "search",
+            action = function()
+                self:downloadsFilterDialog()
+            end,
+            hold_action = filtering and function()
+                self.downloads_query = nil
+                self:showDownloads(true)
+            end or nil,
+            role = "download_filter",
+        }
+    end
+
+    for _, item in ipairs(visible) do
         rows[#rows + 1] = {
             text = item.title,
             mandatory = item.id and ("#" .. item.id) or nil,
@@ -4720,12 +4903,15 @@ function Ao3:showDownloads(replace)
             hold_action = function()
                 self:downloadItemActions(item)
             end,
+            role = "download",
         }
     end
 
-    if #rows == 0 then
-        rows[1] = { text = _("No saved works yet.") }
-        rows[2] = { text = _("Open a work and tap Read.") }
+    if #downloads == 0 then
+        rows[#rows + 1] = { text = _("No saved works yet."), role = "download_empty" }
+        rows[#rows + 1] = { text = _("Open a work and tap Read.") }
+    elseif #visible == 0 then
+        rows[#rows + 1] = { text = _("No saved works match."), role = "download_empty" }
     end
 
     rows[#rows + 1] = {
@@ -4737,6 +4923,7 @@ function Ao3:showDownloads(replace)
                 timeout = 5,
             })
         end,
+        role = "download_storage",
     }
 
     local title = #downloads > 0 and T(_("Downloads (%1)"), #downloads) or _("Downloads")
