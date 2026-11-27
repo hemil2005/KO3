@@ -118,6 +118,10 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - `Updater.currentVersion` reads `_meta.lua`; do not execute plugin code to
   find the version. Keep the manifest URLs on HTTPS and reject path traversal
   and absolute paths in archive entries.
+- A self-re-arming timer (armed in `showHome`, cancelled in `onMenuClosed`)
+  checks the manifest once a day, retries offline failures in 15 minutes, never
+  draws, and prompts Update / Remind later / Dismiss / Changelog only when the
+  plugin menu is the top window; the state lives in `settings/ao3_prefs.lua`.
 
 ## Network
 

@@ -71,6 +71,53 @@ describe("AO3 reader preferences", function()
         assert.are.equal("modern", Preferences.load(path).card_style)
     end)
 
+    it("starts with no update bookkeeping", function()
+        local prefs = Preferences.load(path)
+        assert.are.equal(0, prefs.last_check_ts)
+        assert.are.equal(0, prefs.remind_after_ts)
+        assert.are.equal("", prefs.dismissed_version)
+    end)
+
+    it("round-trips the update bookkeeping", function()
+        assert.is_true(Preferences.save({
+            tags_expanded = false,
+            last_check_ts = 1700000000,
+            remind_after_ts = 1700086400,
+            dismissed_version = "1.6.0",
+        }, path))
+        local prefs = Preferences.load(path)
+        assert.are.equal(1700000000, prefs.last_check_ts)
+        assert.are.equal(1700086400, prefs.remind_after_ts)
+        assert.are.equal("1.6.0", prefs.dismissed_version)
+    end)
+
+    it("ignores hand-edited timestamps and a non-string version", function()
+        local f = assert(io.open(path, "wb"))
+        f:write('return { ["last_check_ts"] = "soon", ["remind_after_ts"] = -5,'
+            .. ' ["dismissed_version"] = 7 }\n')
+        f:close()
+        local prefs = Preferences.load(path)
+        assert.are.equal(0, prefs.last_check_ts)
+        assert.are.equal(0, prefs.remind_after_ts)
+        assert.are.equal("", prefs.dismissed_version)
+    end)
+
+    it("keeps the update bookkeeping when a display choice changes", function()
+        -- Toggling a setting saves the whole table; a dismissed release must
+        -- survive that or the prompt would come back on the next open.
+        local prefs = Preferences.load(path)
+        prefs.dismissed_version = "1.6.0"
+        prefs.last_check_ts = 1700000000
+        assert.is_true(Preferences.save(prefs, path))
+        prefs.tags_expanded = true
+        assert.is_true(Preferences.save(prefs, path))
+
+        local reread = Preferences.load(path)
+        assert.is_true(reread.tags_expanded)
+        assert.are.equal("1.6.0", reread.dismissed_version)
+        assert.are.equal(1700000000, reread.last_check_ts)
+    end)
+
     it("keeps its file separate from the session file", function()
         local DataStorage = require("datastorage")
         local old_dir = DataStorage.getSettingsDir

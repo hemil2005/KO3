@@ -83,6 +83,48 @@ function Updater.isNewer(candidate, current)
 end
 
 -- ---------------------------------------------------------------------------
+-- Background check cadence (pure)
+-- ---------------------------------------------------------------------------
+
+-- One manifest request a day is enough: a release is never urgent, and a
+-- Kindle should not keep waking to ask. Offline, or a request that failed,
+-- waits a quarter of an hour before trying again.
+Updater.CHECK_INTERVAL = 24 * 60 * 60
+Updater.RETRY_INTERVAL = 15 * 60
+
+-- What the background checker should do at `now` (epoch seconds).
+-- Returns "check", 0 when a check is due, or "wait", delay_seconds otherwise.
+-- The caller owns the clock and the connectivity probe, so the 15-minute and
+-- 24-hour rules need neither a timer nor a network to test.
+function Updater.nextCheck(now, last_check_ts, online)
+    now = tonumber(now) or 0
+    if not online then
+        return "wait", Updater.RETRY_INTERVAL
+    end
+    local last = tonumber(last_check_ts) or 0
+    local elapsed = now - last
+    if elapsed >= Updater.CHECK_INTERVAL then
+        return "check", 0
+    end
+    -- A clock that moved backwards must not park the check for longer than a
+    -- normal interval.
+    if elapsed < 0 then
+        return "wait", Updater.CHECK_INTERVAL
+    end
+    return "wait", Updater.CHECK_INTERVAL - elapsed
+end
+
+-- Whether a newer release should be put in front of the reader now: not
+-- dismissed by version, and not inside a "remind me later" window. The
+-- version the check found is the only thing dismissal is keyed on, so a later
+-- release asks again.
+function Updater.promptDue(version, dismissed_version, remind_after_ts, now)
+    if type(version) ~= "string" or version == "" then return false end
+    if dismissed_version == version then return false end
+    return (tonumber(remind_after_ts) or 0) <= (tonumber(now) or 0)
+end
+
+-- ---------------------------------------------------------------------------
 -- Manifest
 -- ---------------------------------------------------------------------------
 
