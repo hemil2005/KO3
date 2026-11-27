@@ -599,9 +599,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
-  listing-filter, tag-autocomplete, bookmark-filter, Downloads-filter,
-  background-update-check and bug-report tests, including 51 account tests
-  across token parsing, the three-request sign-in, cookie
+  listing-filter, tag-autocomplete, search-filter, bookmark-filter,
+  Downloads-filter, background-update-check and bug-report tests, including 51
+  account tests across token parsing, the three-request sign-in, cookie
   scoping/rotation, session persistence/logout, subscription parsing and work
   actions. The work-action tests cover the website's form bodies, reading the
   work page's bookmarked/subscribed/read-later state, one-time token reuse,
@@ -672,12 +672,13 @@ what made the 403 stick for the plugin while `curl` could still fetch pages.
 - **Snapshot, not live.** The fandom list is a point-in-time copy; tag names
   that were renamed on AO3 after the snapshot will 404 until it is
   regenerated. "Find a tag…" resolves any current tag by name.
-- **Simple search.** One query box. Filters are the facets AO3 itself lists on
-  the results page (rating, warnings, categories, fandoms, characters,
-  relationships, tags), in an Include or Exclude group, plus typed tag names
-  from AO3's autocomplete for the four tag dimensions. Word count, completion
-  status, sort order and numeric ranges are not exposed; they would need their
-  own controls and are intentionally out of scope.
+- **Simple search.** One query box. Search results have no AO3 filter sidebar,
+  so the funnel offers AO3's fixed search dimensions instead — rating, archive
+  warnings, categories, completion and crossovers — in an Include group, plus
+  typed tag names on both sides from AO3's autocomplete. Tag, fandom and author
+  listings filter by the facets their own pages carry, in Include and Exclude
+  groups. Word count, sort order and numeric ranges are not exposed; they would
+  need their own controls and are intentionally out of scope.
 - **No infinite scroll.** 20 works per page.
 - **Untested on a physical Kindle.** Parsers, UI and rendering were tested
   in the emulator; a real-device pass is still recommended.
