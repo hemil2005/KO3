@@ -574,21 +574,49 @@ describe("AO3 account", function()
     end)
 
     describe("subscriptions", function()
-        it("classifies work, series and user subscriptions", function()
+        it("reads the definition list AO3 renders", function()
             local data = assert(AuthorPage.parseSubscriptions(read_fixture("subscriptions.html")))
             assert.are.equal(3, #data.items)
-            assert.are.equal("3", data.count)
+            -- The page heading is "My Subscriptions" and carries no count, so
+            -- the title bar just names the shelf.
+            assert.is_nil(data.count)
 
             assert.are.equal("work", data.items[1].kind)
             assert.are.equal("111", data.items[1].id)
             assert.are.equal("A Subscribed Work", data.items[1].title)
             assert.are.equal("Author One", data.items[1].authors)
+            assert.are.equal("/works/111", data.items[1].url)
 
             assert.are.equal("series", data.items[2].kind)
             assert.are.equal("222", data.items[2].id)
+            assert.are.equal("A Subscribed Series", data.items[2].title)
 
             assert.are.equal("user", data.items[3].kind)
             assert.are.equal("authorthree", data.items[3].name)
+            assert.are.equal("Author Three", data.items[3].title)
+        end)
+
+        it("does not read the byline as the subscribed item", function()
+            local data = assert(AuthorPage.parseSubscriptions(read_fixture("subscriptions.html")))
+            -- Every work entry links its author next to the work link; the
+            -- author link must not turn the row into a person subscription.
+            for _, item in ipairs(data.items) do
+                assert.are_not.equal("authorone", item.name)
+                assert.are_not.equal("authortwo", item.name)
+            end
+        end)
+
+        it("prefers the work link even when the byline has no rel=author", function()
+            local data = assert(AuthorPage.parseSubscriptions([[
+                <dl class="subscription index group">
+                  <dt><a href="/works/900">Plain Byline</a> (Work) by
+                    <a href="/users/someone">Someone</a></dt>
+                  <dd></dd>
+                </dl>
+            ]]))
+            assert.are.equal(1, #data.items)
+            assert.are.equal("work", data.items[1].kind)
+            assert.are.equal("900", data.items[1].id)
         end)
 
         it("keeps rows readable for each kind", function()

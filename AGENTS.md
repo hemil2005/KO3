@@ -39,7 +39,11 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - Work details shows series membership as a quiet **Series** group: one row per
   series, "Part 2 of …", built from `dd.series span.position` (only `/series/`
   links in each position span; the Previous/Next Work links in the same `dd`
-  are works, not series) and opening that series as a work listing. When the
+  are works, not series) and opening that series as a work listing. A listing
+  blurb carries no series, so opening a card paints details from the blurb
+  first and then reads the work page once: signed in, the action-state load
+  fills it from the same response; signed out, one quiet request does. Work
+  details itself must still make no request. When the
   saved copy has fewer chapters than the live page, a row under the facts says
   how far behind it is ("2 new chapters · 3/7 → 5/7") and refreshes on tap.
   That comparison reads the saved file's preface and the work already in hand,
@@ -171,6 +175,13 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - Opening a signed-in work page reads its action state once, silently, so the
   four buttons start with accurate checkmarks. Failures are not shown; a tap
   reports its own error.
+- Subscriptions are not blurbs. `/users/<name>/subscriptions` is a definition
+  list (`dl.subscription` with one `dt` per entry, the unsubscribe form in its
+  `dd`), so parse `dl.subscription dt`: the first `/works/<id>`, `/series/<id>`
+  or `/users/<name>` link in each `dt` is the subscribed thing, while
+  `a[rel='author']` in the same `dt` is only the byline. The heading is
+  "My Subscriptions" with no count, so do not expect one. Never parse this
+  page as work blurbs; that returns nothing.
 
 ## Bug reports
 

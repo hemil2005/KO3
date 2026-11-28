@@ -101,7 +101,10 @@ The tests are offline:
   several `span.position` blocks, the `span.series` fallback, a malformed or
   absent dd), the details rows and their carried entry, the guarded
   `/series/<id>` open, and the series listing's blurbs and pagination with no
-  filter funnel.
+  filter funnel. It also covers the listing gap: a work opened from a card has
+  no series, so one work-page read fills it and repaints in place, offline
+  stays quiet, the answer is remembered, and a signed-in reader borrows the
+  action-state page instead of making a second request.
 - `ao3_workupdate_spec.lua` covers saved-work update checks: the chapter
   parser (`3/7`, `3/?`, a bare number), the bounded preface read, the
   comparison and its messages, the WIP rule (unknown total or fewer chapters
@@ -117,6 +120,9 @@ and `challenge.html` cover the two common non-work responses.
 `fixtures/account/work_actions_*.html` are trimmed copies of AO3's signed-in
 work page forms: the first has nothing marked, the second has a bookmark,
 subscription and read-later entry to remove.
+`fixtures/account/subscriptions.html` follows AO3's real subscriptions page:
+a `dl.subscription` with one `dt` per entry, the "(Work)"/"(Series)" suffix
+and byline in the same cell, and the unsubscribe form in the `dd`.
 
 Live checks are separate from this suite. A repo-root `.env` may hold test
 credentials as `EMAIL` and `PASSWORD`; it is gitignored, and its values must

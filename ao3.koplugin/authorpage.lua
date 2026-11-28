@@ -634,30 +634,50 @@ end
 
 -- Bookmarks carry the bookmarked work's header directly, so the shared work
 -- parser reads them. Series bookmarks (series-NNN) become series entries.
--- Subscriptions can point at a work, a series or a user. AO3 uses one
--- `li.subscription` per entry; the first heading link is the subscribed
--- thing. Work entries often carry the usual blurb header, so the shared work
--- parser can fill title/author/summary when it can.
+--
+-- Subscriptions are not blurbs. AO3 renders them as a definition list:
+--
+--   <dl class="subscription index group">
+--     <dt><a href="/works/111">Title</a> (Work) by <a rel="author">…</a></dt>
+--     <dd><form>…Unsubscribe…</form></dd>
+--
+-- so each `<dt>` is one entry and its first link is the subscribed thing:
+-- `/works/<id>`, `/series/<id>` or `/users/<name>`. The "(Work)" / "(Series)"
+-- suffix and the byline share the same `<dt>`, which is why the author link
+-- has to be skipped when choosing the entry's link. There is no date and no
+-- result count on this page (the heading is just "My Subscriptions").
 function AuthorPage.parseSubscriptions(html)
     local ok, root = pcall(htmlparser.parse, html, 5000)
     if not ok or not root then
         return nil, _("Could not parse the AO3 page.")
     end
-    local items = {}
+
+    local nodes = root:select("dl.subscription dt")
+    -- Pre-2014 AO3 used list items here; keep them so an old saved page still
+    -- reads even though the live site has used the definition list for years.
     for _, li in ipairs(root:select("li.subscription")) do
-        local link
-        for _, heading in ipairs({ "h4.heading", "h3.heading", "h5.heading" }) do
-            for _, a in ipairs(li:select(heading .. " a")) do
-                local href = a.attributes.href or ""
-                if a.attributes.rel ~= "author"
-                    and (href:match("/works/%d+") or href:match("/series/%d+")
-                        or href:match("/users/")) then
+        nodes[#nodes + 1] = li
+    end
+
+    local items = {}
+    for _, node in ipairs(nodes) do
+        -- A work or series link wins over a person link: a work's `<dt>`
+        -- appends its byline after the title, and only the title opens the
+        -- subscription. A person subscription has no other link.
+        local link, person
+        for _, a in ipairs(node:select("a")) do
+            local href = a.attributes.href or ""
+            if a.attributes.rel ~= "author" then
+                if href:match("^/works/%d+") or href:match("^/series/%d+") then
                     link = a
                     break
                 end
+                if not person and href:match("^/users/[^/%?#]+$") then
+                    person = a
+                end
             end
-            if link then break end
         end
+        link = link or person
 
         if link then
             local href = link.attributes.href or ""
@@ -665,33 +685,29 @@ function AuthorPage.parseSubscriptions(html)
             local work_id = href:match("/works/(%d+)")
             local series_id = href:match("/series/(%d+)")
             local user = href:match("/users/([^/%?#\"]+)")
-            local subscribed = plain(first(li:select("p.datetime")))
-                or plain(first(li:select("dd.subscribed")))
+            local subscribed = plain(first(node:select("p.datetime")))
+                or plain(first(node:select("dd.subscribed")))
 
             if work_id then
-                local work = AuthorPage.parseWorkNode(li) or {}
-                -- Subscription entries may keep the author link in h5 rather
-                -- than the usual h4, so fill it in from any rel=author link.
-                if not work.author_names then
-                    local names, urls = {}, {}
-                    for _, a in ipairs(li:select("a[rel='author']")) do
-                        local name = plain(a)
-                        if name ~= "" then
-                            names[#names + 1] = name
-                            local href = a.attributes.href or ""
-                            if href ~= "" then urls[#urls + 1] = href end
-                        end
-                    end
-                    if #names > 0 then
-                        work.authors = table.concat(names, ", ")
-                        work.author_names = names
-                        work.author_urls = #urls > 0 and urls or nil
+                local names, urls = {}, {}
+                for _, a in ipairs(node:select("a[rel='author']")) do
+                    local name = plain(a)
+                    if name ~= "" then
+                        names[#names + 1] = name
+                        local author_href = a.attributes.href or ""
+                        if author_href ~= "" then urls[#urls + 1] = author_href end
                     end
                 end
-                work.kind = "work"
-                work.id = work_id
-                work.title = title ~= "" and title or work.title
-                items[#items + 1] = work
+                items[#items + 1] = {
+                    kind = "work",
+                    id = work_id,
+                    title = title ~= "" and title or T(_("Work %1"), work_id),
+                    authors = #names > 0 and table.concat(names, ", ") or nil,
+                    author_names = #names > 0 and names or nil,
+                    author_urls = #urls > 0 and urls or nil,
+                    updated = subscribed,
+                    url = "/works/" .. work_id,
+                }
             elseif series_id then
                 items[#items + 1] = {
                     kind = "series",
@@ -711,13 +727,8 @@ function AuthorPage.parseSubscriptions(html)
         end
     end
 
-    local count
-    for _, h in ipairs(root:select("h2.heading")) do
-        count = plain(h):match("([%d,]+) Subscriptions?")
-        if count then break end
-    end
     local pag = AuthorPage.pagination(root)
-    return { items = items, count = count, next_url = pag.next_url, prev_url = pag.prev_url }
+    return { items = items, next_url = pag.next_url, prev_url = pag.prev_url }
 end
 
 -- AO3's own sort controls, read from the page already in hand. Listings carry

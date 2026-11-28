@@ -629,6 +629,72 @@ function Ao3:parseListing(html)
     }
 end
 
+-- Series membership lives in the work meta as one `dd.series` holding a
+-- `span.series` (and `span.position`) per series, because a work can
+-- belong to several:
+--
+--   <dt class="series">Series:</dt>
+--   <dd class="series"><span class="series"><span class="position">Part 2 of
+--     <a href="/series/123">Title</a></span></span></dd>
+--
+-- Each position span carries its own "Part N of" prefix and its own series
+-- link; the Previous/Next Work links sit in the same span but point at works,
+-- so only the first /series/ link counts. Older or partial markup may lack
+-- `span.position`, so the enclosing `span.series` is the fallback. The
+-- repeated module under the work text is a last resort, read only when the
+-- meta is absent. Returns nil when the work belongs to no series, so the
+-- details page can tell "no series" from "series not parsed".
+local function parseSeriesMeta(root)
+    local series
+    local function addSeries(position, link)
+        local name = plain(link)
+        local href = link and link.attributes and link.attributes.href or ""
+        if name == "" or href == ""
+                or not href:find("/series/", 1, true) then
+            return
+        end
+        series = series or {}
+        series[#series + 1] = {
+            name = name,
+            url = util.htmlEntitiesToUtf8(href),
+            position = tonumber(position),
+        }
+    end
+
+    local positions = root:select("dl.work.meta dd.series span.position")
+    if #positions > 0 then
+        for _, span in ipairs(positions) do
+            addSeries(plain(span):match("Part%s+(%d+)"),
+                first(span:select("a[href*='/series/']")))
+        end
+    else
+        local spans = root:select("dl.work.meta dd.series span.series")
+        if #spans > 0 then
+            for _, span in ipairs(spans) do
+                addSeries(plain(span):match("Part%s+(%d+)"),
+                    first(span:select("a[href*='/series/']")))
+            end
+        elseif #root:select("dl.work.meta dd.series") == 0 then
+            for _, li in ipairs(root:select("div#series.series.module li")) do
+                addSeries(plain(li):match("Part%s+(%d+)"),
+                    first(li:select("a[href*='/series/']")))
+            end
+        end
+    end
+    return series
+end
+
+-- A listing's blurb says nothing about series, so a work opened from a list
+-- only learns its series from the work page. This reads that page's meta from
+-- an HTML string already in hand; one parse, no extra request.
+local function mergeSeries(work, html)
+    if not work or work.series ~= nil or work._series_checked then return end
+    local ok, root = pcall(htmlparser.parse, html, 5000)
+    if not ok or not root then return end
+    work._series_checked = true
+    work.series = parseSeriesMeta(root)
+end
+
 -- Parse a single AO3 work page (/works/<id>) into the same work table that
 -- parseListing produces, so Open work and Downloads can open Work details.
 function Ao3:parseWorkPage(html, fallback_id)
@@ -722,50 +788,7 @@ function Ao3:parseWorkPage(html, fallback_id)
     local summary_node = first(root:select("div.summary.module blockquote.userstuff"))
         or first(root:select("blockquote.userstuff"))
 
-    -- Series membership lives in the work meta as one `dd.series` holding a
-    -- `span.series` (and `span.position`) per series, because a work can
-    -- belong to several. Each position span carries its own "Part N of"
-    -- prefix and its own series link; the Previous/Next Work links sit in the
-    -- same dd but point at works, so only the first /series/ link in a
-    -- position counts. Older or partial markup may lack `span.position`, so
-    -- the enclosing `span.series` is the fallback. The repeated module under
-    -- the work text is a last resort, read only when the meta is absent.
-    local series
-    local function addSeries(position, link)
-        local name = plain(link)
-        local href = link and link.attributes and link.attributes.href or ""
-        if name == "" or href == ""
-                or not href:find("/series/", 1, true) then
-            return
-        end
-        series = series or {}
-        series[#series + 1] = {
-            name = name,
-            url = util.htmlEntitiesToUtf8(href),
-            position = tonumber(position),
-        }
-    end
-
-    local positions = root:select("dl.work.meta dd.series span.position")
-    if #positions > 0 then
-        for _, span in ipairs(positions) do
-            addSeries(plain(span):match("Part%s+(%d+)"),
-                first(span:select("a[href*='/series/']")))
-        end
-    else
-        local spans = root:select("dl.work.meta dd.series span.series")
-        if #spans > 0 then
-            for _, span in ipairs(spans) do
-                addSeries(plain(span):match("Part%s+(%d+)"),
-                    first(span:select("a[href*='/series/']")))
-            end
-        elseif #root:select("dl.work.meta dd.series") == 0 then
-            for _, li in ipairs(root:select("div#series.series.module li")) do
-                addSeries(plain(li):match("Part%s+(%d+)"),
-                    first(li:select("a[href*='/series/']")))
-            end
-        end
-    end
+    local series = parseSeriesMeta(root)
 
     return {
         id = id,
@@ -3950,8 +3973,16 @@ function Ao3:loadAuthorPage(tab_id, url, filters)
     end)
 end
 
+-- A work opened from a listing carries only what its blurb printed, and a
+-- blurb has no series. Signed in, the action-state load reads the work page
+-- anyway and fills it; signed out, this asks for the same page once, quietly,
+-- after the details are already on screen. Failures leave the listing's facts
+-- untouched, and Work details itself still costs no request.
 function Ao3:showWork(work)
     self:showWorkPage(work, false)
+    if not Account.isSignedIn(self.session) then
+        self:ensureWorkSeriesLoaded(work)
+    end
 end
 
 function Ao3:openWorkDetails(id, title)
@@ -4036,6 +4067,35 @@ function Ao3:ensureWorkSocialLoaded(work)
             self:showWorkPage(work, true)
         end
     end, { silent = true })
+end
+
+-- Work details opened straight from a listing has no series: blurbs do not
+-- carry them and the plugin does not refetch a page just to draw a card. When
+-- signed out there is no action-state load to borrow, so this reads the work
+-- page once, quietly, and repaints if the page is still the open one. A
+-- restricted or offline work simply keeps the facts the listing had.
+function Ao3:ensureWorkSeriesLoaded(work)
+    if not work or not work.id or work.series ~= nil or work._series_checked then
+        return
+    end
+    if NetworkMgr.isConnected and not NetworkMgr:isConnected() then return end
+
+    local id = tostring(work.id)
+    self.work_series_loading = self.work_series_loading or {}
+    if self.work_series_loading[id] then return end
+    self.work_series_loading[id] = true
+    self:fetchPage(Account.workUrl(id), function(html)
+        mergeSeries(work, html)
+        return true
+    end, _("Loading work details…"), function()
+        self.work_series_loading[id] = nil
+        if self.work_state and tostring(self.work_state.id) == id
+            and self.menu and self.menu.ao3_title == _("Work details") then
+            self:showWorkPage(work, true)
+        end
+    end, function()
+        self.work_series_loading[id] = nil
+    end, true)
 end
 
 -- Folded sections are rebuilt in place: the page keeps its position on the
@@ -4240,6 +4300,7 @@ function Ao3:ensureWorkState(work, force)
     local html, err = self:fetchHtml(Account.workUrl(id), 25)
     if not html then return nil, err end
     local state = Account.parseWorkActions(html)
+    mergeSeries(work, html)
     if not state then
         return nil, _("Could not read the work's AO3 page.")
     end
@@ -4535,6 +4596,9 @@ function Ao3:loadWorkActionState(work, on_done, opts)
     end
     self:fetchPage(Account.workUrl(work.id), function(html)
         local state = Account.parseWorkActions(html)
+        -- The same page carries the work meta, so series membership costs no
+        -- second request. The listing that opened this page had no series.
+        mergeSeries(work, html)
         if not state then
             return nil, _("Could not read the work's AO3 page.")
         end

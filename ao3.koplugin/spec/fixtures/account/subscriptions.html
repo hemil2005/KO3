@@ -2,24 +2,51 @@
 <html>
   <body class="logged-in">
     <div id="main">
-      <h2 class="heading">3 Subscriptions</h2>
-      <ol class="subscription index group">
-        <li id="subscription_1" class="subscription group">
-          <h4 class="heading"><a href="/works/111">A Subscribed Work</a></h4>
-          <h5 class="heading">by <a rel="author" href="/users/authorone">Author One</a></h5>
-          <dl class="stats">
-            <dt>Subscribed</dt>
-            <dd class="subscribed">01 Jan 2026</dd>
-          </dl>
-        </li>
-        <li id="subscription_2" class="subscription group">
-          <h4 class="heading"><a href="/series/222">A Subscribed Series</a></h4>
-          <p class="datetime">02 Jan 2026</p>
-        </li>
-        <li id="subscription_3" class="subscription group">
-          <h4 class="heading"><a href="/users/authorthree">Author Three</a></h4>
-        </li>
-      </ol>
+      <!-- Captured shape of /users/<name>/subscriptions: the heading has no
+           count, one <dt> per entry, and the unsubscribe form in its <dd>. -->
+      <h2 class="heading">My Subscriptions</h2>
+      <h3 class="landmark heading">Navigation</h3>
+      <ul class="navigation actions" role="navigation">
+        <li><span class="current">All Subscriptions</span></li>
+        <li><a href="/users/testuser/subscriptions?type=series">Series Subscriptions</a></li>
+        <li><a href="/users/testuser/subscriptions?type=users">User Subscriptions</a></li>
+        <li><a href="/users/testuser/subscriptions?type=works">Work Subscriptions</a></li>
+        <li><a href="/users/testuser/subscriptions/confirm_delete_all">Delete All Subscriptions</a></li>
+      </ul>
+      <h3 class="landmark heading">List of Subscriptions</h3>
+      <dl class="subscription index group">
+        <dt>
+          <a href="/works/111">A Subscribed Work</a>
+          (Work)
+          by <a rel="author" href="/users/authorone">Author One</a>
+        </dt>
+        <dd>
+          <form class="button_to" method="post" action="/users/testuser/subscriptions/501">
+            <input type="hidden" name="_method" value="delete" />
+            <input type="submit" value="Unsubscribe from A Subscribed Work" />
+          </form>
+        </dd>
+        <dt>
+          <a href="/series/222">A Subscribed Series</a>
+          (Series)
+          by <a rel="author" href="/users/authortwo">Author Two</a>
+        </dt>
+        <dd>
+          <form class="button_to" method="post" action="/users/testuser/subscriptions/502">
+            <input type="hidden" name="_method" value="delete" />
+            <input type="submit" value="Unsubscribe from A Subscribed Series" />
+          </form>
+        </dd>
+        <dt>
+          <a href="/users/authorthree">Author Three</a>
+        </dt>
+        <dd>
+          <form class="button_to" method="post" action="/users/testuser/subscriptions/503">
+            <input type="hidden" name="_method" value="delete" />
+            <input type="submit" value="Unsubscribe from Author Three" />
+          </form>
+        </dd>
+      </dl>
     </div>
   </body>
 </html>

@@ -61,7 +61,8 @@ details captured from a live work.
 | ![One dimension with its Include/Exclude switch](screenshots/64-filter-dimension.png) | ![Sort by, using AO3's own columns](screenshots/65-filter-sort.png) |
 | ![Favourite fandoms on the landing page](screenshots/70-home-favourites.png) | ![Work details: new chapters and series membership](screenshots/71-work-series-update.png) |
 | ![Check for updates on a saved WIP](screenshots/72-downloads-check.png) | ![Continue reading under the Library shelf](screenshots/66-home-continue.png) |
-| ![All favourites as a native list](screenshots/69-favourite-fandoms-list.png) | |
+| ![All favourites as a native list](screenshots/69-favourite-fandoms-list.png) | ![Subscriptions from AO3's definition list](screenshots/73-subscriptions-list.png) |
+| ![A work opened from a list grows its Series group](screenshots/74-series-from-listing.png) | |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -600,6 +601,12 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   showing "2 new chapters · 3/7 → 5/7" and two series rows, and the Downloads
   actions with **Check for updates** (`screenshots/63`–`72`). The demo seeds a
   local preferences file and a saved preface; it makes no AO3 request.
+- The subscriptions list is parsed from a copy of AO3's real definition-list
+  markup, so a work ("by Author One"), a series and a user each get a row and
+  the byline is not mistaken for the subscription (`screenshots/73`). A work
+  opened from a listing paints immediately and then grows its **Series** group
+  from one page read; the capture shows both series in place
+  (`screenshots/74`). The demo stubs only the transport.
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
 - Works opened from AO3 return to the plugin from the Back key, the reader
@@ -653,17 +660,21 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 505 tests passing across parser, navigation,
+- The offline `busted` suite: 512 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
   listing-filter, tag-autocomplete, search-filter, bookmark-filter,
   Downloads-filter, search-history, background-update-check, bug-report,
   favourite-fandom, series-navigation, filter-sort and saved-work-update tests,
-  including 51 account tests across token parsing, the three-request
+  including 53 account tests across token parsing, the three-request
   sign-in, cookie
   scoping/rotation, session persistence/logout, subscription parsing and work
-  actions. The work-action tests cover the website's form bodies, reading the
+  actions. The subscription tests run against AO3's real definition-list
+  markup (`dl.subscription dt`, the "(Work)" suffix and byline in the same
+  cell), so a work, a series and a user each become the right row without the
+  byline link being mistaken for the subscription. The work-action tests cover
+  the website's form bodies, reading the
   work page's bookmarked/subscribed/read-later state, one-time token reuse,
   bookmark and subscription ids returned by AO3, already-done duplicates and
   the refusal to post twice. The filter tests cover facet parsing (ids, names,

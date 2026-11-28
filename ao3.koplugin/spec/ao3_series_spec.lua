@@ -323,6 +323,157 @@ describe("AO3 work details series wiring", function()
     end)
 end)
 
+describe("AO3 series fetched for a listing work", function()
+    local NetworkMgr = require("ui/network/manager")
+    local Account = dofile("plugins/ao3.koplugin/account.lua")
+
+    local meta = [[
+        <dt class="series">Series:</dt>
+        <dd class="series">
+          <span class="series"><span class="position">Part 2 of
+            <a href="/series/12345">Coils AU</a></span></span>
+        </dd>
+    ]]
+
+    local function with_pages(body)
+        local saved = {
+            fetchPage = plugin.fetchPage,
+            showWorkPage = plugin.showWorkPage,
+            connected = NetworkMgr.isConnected,
+            session = plugin.session,
+        }
+        local calls = {}
+        NetworkMgr.isConnected = function() return true end
+        plugin.fetchPage = function(_, url, parse, _, on_success, on_error)
+            calls[#calls + 1] = url
+            local data, err = parse(body)
+            if data then
+                on_success(data)
+            elseif on_error then
+                on_error(err)
+            end
+        end
+        plugin.showWorkPage = function(_, work, replace)
+            calls.repainted = { id = work.id, replace = replace }
+        end
+        return saved, calls
+    end
+
+    local function restore(saved)
+        plugin.fetchPage = saved.fetchPage
+        plugin.showWorkPage = saved.showWorkPage
+        NetworkMgr.isConnected = saved.connected
+        plugin.session = saved.session
+    end
+
+    it("fills series from one work-page read and repaints in place", function()
+        local saved, calls = with_pages(work_html(meta))
+        local work = { id = "42", title = "A Work", authors = "Alice" }
+
+        local ok, err = pcall(function()
+            plugin.work_state = { id = "42" }
+            plugin.menu = { font_size = 19, ao3_title = "Work details" }
+            plugin:ensureWorkSeriesLoaded(work)
+
+            assert.are.equal(1, #calls)
+            assert.are.equal(Account.workUrl("42"), calls[1])
+            assert.are.equal(1, #work.series)
+            assert.are.equal("Coils AU", work.series[1].name)
+            assert.are.equal(2, work.series[1].position)
+            assert.is_true(calls.repainted.replace)
+            assert.are.equal("42", calls.repainted.id)
+
+            -- One page per work: the result is remembered, so reopening the
+            -- same card costs nothing.
+            plugin:ensureWorkSeriesLoaded(work)
+            assert.are.equal(1, #calls)
+        end)
+        restore(saved)
+        assert.is_true(ok, err)
+    end)
+
+    it("remembers a work that has no series without asking again", function()
+        local saved, calls = with_pages(work_html(""))
+        local work = { id = "42", title = "A Work", authors = "Alice" }
+
+        local ok, err = pcall(function()
+            plugin:ensureWorkSeriesLoaded(work)
+            assert.is_nil(work.series)
+            plugin:ensureWorkSeriesLoaded(work)
+            assert.are.equal(1, #calls)
+        end)
+        restore(saved)
+        assert.is_true(ok, err)
+    end)
+
+    it("stays offline when there is no connection", function()
+        local saved, calls = with_pages(work_html(meta))
+        NetworkMgr.isConnected = function() return false end
+        local work = { id = "42", title = "A Work", authors = "Alice" }
+
+        local ok, err = pcall(function()
+            plugin:ensureWorkSeriesLoaded(work)
+            assert.are.equal(0, #calls)
+        end)
+        restore(saved)
+        assert.is_true(ok, err)
+    end)
+
+    it("borrows the signed-in action-state page instead of a second request", function()
+        local saved, calls = with_pages(work_html(meta))
+        local work = { id = "42", title = "A Work", authors = "Alice" }
+
+        local ok, err = pcall(function()
+            plugin.session = {
+                username = "testuser",
+                cookies = { _otwarchive_session = "x" },
+            }
+            plugin:loadWorkActionState(work)
+            assert.are.equal(1, #calls)
+            assert.are.equal(1, #work.series)
+            assert.are.equal("Coils AU", work.series[1].name)
+        end)
+        restore(saved)
+        assert.is_true(ok, err)
+    end)
+
+    it("asks for series when a listing card opens details", function()
+        local saved = {
+            showWorkPage = plugin.showWorkPage,
+            ensureWorkSeriesLoaded = plugin.ensureWorkSeriesLoaded,
+            session = plugin.session,
+        }
+        local painted, asked = 0, 0
+        plugin.showWorkPage = function() painted = painted + 1 end
+        plugin.ensureWorkSeriesLoaded = function() asked = asked + 1 end
+        local work = { id = "42", title = "A Work", authors = "Alice" }
+
+        local ok, err = pcall(function()
+            -- Signed out: the details page itself draws from the blurb, then
+            -- one page read fills the series.
+            plugin.session = nil
+            plugin:showWork(work)
+            assert.are.equal(1, painted)
+            assert.are.equal(1, asked)
+
+            -- Signed in, the action-state load already reads that page, so a
+            -- second request would be waste.
+            plugin.session = {
+                username = "testuser",
+                cookies = { _otwarchive_session = "x" },
+            }
+            plugin:showWork(work)
+            assert.are.equal(2, painted)
+            assert.are.equal(1, asked)
+        end)
+
+        plugin.showWorkPage = saved.showWorkPage
+        plugin.ensureWorkSeriesLoaded = saved.ensureWorkSeriesLoaded
+        plugin.session = saved.session
+        assert.is_true(ok, err)
+    end)
+end)
+
 describe("AO3 series listing", function()
     it("reads the usual work blurbs and pagination", function()
         local listing = plugin:parseListing(read_fixture("series.html"))
