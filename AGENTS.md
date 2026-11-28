@@ -57,6 +57,12 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   how far behind it is ("2 new chapters · 3/7 → 5/7") and refreshes on tap.
   That comparison reads the saved file's preface and the work already in hand,
   so it must never fetch anything.
+- A subscription list entry is not a blurb: `parseSubscriptions` gives it
+  `brief = true` with only the title, byline and id. Its card must open
+  through `openWorkDetails`, which reads the work page and paints the full
+  record (the same response also carries the series and, signed in, the action
+  state). Painting a subscription entry through `showWork` leaves Work details
+  empty, because that path deliberately fetches nothing.
 - A work listing carries a funnel at the top-left of the title bar, opposite
   Close. It opens a tile screen built only from the facets already in AO3's
   `#work-filters` sidebar (rating, warning, category, fandom, character,
@@ -155,6 +161,13 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   that line as well as the class pair. A real saved work is the text shape;
   scanning the chapter bodies to count them is never acceptable on a 4 MB
   file.
+- AO3's download edge caches the generated file by URL. On 2026-11-28, work
+  91979691 read **15/?** on the site and in the browser, while
+  `/downloads/91979691/work.html` kept returning **14/?** even hours later; the
+  same path with `?v=<epoch>` returned 15/? immediately. So a refresh appends
+  `?v=os.time()` (`downloadWork(id, title, true)`), which makes AO3 regenerate;
+  a first download keeps the plain URL. Never auto-retry a refresh: one clean
+  attempt, then let the reader refresh again.
 - The quiet watch never asks for a work page. One work per timer tick, at most
   once a day per work, 12 works per run, 4 s apart, WIPs only, stopping at the
   first refusal: `GET /works/<id>/navigate` is AO3's own chapter menu, a few

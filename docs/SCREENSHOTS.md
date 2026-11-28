@@ -39,6 +39,7 @@ For the short tour, see the [README](../README.md).
 | ![A work opened from a list grows its Series group](../screenshots/74-series-from-listing.png) | ![The bell beside the gear, wearing its dot](../screenshots/75-home-bell.png) |
 | ![Updates: works with chapters the copy lacks](../screenshots/76-updates.png) | ![Downloads rows carrying the gap](../screenshots/77-downloads-badges.png) |
 | ![Updates after a live check of a real downloaded work](../screenshots/78-updates-live.png) | ![A followed work with new chapters](../screenshots/79-updates-subscribed.png) |
+| ![Details of a subscribed work, with its real 15/? chapters](../screenshots/80-subscription-details.png) | |
 | ![Back from a work returns to the listing's page](../screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](../screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](../screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](../screenshots/45-author-search.png) |
 | ![Sign in on the landing page](../screenshots/24-home-signed-out.png) | ![Account on the landing page](../screenshots/25-home-signed-in.png) |

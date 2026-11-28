@@ -208,6 +208,19 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   parser stays pinned to AO3's real definition-list markup and its paging to
   the controller's `will_paginate`. The settings switch is captured in
   `screenshots/41`.
+- A subscription entry is not a blurb, and its card used to paint details from
+  the entry alone: the screen was empty. `parseSubscriptions` now marks work
+  entries `brief`, and `workRow` opens them through `openWorkDetails`, which
+  reads the work page once. The page used for the capture is the real signed-in
+  page of work 91979691, saved from the browser and replayed to the parser;
+  the details show 15/?, the tags, the summary and "Part 1 of Shan'Dur"
+  (`screenshots/80`).
+- AO3's download edge serves the generated file by URL and can stay behind the
+  newest chapter. Work 91979691 read 15/? on the site but its plain
+  `/downloads/91979691/work.html` returned 14/?; adding `?v=<epoch>` returned
+  15/? immediately, and the plugin's refresh downloaded a save whose preface
+  says 15. A refresh now appends that query; a first download keeps the plain
+  URL.
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
 - Works opened from AO3 return to the plugin from the Back key, the reader
@@ -261,7 +274,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 549 tests passing across parser, navigation,
+- The offline `busted` suite: 551 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,

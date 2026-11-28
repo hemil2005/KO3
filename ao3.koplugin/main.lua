@@ -2361,7 +2361,13 @@ function Ao3:workRow(work)
         tags_expanded = self.prefs and self.prefs.tags_expanded == true or false,
         card_style = Preferences.cardStyle(self.prefs and self.prefs.card_style),
         action = function()
-            self:showWork(work)
+            -- A subscription entry has no blurb: its details need the work
+            -- page itself (which also carries the series and action state).
+            if work.brief then
+                self:openWorkDetails(work.id, work.title)
+            else
+                self:showWork(work)
+            end
         end,
     }
 end
@@ -4635,7 +4641,7 @@ end
 -- Reading a work
 -- ---------------------------------------------------------------------------
 
-function Ao3:downloadWork(id, title)
+function Ao3:downloadWork(id, title, refresh)
     local dir = getDownloadDir()
     local tmp = dir .. "/" .. id .. ".html.part"
     local old = findCachedWork(dir, id)
@@ -4647,6 +4653,12 @@ function Ao3:downloadWork(id, title)
     probe:close()
 
     local url = DOWNLOAD_HOST .. "/downloads/" .. id .. "/work.html"
+    if refresh then
+        -- AO3's download edge caches the generated file by URL. Without a
+        -- new query it serves the copy made before the latest chapter, even
+        -- hours later; the fresh URL forces a regeneration.
+        url = url .. "?v=" .. tostring(os.time())
+    end
 
     -- Stream to disk, but follow redirects here so the session cookie is
     -- recomputed for each host (LuaSocket would copy the original Cookie).
@@ -4989,7 +5001,8 @@ function Ao3:readWork(id, title, refresh)
         local path, err
         Trapper:wrap(function()
             Trapper:info(T(_("Downloading “%1”…"), title or id))
-            local ok, result, download_err = pcall(self.downloadWork, self, id, title)
+            local ok, result, download_err = pcall(self.downloadWork, self, id, title,
+                refresh)
             if ok then
                 path, err = result, download_err
             else

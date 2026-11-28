@@ -707,6 +707,9 @@ function AuthorPage.parseSubscriptions(html)
                     author_urls = #urls > 0 and urls or nil,
                     updated = subscribed,
                     url = "/works/" .. work_id,
+                    -- No blurb: only the title, the byline and the id. Details
+                    -- must read the work page before it can paint.
+                    brief = true,
                 }
             elseif series_id then
                 items[#items + 1] = {

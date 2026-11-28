@@ -244,6 +244,12 @@ compares the saved chapter count with AO3's live one, and either says
 own preface, so opening Work details costs no request at all. Finished
 multi-chapter saves and one-shots keep only **Refresh from AO3**.
 
+**Refresh from AO3** forces a fresh download. AO3's download server caches the
+generated file by URL, so a plain re-request can still be the copy from before
+the newest chapter — sometimes for hours. The refresh appends a cache-busting
+value, which makes AO3 build the file again. If a download still comes back one
+chapter short, refresh once more; the plugin never retries on its own.
+
 Inside the reader, a work opened from AO3 has three ways back to the screen
 you left, instead of KOReader's file manager:
 

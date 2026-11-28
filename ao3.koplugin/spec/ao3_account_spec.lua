@@ -586,6 +586,9 @@ describe("AO3 account", function()
             assert.are.equal("A Subscribed Work", data.items[1].title)
             assert.are.equal("Author One", data.items[1].authors)
             assert.are.equal("/works/111", data.items[1].url)
+            -- No blurb: the details screen has to read the work page.
+            assert.is_true(data.items[1].brief)
+            assert.is_nil(data.items[2].brief)
 
             assert.are.equal("series", data.items[2].kind)
             assert.are.equal("222", data.items[2].id)

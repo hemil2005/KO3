@@ -520,6 +520,24 @@ describe("AO3 browser", function()
             end)
         end)
 
+        it("busts AO3's download cache when refreshing", function()
+            -- The download edge keeps the generated file by URL. A refresh
+            -- that reused the URL got the copy from before the new chapter;
+            -- the query makes AO3 generate it again.
+            local work_html = read_fixture("work.html")
+            with_http(function(req)
+                assert.is_truthy(req.url:match(
+                    "^https://download%.archiveofourown%.org/downloads/123/work%.html%?v=%d+$"))
+                req.sink(work_html)
+                req.sink(nil)
+                return 1, 200, {}, "OK"
+            end, function()
+                local path, err = plugin:downloadWork("123", "Test Work", true)
+                assert.is_nil(err)
+                assert.is_truthy(path)
+            end)
+        end)
+
         it("rejects a login page", function()
             with_http(function(req)
                 req.sink(read_fixture("login.html"))
@@ -1004,6 +1022,35 @@ describe("AO3 browser", function()
             os.remove(prefs_path)
             os.remove(prefs_path .. ".old")
             assert.is_true(ok, err)
+        end)
+
+        it("opens a subscription card by reading the work page", function()
+            -- Subscription entries carry only title, byline and id; painting
+            -- from that leaves an empty details page. The brief flag sends
+            -- the tap through the page fetch instead.
+            local probe = setmetatable({}, { __index = Ao3 })
+            probe.prefs = { tags_expanded = false, card_style = "modern" }
+            local opened, fetched
+            probe.showWork = function(_, work) opened = work end
+            probe.openWorkDetails = function(_, id, title)
+                fetched = { id = id, title = title }
+            end
+
+            local listing_row = probe:workRow({
+                id = "77", title = "A Subscribed Work",
+                authors = "Someone", summary = "A summary.",
+            })
+            listing_row.action()
+            assert.are.equal("77", opened.id)
+            assert.is_nil(fetched)
+
+            local sub_row = probe:workRow({
+                id = "77", title = "A Subscribed Work",
+                authors = "Someone", brief = true,
+            })
+            sub_row.action()
+            assert.are.equal("77", fetched.id)
+            assert.are.equal("A Subscribed Work", fetched.title)
         end)
 
         it("ships the official logo, its traced SVG and the tile icons", function()
