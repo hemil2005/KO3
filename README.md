@@ -138,13 +138,20 @@ Found a bug or have a suggestion? **Report a bug** in the plugin, or
 - The Archive of Our Own name and logo are trademarks of the Organization for
   Transformative Works (OTW). `ao3.koplugin/assets/ao3-logo.png` is copied
   byte-for-byte from the OTW's own repository, and
-  `ao3.koplugin/assets/ao3-logo.svg` is a vector trace of it. KO3 is unofficial
-  and is not affiliated with or endorsed by the OTW.
+  `ao3.koplugin/assets/ao3-logo.svg` is a vector trace of it. `otwarchive` is
+  licensed GPL-2.0-or-later; those files are used under those terms inside this
+  AGPL-3.0 project. KO3 is unofficial and is not affiliated with or endorsed by
+  the OTW.
 - AO3's required-tag symbols are redrawn in monochrome in
   `ao3.koplugin/assets/icons/`; the shapes follow AO3's own symbol set, with the
   colour dropped for e-ink.
 - [KOReader](https://github.com/koreader/koreader) is made by the KOReader
   contributors.
+- The embedded fandom index is a snapshot of AO3's public fandom listing; it
+  contains names and work counts only.
+- Runtime libraries (HTML parser, JSON, sockets, TLS) come from KOReader and are
+  not bundled. [THIRD-PARTY.md](THIRD-PARTY.md) lists every component and its
+  license.
 
 ## License
 

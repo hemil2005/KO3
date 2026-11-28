@@ -28,4 +28,14 @@ OTW-published files.
 `icons/settings.svg` is a gear drawn in the same 24×24 stroke style as the
 row icons. The rating letters and the warning marks are set in the reader's
 own font inside the symbol cells, so they scale with the reader's font size.
+
+## Licensing
+
+`otwarchive` is licensed GPL-2.0-or-later by the OTW. The PNG is copied from
+that repository and the SVG is traced from it; the required-tag symbols are
+redrawn from AO3's public symbol set. To the extent these files are derivative
+works of `otwarchive`, they are used under GPL-2.0-or-later inside this
+AGPL-3.0 project. The full notice, including the trademark disclaimer, is at
+
+    https://github.com/hemil2005/KO3/blob/main/THIRD-PARTY.md
 -->
