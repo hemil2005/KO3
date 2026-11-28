@@ -112,10 +112,11 @@ The tests are offline:
   preface, the 404 "gone" answer, stopping at a refusal, the manual run over
   every WIP, the bell's dot and the Updates screen's rows.
 - `ao3_workupdate_spec.lua` covers saved-work update checks: the chapter
-  parser (`3/7`, `3/?`, a bare number), the bounded preface read, the
-  comparison and its messages, the WIP rule (unknown total or fewer chapters
-  than total), the single-request Downloads check with its confirmation before
-  `readWork(..., true)`, and the zero-request details row.
+  parser (`3/7`, `3/?`, a bare number), the bounded preface read in both the
+  website's `dd.chapters` shape and the plain Stats row AO3's own download
+  writes, the comparison and its messages, the WIP rule (unknown total or
+  fewer chapters than total), the single-request Downloads check with its
+  confirmation before `readWork(..., true)`, and the zero-request details row.
 - The report flow is also exercised through the UI: the home row, the
   editor, the log-consent dialog and the saved bundle.
 - The plugin loader test calls `load_plugin("ao3")`, so `_meta.lua` and

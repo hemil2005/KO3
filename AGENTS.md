@@ -143,11 +143,17 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 - **Check for updates** is offered in the Downloads actions only for a saved
   work that can still grow (unknown total, or fewer chapters than its total).
   A tap makes exactly one work-page request, compares the saved preface's
-  `dl.stats dd.chapters` with the live page, says "Up to date · 3/7" when
-  nothing changed, and otherwise offers **Get new chapters** / **Not now**
-  before calling the existing validated refresh. Never download without the
+  chapter count with the live page, says "Up to date · 3/7" when nothing
+  changed, and otherwise offers **Get new chapters** / **Not now** before
+  calling the existing validated refresh. Never download without the
   confirmation, never poll, and never show the row for a finished save or a
   one-shot (they keep **Refresh from AO3**).
+- AO3's own HTML download has no `dd.chapters` cell — that is the website's
+  markup. Its preface spells one Stats row out as text ("Published: …
+  Words: 675,137 Chapters: 159/159"), so `WorkUpdate.cachedChapters` reads
+  that line as well as the class pair. A real saved work is the text shape;
+  scanning the chapter bodies to count them is never acceptable on a 4 MB
+  file.
 - The quiet watch never asks for a work page. One work per timer tick, at most
   once a day per work, 12 works per run, 4 s apart, WIPs only, stopping at the
   first refusal: `GET /works/<id>/navigate` is AO3's own chapter menu, a few

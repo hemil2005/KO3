@@ -122,6 +122,43 @@ describe("WorkUpdate cached copy", function()
         assert.is_nil(total)
     end)
 
+    -- AO3's own download is the file this plugin actually saves, and it has
+    -- no class="chapters" cell at all: the preface spells one Stats row out.
+    local function download_html(stats)
+        return '<!DOCTYPE html><html><body><div id="preface">'
+            .. '<h2 class="toc-heading">Preface</h2>'
+            .. '<div class="meta"><dl class="tags">'
+            .. '<dt>Rating:</dt><dd>Teen And Up Audiences</dd>'
+            .. '<dt>Stats:</dt><dd> Published: 2024-07-03 Completed: 2025-05-22'
+            .. ' Words: 675,137 Chapters: ' .. stats .. ' </dd>'
+            .. '</dl></div></div>'
+            .. '<div id="chapters" class="userstuff"></div></body></html>'
+    end
+
+    local function write_download(name, stats)
+        local dir = download_dir()
+        if lfs.attributes(dir, "mode") ~= "directory" then lfs.mkdir(dir) end
+        local path = dir .. "/" .. name
+        local f = assert(io.open(path, "wb"))
+        f:write(download_html(stats))
+        f:close()
+        return path
+    end
+
+    it("reads AO3's download Stats row", function()
+        local path = write_download("The Evans Boy [106].html", "159/159")
+        local current, total = WorkUpdate.cachedChapters(path)
+        assert.are.equal(159, current)
+        assert.are.equal(159, total)
+    end)
+
+    it("keeps an unknown total in the download Stats row", function()
+        local path = write_download("Open Download [107].html", "5/?")
+        local current, total = WorkUpdate.cachedChapters(path)
+        assert.are.equal(5, current)
+        assert.is_nil(total)
+    end)
+
     it("says nothing when the file is gone or has no stat", function()
         assert.is_nil(WorkUpdate.cachedChapters(nil))
         assert.is_nil(WorkUpdate.cachedChapters(download_dir() .. "/missing.html"))

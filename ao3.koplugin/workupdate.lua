@@ -1,11 +1,13 @@
 --[[--
 Chapter counts for a saved work and its live page.
 
-A downloaded AO3 work keeps the preface, and its stats list carries the same
-"3/7" the website shows, so a saved work in progress can be compared with the
-live page without opening (or even reading all of) the multi-megabyte file.
-Nothing here touches the network: the caller fetches the live page only on a
-tap, and this module only reads files already on the device.
+AO3's own HTML download keeps a preface, and its Stats row spells out the
+chapter count ("Chapters: 3/7"), so a saved work can be compared with the live
+page without opening — or even scanning — the multi-megabyte chapter bodies.
+The website's cached pages use a `dd.chapters` cell instead; both shapes are
+read. Nothing here touches the network: the caller fetches the live chapter
+menu only when a check is due, and this module only reads files already on the
+device.
 ]]
 
 local util = require("util")
@@ -54,6 +56,13 @@ end
 -- (current, total) like parseChapters; nil when the file or its stat is
 -- missing. A bounded pattern rather than a full parse: htmlparser would need
 -- the whole document up front, and the stat is one element in the head.
+--
+-- Two shapes exist. A page saved from the website keeps the meta's
+-- `<dt class="chapters">` / `<dd class="chapters">3/7</dd>` pair. AO3's own
+-- download (`/downloads/<id>/work.html`, the file the plugin saves) has no
+-- such cell: its preface spells one Stats row out as text,
+-- "Published: … Words: 675,137 Chapters: 159/159". Accept both, because a
+-- real saved work is the second one.
 function WorkUpdate.cachedChapters(path, bytes)
     if not path then return nil end
     local limit = tonumber(bytes)
@@ -71,6 +80,15 @@ function WorkUpdate.cachedChapters(path, bytes)
         local current, total = WorkUpdate.parseChapters(plainStat(body))
         if current then return current, total end
     end
+
+    -- The download's Stats dd: "… Words: 675,137 Chapters: 159/159". The
+    -- first match is the stats row; the summary comes after it, so a work
+    -- whose own text mentions a chapter count cannot win.
+    local text = plainStat(head)
+    local current, total = text:match("Chapters:%s*(%d+)/(%d+)")
+    if current then return tonumber(current), tonumber(total) end
+    current = text:match("Chapters:%s*(%d+)/%?")
+    if current then return tonumber(current), nil end
     return nil
 end
 

@@ -66,6 +66,7 @@ details captured from a live work.
 | ![All favourites as a native list](screenshots/69-favourite-fandoms-list.png) | ![Subscriptions from AO3's definition list](screenshots/73-subscriptions-list.png) |
 | ![A work opened from a list grows its Series group](screenshots/74-series-from-listing.png) | ![The bell beside the gear, wearing its dot](screenshots/75-home-bell.png) |
 | ![Updates: works with chapters the copy lacks](screenshots/76-updates.png) | ![Downloads rows carrying the gap](screenshots/77-downloads-badges.png) |
+| ![Updates after a live check of a real downloaded work](screenshots/78-updates-live.png) | |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -629,6 +630,14 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   3/7 → 5/7") and one AO3 no longer serves (`screenshots/76`), and the
   Downloads rows carrying "#51358966 · 2 new" (`screenshots/77`). The demo
   seeds saved prefaces and the check entries the watcher would have written.
+- The watch was then run against a real work end to end: `/works/57085603`
+  downloaded through the plugin (4.36 MB), its saved `Chapters: 159/159`
+  lowered to `1/159` in the preface, and one quiet check made a single
+  `GET /works/57085603/navigate` (200, 39,548 bytes) that parsed **159**. The
+  bell took its dot, the row read "158 new · 1/159 → 159/159"
+  (`screenshots/78`), and the Downloads row said "#57085603 · 158 new". This
+  run also found that AO3's own download has no `dd.chapters` cell at all —
+  the parser now reads the Stats row, which is what a real save contains.
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
 - Works opened from AO3 return to the plugin from the Back key, the reader
@@ -682,7 +691,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 535 tests passing across parser, navigation,
+- The offline `busted` suite: 538 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
@@ -715,9 +724,11 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   row, and the home shelf's four-tile cap and **All favourites** row. The
   series tests cover the `dd.series` shapes (one series, several, the
   `span.series` fallback), the details rows and the guarded open. The saved-work
-  update tests cover the chapter parser, the bounded preface read, the
-  comparison and its messages, the one-request Downloads check, and the
-  zero-request details row. The watch tests cover the chapter menu parser and
+  update tests cover the chapter parser, the bounded preface read (both the
+  website's `dd.chapters` shape and the plain Stats row AO3's own download
+  writes), the comparison and its messages, the one-request Downloads check,
+  and the zero-request details row. The watch tests cover the chapter menu
+  parser and
   its link fallback, the daily interval, WIP-only planning, the budget and
   oldest-first order, pruning a deleted file's entry, the badge recomputed from
   the saved preface, the 404 "gone" answer, stopping at a refusal, the manual

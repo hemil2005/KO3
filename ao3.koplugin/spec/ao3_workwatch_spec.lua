@@ -298,6 +298,23 @@ describe("AO3 quiet watch on the plugin", function()
         assert.are.equal(WorkWatch.SPACING, scheduled[1])
     end)
 
+    it("reads the Stats row of a real AO3 download", function()
+        -- The file the plugin saves has no class="chapters" cell; its preface
+        -- spells the count out in one Stats row.
+        local path = download_dir() .. "/Real [301].html"
+        local f = assert(io.open(path, "wb"))
+        f:write('<html><body><div id="preface"><div class="meta">'
+            .. '<dl class="tags"><dt>Stats:</dt><dd> Published: 2024-07-03'
+            .. ' Words: 675,137 Chapters: 3/7 </dd></dl></div></div>'
+            .. '<div id="chapters" class="userstuff"></div></body></html>')
+        f:close()
+
+        plugin:watchStep()
+
+        assert.are.equal(4, plugin.prefs.work_checks["301"].chapters)
+        assert.are.equal(Account.workUrl("301") .. "/navigate", requests[1])
+    end)
+
     it("makes no request for a work checked today", function()
         write_work("WIP [201].html", "3/?")
         plugin.prefs.work_checks["201"] = { ts = os.time(), chapters = 4 }
