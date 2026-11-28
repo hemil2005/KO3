@@ -77,6 +77,13 @@ local function role(rows, name)
     end
 end
 
+local function read_fixture(name)
+    local f = assert(io.open("plugins/ao3.koplugin/spec/fixtures/" .. name, "rb"))
+    local body = f:read("*a")
+    f:close()
+    return body
+end
+
 describe("AO3 chapter menu parsing", function()
     it("counts the chapter list AO3 renders", function()
         assert.are.equal(7, WorkUpdate.parseChapterIndex(navigate(7)))
@@ -134,6 +141,32 @@ describe("AO3 quiet watch state", function()
         assert.are.equal(1700000000, loaded.work_checks["201"].ts)
         assert.is_true(loaded.work_checks["202"].gone)
         assert.are.equal(1700000200, loaded.updates_seen_ts)
+    end)
+
+    it("round-trips the subscription switch and list", function()
+        assert.is_true(Preferences.save({
+            check_subscriptions = false,
+            subscription_check_ts = 1700000000,
+            work_subscriptions = {
+                { id = "111", title = "Followed" },
+                { id = "111", title = "Again" },
+                { id = "222", title = "" },
+                { id = "x", title = "Bad" },
+            },
+        }, path))
+        local loaded = Preferences.load(path)
+        assert.is_false(loaded.check_subscriptions)
+        assert.are.equal(1700000000, loaded.subscription_check_ts)
+        assert.are.equal(2, #loaded.work_subscriptions)
+        assert.are.equal("111", loaded.work_subscriptions[1].id)
+        assert.are.equal("Followed", loaded.work_subscriptions[1].title)
+        assert.are.equal("222", loaded.work_subscriptions[2].id)
+        assert.are.equal("Work 222", loaded.work_subscriptions[2].title)
+        -- Unset in an older file means the switch is on.
+        assert.is_true(Preferences.load(path).check_subscriptions == false)
+        os.remove(path)
+        os.remove(path .. ".old")
+        assert.is_true(Preferences.load(path).check_subscriptions)
     end)
 
     it("drops hand-edited entries that could invent a badge", function()
@@ -238,6 +271,49 @@ describe("AO3 quiet watch state", function()
         assert.are.equal("202", found[2].item.id)
         assert.is_true(found[2].gone)
     end)
+
+    it("baselines a subscribed work, then counts the gap", function()
+        local prefs = {
+            work_checks = {},
+            work_subscriptions = { { id = "401", title = "Followed" } },
+            updates_seen_ts = 0,
+        }
+        local now = 1700000000
+
+        -- The first answer is the baseline: no badge for the chapters it
+        -- already has when the reader subscribes.
+        WorkWatch.record(prefs, "401", 12, now, false, { subscribed = true })
+        assert.are.equal(0, WorkWatch.subscribedAdded(prefs, "401"))
+
+        -- A later answer keeps the known count and moves only the live one.
+        WorkWatch.record(prefs, "401", 14, now + 60, false, { subscribed = true })
+        assert.are.equal(2, WorkWatch.subscribedAdded(prefs, "401"))
+        assert.is_true(WorkWatch.unread(prefs, {}, now - 1))
+        assert.is_false(WorkWatch.unread(prefs, {}, now + 60))
+
+        local found = WorkWatch.updates(prefs, {})
+        assert.are.equal(1, #found)
+        assert.is_true(found[1].subscribed)
+        assert.are.equal(2, found[1].added)
+        assert.are.equal(12, found[1].current)
+        assert.are.equal(14, found[1].live)
+
+        -- Downloading it acknowledges the chapters in hand.
+        WorkWatch.acknowledge(prefs, "401")
+        assert.are.equal(0, WorkWatch.subscribedAdded(prefs, "401"))
+        assert.is_nil(prefs.work_checks["401"].live)
+    end)
+
+    it("treats a subscribed work as due without a saved file", function()
+        local prefs = { work_checks = {} }
+        local item = { id = "401", title = "Followed", subscribed = true }
+        local now = 1700000000
+
+        assert.is_true(WorkWatch.due(prefs, item, now))
+        WorkWatch.record(prefs, "401", 12, now, false, { subscribed = true })
+        assert.is_false(WorkWatch.due(prefs, item, now + 60))
+        assert.is_true(WorkWatch.due(prefs, item, now + WorkWatch.INTERVAL))
+    end)
 end)
 
 describe("AO3 quiet watch on the plugin", function()
@@ -313,6 +389,144 @@ describe("AO3 quiet watch on the plugin", function()
 
         assert.are.equal(4, plugin.prefs.work_checks["301"].chapters)
         assert.are.equal(Account.workUrl("301") .. "/navigate", requests[1])
+    end)
+
+    it("reads the subscription list once, then baselines its works", function()
+        plugin.prefs = {
+            work_checks = {},
+            work_subscriptions = {},
+            updates_seen_ts = 0,
+            check_subscriptions = true,
+            subscription_check_ts = 0,
+        }
+        plugin.session = {
+            username = "tester",
+            cookies = { _otwarchive_session = "x" },
+        }
+        local subs = read_fixture("account/subscriptions.html")
+        plugin.httpRequest = function(_, url)
+            requests[#requests + 1] = url
+            if url:find("/subscriptions", 1, true) then
+                return subs, nil, 200
+            end
+            return navigate(15), nil, 200
+        end
+
+        plugin:watchStep()  -- the list page
+        assert.are.equal(1, #requests)
+        assert.are.equal(Account.listUrl("tester", "/subscriptions"), requests[1])
+        assert.are.equal(1, #plugin.prefs.work_subscriptions)
+        assert.are.equal("111", plugin.prefs.work_subscriptions[1].id)
+
+        plugin:watchStep()  -- one work per tick
+        assert.are.equal(2, #requests)
+        assert.are.equal(Account.workUrl("111") .. "/navigate", requests[2])
+        assert.are.equal(15, plugin.prefs.work_checks["111"].chapters)
+        -- The first answer is the baseline, not fifteen new chapters.
+        assert.are.equal(0, WorkWatch.subscribedAdded(plugin.prefs, "111"))
+    end)
+
+    it("follows the next page of subscriptions", function()
+        plugin.prefs = {
+            work_checks = {},
+            work_subscriptions = {},
+            updates_seen_ts = 0,
+            check_subscriptions = true,
+            subscription_check_ts = 0,
+        }
+        plugin.session = {
+            username = "tester",
+            cookies = { _otwarchive_session = "x" },
+        }
+        local page1 = read_fixture("account/subscriptions.html"):gsub(
+            "</body>", '<ol class="pagination"><li class="next">'
+            .. '<a href="/users/tester/subscriptions?page=2">Next</a></li></ol></body>')
+        local page2 = '<h2 class="heading">My Subscriptions</h2>'
+            .. '<dl class="subscription index group"><dt>'
+            .. '<a href="/works/333">Third Work</a> (Work) by '
+            .. '<a rel="author" href="/users/x">X</a></dt><dd></dd></dl>'
+        plugin.httpRequest = function(_, url)
+            requests[#requests + 1] = url
+            if url:find("page=2", 1, true) then return page2, nil, 200 end
+            if url:find("/subscriptions", 1, true) then return page1, nil, 200 end
+            return navigate(15), nil, 200
+        end
+
+        plugin:watchStep()
+        plugin:watchStep()
+
+        assert.are.equal(2, #requests)
+        assert.are.equal(2, #plugin.prefs.work_subscriptions)
+        assert.are.equal("111", plugin.prefs.work_subscriptions[1].id)
+        assert.are.equal("333", plugin.prefs.work_subscriptions[2].id)
+    end)
+
+    it("asks nothing about subscriptions when switched off", function()
+        write_work("WIP [201].html", "3/?")
+        plugin.session = {
+            username = "tester",
+            cookies = { _otwarchive_session = "x" },
+        }
+        plugin.prefs = {
+            work_checks = {},
+            work_subscriptions = {},
+            updates_seen_ts = 0,
+            check_subscriptions = false,
+            subscription_check_ts = 0,
+        }
+
+        plugin:watchStep()
+
+        assert.are.equal(1, #requests)
+        assert.are.equal(Account.workUrl("201") .. "/navigate", requests[1])
+    end)
+
+    it("keeps the cached list when AO3 answers with the login page", function()
+        plugin.prefs = {
+            work_checks = {},
+            work_subscriptions = { { id = "111", title = "Kept" } },
+            updates_seen_ts = 0,
+            check_subscriptions = true,
+            subscription_check_ts = 0,
+        }
+        plugin.session = {
+            username = "tester",
+            cookies = { _otwarchive_session = "x" },
+        }
+        plugin.httpRequest = function(_, url)
+            requests[#requests + 1] = url
+            return read_fixture("account/login.html"), nil, 200
+        end
+
+        plugin:watchStep()
+
+        assert.are.equal(1, #requests)
+        assert.are.equal(1, #plugin.prefs.work_subscriptions)
+        assert.are.equal("Kept", plugin.prefs.work_subscriptions[1].title)
+        assert.are.equal(0, plugin.prefs.subscription_check_ts)
+    end)
+
+    it("acknowledges a subscription when the work is downloaded", function()
+        plugin.prefs = {
+            work_checks = { ["111"] = { ts = 1, chapters = 3, live = 5 } },
+            work_subscriptions = { { id = "111", title = "Followed" } },
+            updates_seen_ts = 0,
+        }
+        plugin.downloadWork = function() return "/tmp/followed.html" end
+        plugin.openWorkReader = function() end
+        package.loaded["ui/trapper"] = {
+            wrap = function(_, f) f() end,
+            info = function() end,
+            reset = function() end,
+        }
+        local NetworkMgr = require("ui/network/manager")
+        NetworkMgr.runWhenOnline = function(_, f) f() end
+        NetworkMgr.afterWifiAction = function() end
+
+        plugin:readWork("111", "Followed", true)
+
+        assert.are.equal(0, WorkWatch.subscribedAdded(plugin.prefs, "111"))
+        assert.is_nil(plugin.prefs.work_checks["111"].live)
     end)
 
     it("makes no request for a work checked today", function()
@@ -440,6 +654,46 @@ describe("AO3 updates screen and badges", function()
         assert.is_truthy(gone)
         assert.are.equal("Gone", gone.text)
         assert.are.equal("No longer on AO3", gone.mandatory)
+    end)
+
+    it("lists a followed work that gained chapters", function()
+        plugin.prefs = {
+            work_checks = { ["111"] = { ts = 1, chapters = 3, live = 5 } },
+            work_subscriptions = { { id = "111", title = "Followed" } },
+            updates_seen_ts = 0,
+        }
+
+        plugin:showUpdates(false)
+
+        local row = role(rows, "update_subscription")
+        assert.is_truthy(row)
+        assert.are.equal("Followed", row.text)
+        assert.are.equal("2 new · 3 → 5", row.mandatory)
+        assert.is_nil(row.hold_action)
+    end)
+
+    it("wears the dot for a subscribed work", function()
+        plugin.prefs = {
+            work_checks = { ["111"] = { ts = 10, chapters = 3, live = 5 } },
+            work_subscriptions = { { id = "111", title = "Followed" } },
+            updates_seen_ts = 0,
+        }
+
+        assert.is_true(plugin:updatesUnread())
+    end)
+
+    it("hides followed works when the switch is off", function()
+        plugin.prefs = {
+            work_checks = { ["111"] = { ts = 10, chapters = 3, live = 5 } },
+            work_subscriptions = { { id = "111", title = "Followed" } },
+            updates_seen_ts = 0,
+            check_subscriptions = false,
+        }
+
+        plugin:showUpdates(false)
+
+        assert.is_nil(role(rows, "update_subscription"))
+        assert.is_false(plugin:updatesUnread())
     end)
 
     it("puts the gap on the Downloads row", function()

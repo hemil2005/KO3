@@ -20,11 +20,12 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   lines, with no marks, classifications, tags or numbers, measured and paged at
   its own height. Both keep one separator per card and no per-row shortcut
   boxes. Three modern works fit a 600×800 page with the tags folded.
-- Settings has two rows and no prose, opened by the gear at the right of the
-  landing masthead: **Expanded tags:** On/Off and **Work cards:**
-  Modern/Legacy. Both choices live in `settings/ao3_prefs.lua`, separate from
-  the AO3 session, so Log out keeps them. Flipping the card design restyles
-  work rows already on the back stack; never refetch a page to redraw it.
+- Settings has three rows and no prose, opened by the gear at the right of the
+  landing masthead: **Expanded tags:** On/Off, **Work cards:**
+  Modern/Legacy, and **Subscribed works:** On/Off. All three choices live in
+  `settings/ao3_prefs.lua`, separate from the AO3 session, so Log out keeps
+  them. Flipping the card design restyles work rows already on the back stack;
+  never refetch a page to redraw it.
 - A bell sits beside that gear. It wears the filled-dot icon only while the
   quiet saved-work check has found chapters the saved copy lacks and the
   reader has not opened the list since; opening **Updates** marks them seen.
@@ -164,6 +165,16 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   when a saved file disappears. Opening the bell's screen marks results seen;
   refreshing the work clears its row and badge by recomputation, with no extra
   bookkeeping. The timer arms in `showHome` and dies in `onMenuClosed`.
+- Signed in, the same watch may follow **work subscriptions** when
+  **Subscribed works:** is On: the list at `/users/<login>/subscriptions` is
+  read once a day, one page per tick, up to five pages (100 entries), and only
+  the `kind == "work"` entries are kept. A subscribed work has no file, so its
+  first check stores the baseline (`chapters`) and later checks move only
+  `live`; the gap is `live - chapters` and it clears when that work is
+  downloaded (`acknowledge`). Never notify on the first sight of a
+  subscription, and never check series or user subscriptions. The list and the
+  checks share the 12-work budget. The manual **Check for updates now** reads
+  every list page under the Trapper and forces every due work.
 
 ## Account
 

@@ -935,6 +935,7 @@ describe("AO3 browser", function()
             local old_dir = DataStorage.getSettingsDir
             DataStorage.getSettingsDir = function() return dir end
             plugin.prefs = { tags_expanded = false }
+            plugin.startWorkWatch = function() end
 
             local ok, err = pcall(function()
                 local menu = open_home()
@@ -955,9 +956,10 @@ describe("AO3 browser", function()
                 gear.onTap()
                 assert.are.equal("Settings", menu.ao3_title)
 
-                -- Two options, each a label and its state: the tag default,
-                -- then the card design, which starts modern.
-                assert.are.equal(2, #menu.item_table)
+                -- Three options: the tag default, the card design, and the
+                -- subscription watch. The first two are display choices; the
+                -- third is the one switch that permits background requests.
+                assert.are.equal(3, #menu.item_table)
                 local row = menu.item_table[1]
                 assert.are.equal("tags_default", row.role)
                 assert.are.equal("Expanded tags:", row.text)
@@ -966,10 +968,22 @@ describe("AO3 browser", function()
                 assert.are.equal("card_style", style_row.role)
                 assert.are.equal("Work cards:", style_row.text)
                 assert.are.equal("Modern", style_row.mandatory)
+                local sub_row = menu.item_table[3]
+                assert.are.equal("subscriptions_default", sub_row.role)
+                assert.are.equal("Subscribed works:", sub_row.text)
+                assert.are.equal("On", sub_row.mandatory)
 
                 row.action()
                 assert.is_true(plugin.prefs.tags_expanded)
                 assert.are.equal("On", menu.item_table[1].mandatory)
+
+                -- The subscription switch is stored like the others.
+                sub_row.action()
+                assert.is_false(plugin.prefs.check_subscriptions)
+                assert.are.equal("Off", menu.item_table[3].mandatory)
+                assert.is_false(Preferences.load(prefs_path).check_subscriptions)
+                sub_row.action()
+                assert.is_true(plugin.prefs.check_subscriptions)
 
                 -- The choice is on disk, and a new listing follows it.
                 assert.is_true(Preferences.load(prefs_path).tags_expanded)

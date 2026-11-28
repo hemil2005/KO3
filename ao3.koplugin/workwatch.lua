@@ -29,6 +29,11 @@ WorkWatch.BUDGET = 12
 WorkWatch.DELAY = 20
 WorkWatch.SPACING = 4
 
+-- AO3 paginates subscriptions; a daily refresh reads up to this many pages
+-- (100 entries), which is enough for a personal account and still a handful
+-- of small requests.
+WorkWatch.SUBSCRIPTION_PAGES = 5
+
 -- Only the preface is needed for the saved count, and the stats sit near the
 -- top of AO3's downloaded HTML. A smaller window than the update check's keeps
 -- a run over a full shelf cheap on a reader with little RAM.
@@ -76,21 +81,55 @@ local function dropOldestEntry(checks)
     if oldest_id then checks[oldest_id] = nil end
 end
 
+-- Chapters a subscribed work has gained since the reader last saw it. Unlike
+-- a saved work there is no file to compare against: `chapters` is the count
+-- the reader knows and `live` the last one a check saw. A first check records
+-- both, so subscribing to a long work does not raise a hundred chapters.
+function WorkWatch.subscribedAdded(prefs, id)
+    local entry = WorkWatch.entry(prefs, id)
+    if not entry or entry.gone then return 0 end
+    local live, known = tonumber(entry.live), tonumber(entry.chapters)
+    if not live or not known then return 0 end
+    return math.max(0, live - known)
+end
+
+-- The reader has the work now (it was downloaded and opened): later chapters
+-- count from that download, not from the subscription baseline.
+function WorkWatch.acknowledge(prefs, id)
+    local entry = WorkWatch.entry(prefs, id)
+    if not entry then return end
+    local live = tonumber(entry.live)
+    if live then entry.chapters = live end
+    entry.live = nil
+end
+
 -- Remember one answer. `gone` means AO3 returned 404 for the work: the saved
 -- copy is still readable, so nothing is deleted, but there is no point asking
 -- again. A request that produced no readable count records nothing, so the
 -- work is retried on the next run instead of being marked up to date.
-function WorkWatch.record(prefs, id, chapters, now, gone)
+--
+-- `opts.subscribed` is a subscription without a saved copy: its first answer
+-- is the baseline (chapters = the live count) and later answers only move
+-- `live`, which keeps the found gap visible until the reader downloads it.
+function WorkWatch.record(prefs, id, chapters, now, gone, opts)
     if not prefs or id == nil then return end
     local checks = type(prefs.work_checks) == "table" and prefs.work_checks or {}
     prefs.work_checks = checks
+    local previous = checks[key(id)]
     local entry = { ts = math.floor(tonumber(now) or os.time()) }
     if gone then
         entry.gone = true
     else
         local count = tonumber(chapters)
         if not count or count < 1 then return end
-        entry.chapters = math.floor(count)
+        count = math.floor(count)
+        local known = previous and tonumber(previous.chapters)
+        if opts and opts.subscribed and known then
+            entry.chapters = math.floor(known)
+            entry.live = count
+        else
+            entry.chapters = count
+        end
     end
     checks[key(id)] = entry
 
@@ -104,13 +143,16 @@ end
 
 -- A work is due when it can still grow (never for a one-shot or a finished
 -- save), has not been checked within the interval, and its preface is
--- readable. `interval = 0` makes every WIP due, for the manual run.
+-- readable. A subscribed work has no file to inspect: it is due on the
+-- interval alone, and its first check takes the baseline.
+-- `interval = 0` makes everything due, for the manual run.
 function WorkWatch.due(prefs, item, now, interval)
     if not item or not item.id then return false end
     local entry = WorkWatch.entry(prefs, item.id)
     if entry and entry.gone then return false end
     local wait = interval or WorkWatch.INTERVAL
     if entry and entry.ts and (now - entry.ts) < wait then return false end
+    if item.subscribed then return true end
     local current, total = WorkWatch.localChapters(item)
     if not current then return false end
     return WorkUpdate.isWip{ current = current, total = total }
@@ -161,10 +203,13 @@ function WorkWatch.plan(items, prefs, now, opts)
 end
 
 -- Everything the notifications screen lists: saved works with chapters the
--- copy does not have, plus works AO3 no longer serves.
+-- copy does not have, works AO3 no longer serves, and subscribed works that
+-- have gained chapters since the reader last looked.
 function WorkWatch.updates(prefs, items)
     local out = {}
+    local saved = {}
     for _, item in ipairs(items or {}) do
+        if item.id then saved[key(item.id)] = true end
         local entry = WorkWatch.entry(prefs, item.id)
         if entry then
             if entry.gone then
@@ -184,6 +229,28 @@ function WorkWatch.updates(prefs, items)
             end
         end
     end
+
+    -- Subscriptions without a saved copy. A work that is also saved is
+    -- already covered above, from its own file. The switch hides them too, so
+    -- turning it off speaks for the bell as well as for the checks.
+    if prefs and prefs.check_subscriptions ~= false then
+        for _, sub in ipairs(prefs.work_subscriptions or {}) do
+            local id = key(sub.id or "")
+            if id ~= "" and not saved[id] then
+                local added = WorkWatch.subscribedAdded(prefs, id)
+                if added > 0 then
+                    local entry = WorkWatch.entry(prefs, id)
+                    out[#out + 1] = {
+                        item = { id = id, title = sub.title, subscribed = true },
+                        subscribed = true,
+                        added = added,
+                        current = tonumber(entry and entry.chapters),
+                        live = tonumber(entry and entry.live),
+                    }
+                end
+            end
+        end
+    end
     return out
 end
 
@@ -196,6 +263,15 @@ function WorkWatch.unread(prefs, items, seen_ts)
         if entry and not entry.gone and (tonumber(entry.ts) or 0) > seen
                 and WorkWatch.added(prefs, item) > 0 then
             return true
+        end
+    end
+    if prefs and prefs.check_subscriptions ~= false then
+        for _, sub in ipairs(prefs.work_subscriptions or {}) do
+            local entry = WorkWatch.entry(prefs, sub.id)
+            if entry and not entry.gone and (tonumber(entry.ts) or 0) > seen
+                    and WorkWatch.subscribedAdded(prefs, sub.id) > 0 then
+                return true
+            end
         end
     end
     return false

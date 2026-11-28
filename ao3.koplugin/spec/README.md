@@ -110,7 +110,11 @@ The tests are offline:
   daily interval, WIP-only planning, the budget and oldest-first order, pruning
   entries for deleted files, the badge count recomputed from the saved
   preface, the 404 "gone" answer, stopping at a refusal, the manual run over
-  every WIP, the bell's dot and the Updates screen's rows.
+  every WIP, the bell's dot and the Updates screen's rows. It also covers the
+  subscription side: the switch round trip, the list read page by page, the
+  first check as a baseline, a later gap, acknowledgement on download, the
+  followed-work row, that no list request is made while switched off, that a
+  login page keeps the cached list, and that the switch hides the rows.
 - `ao3_workupdate_spec.lua` covers saved-work update checks: the chapter
   parser (`3/7`, `3/?`, a bare number), the bounded preface read in both the
   website's `dd.chapters` shape and the plain Stats row AO3's own download

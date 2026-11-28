@@ -23,9 +23,10 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
 - Pin fandoms to a **Favourites** shelf on the landing page by holding their
   row in the index; **Continue reading** reopens the saved work you read last
 - Series membership on a work page: "Part 2 of …" opens the series' works
-- A quiet daily check of saved works in progress: its bell beside the landing
-  gear lists works with chapters the copy on disk lacks, and nothing is
-  re-downloaded until you confirm
+- A quiet daily check of saved works in progress, and — signed in, with a
+  Settings switch — of the works you follow on AO3: its bell beside the landing
+  gear lists what has new chapters, and nothing is re-downloaded until you
+  confirm
 - Filter the Downloads list locally by title or work number; no request is made
 - No images
 - No comments, no work posting, no third-party service
@@ -66,7 +67,7 @@ details captured from a live work.
 | ![All favourites as a native list](screenshots/69-favourite-fandoms-list.png) | ![Subscriptions from AO3's definition list](screenshots/73-subscriptions-list.png) |
 | ![A work opened from a list grows its Series group](screenshots/74-series-from-listing.png) | ![The bell beside the gear, wearing its dot](screenshots/75-home-bell.png) |
 | ![Updates: works with chapters the copy lacks](screenshots/76-updates.png) | ![Downloads rows carrying the gap](screenshots/77-downloads-badges.png) |
-| ![Updates after a live check of a real downloaded work](screenshots/78-updates-live.png) | |
+| ![Updates after a live check of a real downloaded work](screenshots/78-updates-live.png) | ![A followed work with new chapters](screenshots/79-updates-subscribed.png) |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -183,14 +184,16 @@ one line, ending in "+N more"; tapping it opens that work's tags in place (up
 to six lines) without opening the work. The work's details page still carries
 the complete tag list.
 
-**Settings** (the gear beside the AO3 name) has two options. **Expanded tags:**
-**On** or **Off** — Off is the default and keeps every tag box to one line; On
-starts each listing with the boxes open. **Work cards:** **Modern** or
+**Settings** (the gear beside the AO3 name) has three options. **Expanded
+tags:** **On** or **Off** — Off is the default and keeps every tag box to one
+line; On starts each listing with the boxes open. **Work cards:** **Modern** or
 **Legacy** — Modern is the default, with the AO3 symbols, fandom and
 relationships, the tag box and the word/chapter numbers; Legacy is the simpler
 card the plugin started with, a bold title, the author and the first three
-lines of the summary. Both choices are stored in `settings/ao3_prefs.lua`,
-separately from the AO3 session, so Log out does not reset them.
+lines of the summary. **Subscribed works:** **On** or **Off** — whether the
+quiet check may also watch the works you follow on AO3 while signed in. All
+three choices are stored in `settings/ao3_prefs.lua`, separately from the AO3
+session, so Log out does not reset them.
 
 On a work listing — search results, a tag, a fandom, or an author's **Works**
 tab — a funnel at the top-left of the title bar, opposite the close button,
@@ -251,8 +254,16 @@ answer in `settings/ao3_prefs.lua`. When it finds a chapter the copy on disk
 lacks, the **bell** beside the gear on the landing page takes its filled dot,
 the Downloads row says "#51358966 · 2 new", and **Updates** lists the work as
 "2 new · 3/7 → 5/7". Nothing downloads until that row is confirmed. The list
-also names a work AO3 no longer serves, and its first row, **Check saved works
+also names a work AO3 no longer serves, and its first row, **Check for updates
 now**, runs the same light check over every saved WIP on demand.
+
+Signed in, and with **Subscribed works:** on in Settings, the same watch also
+follows your **work subscriptions**: it reads the subscriptions list once a
+day, a page per tick and up to five pages, then asks each work the same cheap
+question. A first check only records where the work stands, so subscribing to
+a 150-chapter fic does not raise 150 notifications; after that, a row appears
+when chapters are added. The gap clears when you download the work. Series and
+user subscriptions are not checked.
 
 Tap a result to drill in; tap a work for its details. The work screen leads
 with the title, author and fandom, then **Read** (the solid bar, which
@@ -506,6 +517,8 @@ Reading:
 
 Saved-work watch (silent; one work per tick, at most once a day per work):
   GET /works/<id>/navigate                    chapter list only, not the work
+  GET /users/<login>/subscriptions            the signed-in reader's list,
+                                              one page per tick, once a day
 
 Bug reports (only on tap, after consent):
   POST https://ko3-reports.ko3-reports.workers.dev/report
@@ -553,8 +566,9 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   symbols, classifications, tags or numbers. They are measured and paged at
   their own, shorter height, so a page of them neither clips the last card nor
   leaves an empty band. Captured in `screenshots/44`.
-- Settings has two options, each a label and its value — **Expanded tags:** On
-  or Off and **Work cards:** Modern or Legacy — stored in
+- Settings has three options, each a label and its value — **Expanded tags:** On
+  or Off, **Work cards:** Modern or Legacy, and **Subscribed works:** On or
+  Off — stored in
   `settings/ao3_prefs.lua`, separately from the AO3 session. A tap flips the
   choice, the row redraws with its new value, and every work list already on
   the back stack is restyled from its own rows, so returning to it shows the
@@ -638,6 +652,15 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   (`screenshots/78`), and the Downloads row said "#57085603 · 158 new". This
   run also found that AO3's own download has no `dd.chapters` cell at all —
   the parser now reads the Stats row, which is what a real save contains.
+- The subscription side was run against the same real work: a followed entry
+  with a stored baseline of 150 chapters, one quiet check making a single
+  `GET /works/57085603/navigate` (200, 39,522 bytes) that parsed **159**, so the
+  bell took its dot and Updates listed "9 new · 150 → 159"
+  (`screenshots/79`). The subscription list itself was not read live — the
+  emulator is signed out and the earlier live sign-in hit AO3's 429 — so its
+  parser stays pinned to AO3's real definition-list markup and its paging to
+  the controller's `will_paginate`. The settings switch is captured in
+  `screenshots/41`.
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
 - Works opened from AO3 return to the plugin from the Back key, the reader
@@ -691,7 +714,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 538 tests passing across parser, navigation,
+- The offline `busted` suite: 549 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,

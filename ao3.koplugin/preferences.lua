@@ -2,17 +2,21 @@
 Reader preferences that belong to the app, not to a session.
 
 They live in their own settings file so Log out (which deletes
-`settings/ao3.lua`) cannot take the reader's display choices with it. Five
+`settings/ao3.lua`) cannot take the reader's display choices with it. Six
 kinds of choice are stored here: how the app looks (booleans, plus the one
 card-design enum), the fandoms the reader pinned to the landing page
 (`favourites`), the saved work they opened last, how often the app may ask
-about updates (timestamps and a dismissed version), and what the quiet update
-check has seen for each saved work (`work_checks`). None of them identifies
-the reader; that stays in the session file.
+about updates (timestamps and a dismissed version), what the quiet update
+check has seen for each saved work (`work_checks`), and which work
+subscriptions it may watch (`work_subscriptions`, with
+`check_subscriptions` as the switch). None of them identifies the reader;
+that stays in the session file.
 ]]
 
 local DataStorage = require("datastorage")
 local LuaSettings = require("luasettings")
+local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Preferences = {}
 
@@ -47,6 +51,9 @@ local DEFAULTS = {
     last_read_title = "",
     work_checks = {},
     updates_seen_ts = 0,
+    check_subscriptions = true,
+    subscription_check_ts = 0,
+    work_subscriptions = {},
 }
 
 local CARD_STYLES = {
@@ -62,6 +69,12 @@ Preferences.MAX_FAVOURITES = FAVOURITES_MAX
 -- Enough for a shelf far larger than a Kindle keeps; the oldest entry is
 -- dropped first, and an entry dies with its saved file anyway.
 local MAX_WORK_CHECKS = 500
+
+-- Work subscriptions the quiet check may watch when the reader is signed in.
+-- AO3's list page is paginated, so the whole list is read once a day; this cap
+-- keeps a hand-edited file (or an enormous account) bounded.
+local MAX_SUBSCRIPTIONS = 200
+Preferences.MAX_SUBSCRIPTIONS = MAX_SUBSCRIPTIONS
 
 local function trim(value)
     return (value:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -160,6 +173,32 @@ function Preferences.workChecks(value)
     return checks
 end
 
+-- The watched work subscriptions, in the order AO3 lists them: a work id and
+-- the title the row shows. Anything that is not a numeric id is dropped, ids
+-- are unique, and the list is capped so a hand-edited file cannot grow.
+function Preferences.subscriptions(value)
+    local list = {}
+    if type(value) ~= "table" then return list end
+    local seen = {}
+    for position, item in ipairs(value) do
+        if #list >= MAX_SUBSCRIPTIONS then break end
+        if type(item) == "table" then
+            local id = favouriteString(item.id)
+            if id then id = trim(id) end
+            if id and id:match("^%d+$") and not seen[id] then
+                local title = favouriteString(item.title)
+                title = title and trim(title) or ""
+                seen[id] = true
+                list[#list + 1] = {
+                    id = id,
+                    title = title ~= "" and title or T(_("Work %1"), id),
+                }
+            end
+        end
+    end
+    return list
+end
+
 function Preferences.path()
     local ok, dir = pcall(function() return DataStorage:getSettingsDir() end)
     if not ok or not dir then
@@ -206,6 +245,13 @@ function Preferences.load(path)
     prefs.work_checks = Preferences.workChecks(settings:readSetting("work_checks"))
     prefs.updates_seen_ts = Preferences.timestamp(
         settings:readSetting("updates_seen_ts"))
+    local check_subscriptions = settings:readSetting("check_subscriptions")
+    prefs.check_subscriptions = check_subscriptions == nil
+        or check_subscriptions == true
+    prefs.subscription_check_ts = Preferences.timestamp(
+        settings:readSetting("subscription_check_ts"))
+    prefs.work_subscriptions = Preferences.subscriptions(
+        settings:readSetting("work_subscriptions"))
     return prefs
 end
 
@@ -236,6 +282,12 @@ function Preferences.save(prefs, path)
         Preferences.workChecks(prefs and prefs.work_checks))
     settings:saveSetting("updates_seen_ts",
         Preferences.timestamp(prefs and prefs.updates_seen_ts))
+    settings:saveSetting("check_subscriptions",
+        not prefs or prefs.check_subscriptions ~= false)
+    settings:saveSetting("subscription_check_ts",
+        Preferences.timestamp(prefs and prefs.subscription_check_ts))
+    settings:saveSetting("work_subscriptions",
+        Preferences.subscriptions(prefs and prefs.work_subscriptions))
     settings:flush()
     return true
 end

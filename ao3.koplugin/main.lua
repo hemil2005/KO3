@@ -3625,8 +3625,11 @@ function Ao3:settingsRows()
     return SettingsPage.build{
         tags_expanded = self.prefs and self.prefs.tags_expanded == true,
         card_style = Preferences.cardStyle(self.prefs and self.prefs.card_style),
+        check_subscriptions = not self.prefs
+            or self.prefs.check_subscriptions ~= false,
         on_toggle = function() self:toggleTagsDefault() end,
         on_toggle_card_style = function() self:toggleCardStyle() end,
+        on_toggle_subscriptions = function() self:toggleSubscriptionChecks() end,
     }
 end
 
@@ -3677,6 +3680,21 @@ end
 
 function Ao3:showSettings()
     self:pushRows(_("Settings"), self:settingsRows())
+end
+
+-- Following subscriptions means background requests, so it is a switch. It
+-- only does anything while signed in; turning it on starts the watch without
+-- waiting for the next plugin open.
+function Ao3:toggleSubscriptionChecks()
+    self.prefs = self.prefs or Preferences.load()
+    self.prefs.check_subscriptions = self.prefs.check_subscriptions == false
+    Preferences.save(self.prefs)
+    if self.menu then
+        self:replaceRows(_("Settings"), self:settingsRows())
+    end
+    if self.prefs.check_subscriptions then
+        self:startWorkWatch()
+    end
 end
 
 function Ao3:learnAccountName(html)
@@ -4982,6 +5000,10 @@ function Ao3:readWork(id, title, refresh)
         NetworkMgr:afterWifiAction()
 
         if path then
+            -- The download is the acknowledgement: a subscribed work's next
+            -- gap counts from this copy, not from the subscription baseline.
+            WorkWatch.acknowledge(self:updatePrefs(), id)
+            self:savePrefs()
             self:openWorkReader(path, title)
         else
             UIManager:show(InfoMessage:new{
@@ -5023,6 +5045,33 @@ function Ao3:updatesUnread(prefs)
     prefs = prefs or self:updatePrefs()
     return WorkWatch.unread(prefs, self:listDownloads(),
         prefs.updates_seen_ts)
+end
+
+-- Everything one watch run may ask about: saved works, plus the signed-in
+-- reader's work subscriptions that are not already saved. The subscription
+-- stubs carry `subscribed = true`, so WorkWatch treats their first answer as
+-- the baseline instead of a saved file.
+function Ao3:listWatchItems(prefs)
+    local items = self:listDownloads()
+    if prefs.check_subscriptions == false
+            or not Account.isSignedIn(self.session) then
+        return items
+    end
+    local saved = {}
+    for _, item in ipairs(items) do
+        if item.id then saved[tostring(item.id)] = true end
+    end
+    for _, sub in ipairs(prefs.work_subscriptions or {}) do
+        local id = tostring(sub.id or "")
+        if id ~= "" and not saved[id] then
+            items[#items + 1] = {
+                id = id,
+                title = sub.title,
+                subscribed = true,
+            }
+        end
+    end
+    return items
 end
 
 -- The plugin menu can be the last window left: opening a work closes
@@ -6061,10 +6110,10 @@ end
 -- ---------------------------------------------------------------------------
 
 -- The bell's screen: saved works whose checked chapter count is ahead of the
--- copy on disk, plus works AO3 no longer serves, and the manual run. Opening
--- it counts as seeing what is there, so the dot clears; nothing downloads
--- until the reader confirms a row, and the dialog reuses the same sentence the
--- per-work check shows.
+-- copy on disk, subscribed works that gained chapters, works AO3 no longer
+-- serves, and the manual run. Opening it counts as seeing what is there, so
+-- the dot clears; nothing downloads until the reader confirms a row, and the
+-- dialog reuses the same sentence the per-work check shows.
 function Ao3:showUpdates(replace)
     local prefs = self:updatePrefs()
     local items = self:listDownloads()
@@ -6075,8 +6124,7 @@ function Ao3:showUpdates(replace)
 
     local rows = {
         {
-            text = _("Check saved works now"),
-            mandatory = T(_("%1 saved"), #items),
+            text = _("Check for updates now"),
             ao3_icon = "refresh",
             action = function() self:checkAllSavedWorks() end,
             role = "updates_check",
@@ -6098,6 +6146,22 @@ function Ao3:showUpdates(replace)
                 mandatory = _("No longer on AO3"),
                 action = function() self:downloadItemActions(item) end,
                 role = "update_gone",
+            }
+        elseif entry.subscribed then
+            -- No file to compare with: the count the reader last had and the
+            -- one the check saw. Tapping asks before the first download.
+            local message = T(_("%1 new chapters · %2 → %3"), entry.added,
+                tostring(entry.current or "?"), tostring(entry.live or "?"))
+            rows[#rows + 1] = {
+                text = item.title,
+                mandatory = T(_("%1 new · %2 → %3"), entry.added,
+                    tostring(entry.current or "?"), tostring(entry.live or "?")),
+                action = function()
+                    UIManager:show(updateCheckDialog(message, function()
+                        self:readWork(item.id, item.title, true)
+                    end))
+                end,
+                role = "update_subscription",
             }
         else
             -- The saved total is the best one known; the quiet check only
@@ -6131,31 +6195,31 @@ function Ao3:showUpdates(replace)
     end
 end
 
--- The manual run behind the bell: every saved work in progress, one chapter
--- menu request each. No daily budget because the reader asked, but still one
+-- The manual run behind the bell: refresh the subscription list when the
+-- reader follows one, then ask every due work — saved or subscribed — through
+-- its chapter menu. No daily budget because the reader asked, but still one
 -- request per work, spaced by the network layer's own throttle, and it stops
 -- at the first refusal instead of retrying.
 function Ao3:checkAllSavedWorks()
     local prefs = self:updatePrefs()
-    local items = self:listDownloads()
-    local queue = WorkWatch.plan(items, prefs, os.time(), {
-        force = true,
-        budget = #items,
-    })
-    if #queue == 0 then
-        UIManager:show(InfoMessage:new{
-            text = _("No saved works in progress to check."),
-            timeout = 3,
-        })
-        return
-    end
 
     NetworkMgr:runWhenOnline(function()
         local Trapper = require("ui/trapper")
-        local checked, failure = 0, nil
+        local checked, failure, empty = 0, nil, false
         Trapper:wrap(function()
+            if prefs.check_subscriptions ~= false then
+                self:refreshSubscriptionList(prefs, Trapper)
+            end
+
+            local items = self:listWatchItems(prefs)
+            local queue = WorkWatch.plan(items, prefs, os.time(), {
+                force = true,
+                budget = #items,
+            })
+            if #queue == 0 then empty = true end
+
             for i, item in ipairs(queue) do
-                Trapper:info(T(_("Checking saved works… (%1/%2)"), i, #queue))
+                Trapper:info(T(_("Checking for updates… (%1/%2)"), i, #queue))
                 local ok, body, err, code = pcall(self.httpRequest, self,
                     Account.workUrl(item.id) .. "/navigate",
                     { retry_on_403 = false }, 12)
@@ -6165,7 +6229,9 @@ function Ao3:checkAllSavedWorks()
                 if body then
                     local count = WorkUpdate.parseChapterIndex(body)
                     if count then
-                        WorkWatch.record(prefs, item.id, count, os.time())
+                        WorkWatch.record(prefs, item.id, count, os.time(), false, {
+                            subscribed = item.subscribed == true,
+                        })
                     end
                 elseif code == 404 then
                     WorkWatch.record(prefs, item.id, nil, os.time(), true)
@@ -6180,6 +6246,13 @@ function Ao3:checkAllSavedWorks()
         NetworkMgr:afterWifiAction()
         self:savePrefs()
 
+        if empty then
+            UIManager:show(InfoMessage:new{
+                text = _("No saved works in progress to check."),
+                timeout = 3,
+            })
+            return
+        end
         if failure and checked == 0 then
             UIManager:show(InfoMessage:new{
                 text = T(_("Could not check for updates:\n%1"), failure),
@@ -6715,10 +6788,14 @@ function Ao3:disarmWorkWatch()
 end
 
 -- Called when the plugin opens. A shelf with no saved works has nothing to
--- ask about, so it arms no timer at all.
+-- ask about unless the reader is signed in and lets the watch follow their
+-- subscriptions, in which case the list itself is the first thing to read.
 function Ao3:startWorkWatch()
     if self.watch_timer_armed then return end
-    if #self:listDownloads() == 0 then return end
+    local prefs = self:updatePrefs()
+    local follows = prefs.check_subscriptions ~= false
+        and Account.isSignedIn(self.session)
+    if #self:listDownloads() == 0 and not follows then return end
     self:armWorkWatch(WorkWatch.DELAY)
 end
 
@@ -6729,9 +6806,17 @@ end
 function Ao3:watchStep()
     self.watch_timer_armed = false
     local prefs = self:updatePrefs()
+
+    -- The subscription list changes on AO3, not on the device, so a stale
+    -- list is refreshed one page per tick before any work is asked about.
+    if not self.watch_queue and self:subscriptionListDue(prefs) then
+        self:watchSubscriptionPage(prefs)
+        return
+    end
+
     local queue = self.watch_queue
     if not queue then
-        queue = WorkWatch.plan(self:listDownloads(), prefs, os.time())
+        queue = WorkWatch.plan(self:listWatchItems(prefs), prefs, os.time())
         self.watch_queue = queue
         if #queue == 0 then
             -- Planning also forgets entries for files that are gone.
@@ -6755,7 +6840,9 @@ function Ao3:watchStep()
     if body then
         local count = WorkUpdate.parseChapterIndex(body)
         if count then
-            WorkWatch.record(prefs, item.id, count, os.time())
+            WorkWatch.record(prefs, item.id, count, os.time(), false, {
+                subscribed = item.subscribed == true,
+            })
         end
     elseif code == 404 then
         -- The saved copy is still readable, but AO3 no longer serves the work.
@@ -6774,6 +6861,121 @@ function Ao3:watchStep()
     else
         self.watch_queue = nil
         self:afterWorkWatch()
+    end
+end
+
+-- True when the signed-in watch may refresh the subscription list: the
+-- switch is on, someone is signed in, and the list is a day old.
+function Ao3:subscriptionListDue(prefs)
+    if prefs.check_subscriptions == false then return false end
+    if not Account.isSignedIn(self.session) then return false end
+    if not (self.session.username and self.session.username ~= "") then
+        return false
+    end
+    local now = os.time()
+    return (now - (tonumber(prefs.subscription_check_ts) or 0))
+        >= WorkWatch.INTERVAL
+end
+
+-- One subscriptions page per tick, so the list refresh never freezes the UI
+-- for several requests in a row. AO3 paginates alphabetically; the pages are
+-- followed up to WorkWatch.SUBSCRIPTION_PAGES.
+function Ao3:watchSubscriptionPage(prefs)
+    local state = self.sub_refresh
+    if not state then
+        state = {
+            url = Account.listUrl(self.session.username, "/subscriptions"),
+            items = {},
+            seen = {},
+            pages = 0,
+        }
+        self.sub_refresh = state
+    end
+
+    if state.url and state.pages < WorkWatch.SUBSCRIPTION_PAGES then
+        local body = select(1, self:httpRequest(state.url,
+            { retry_on_403 = false }, 12))
+        if not body or Account.isLoginPage(body)
+                or Account.isLostCookiePage(body) then
+            -- Offline, blocked, or a session AO3 has ended: keep the previous
+            -- list and stop the run rather than retrying or wiping it.
+            self.sub_refresh = nil
+            return
+        end
+        local data = AuthorPage.parseSubscriptions(body)
+        state.pages = state.pages + 1
+        if data then
+            for _, item in ipairs(data.items or {}) do
+                if item.kind == "work" and item.id
+                        and not state.seen[item.id] then
+                    state.seen[item.id] = true
+                    state.items[#state.items + 1] = {
+                        id = tostring(item.id),
+                        title = item.title,
+                    }
+                end
+            end
+            state.url = data.next_url
+        else
+            state.url = nil
+        end
+    else
+        state.url = nil
+    end
+
+    if state.url and state.pages < WorkWatch.SUBSCRIPTION_PAGES then
+        self:armWorkWatch(WorkWatch.SPACING)
+        return
+    end
+    self:finishSubscriptionRefresh(prefs)
+    -- The list is in hand: let the next tick plan the checks.
+    self:armWorkWatch(WorkWatch.SPACING)
+end
+
+-- Store a freshly read subscription list. A refresh that read no page keeps
+-- the old list and its timestamp, so the next open tries again.
+function Ao3:finishSubscriptionRefresh(prefs)
+    local state = self.sub_refresh
+    self.sub_refresh = nil
+    if not state or state.pages < 1 then return end
+    prefs.work_subscriptions = state.items
+    prefs.subscription_check_ts = os.time()
+    self:savePrefs()
+end
+
+-- The manual run's list refresh: every page at once, under the visible
+-- Trapper, because the reader asked and is waiting.
+function Ao3:refreshSubscriptionList(prefs, trapper)
+    if not Account.isSignedIn(self.session) then return end
+    local url = Account.listUrl(self.session.username, "/subscriptions")
+    local items, seen = {}, {}
+    for page = 1, WorkWatch.SUBSCRIPTION_PAGES do
+        if not url then break end
+        if trapper then
+            trapper:info(T(_("Refreshing subscriptions… (%1/%2)"), page,
+                WorkWatch.SUBSCRIPTION_PAGES))
+        end
+        local body = select(1, self:httpRequest(url,
+            { retry_on_403 = false }, 12))
+        if not body or Account.isLoginPage(body)
+                or Account.isLostCookiePage(body) then
+            break
+        end
+        local data = AuthorPage.parseSubscriptions(body)
+        if not data then break end
+        for _, item in ipairs(data.items or {}) do
+            local id = item.id and tostring(item.id)
+            if item.kind == "work" and id and not seen[id] then
+                seen[id] = true
+                items[#items + 1] = { id = id, title = item.title }
+            end
+        end
+        url = data.next_url
+    end
+    if #items > 0 then
+        prefs.work_subscriptions = items
+        prefs.subscription_check_ts = os.time()
+        self:savePrefs()
     end
 end
 
