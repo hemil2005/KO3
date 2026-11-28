@@ -54,11 +54,13 @@ end
 -- (current, total) like parseChapters; nil when the file or its stat is
 -- missing. A bounded pattern rather than a full parse: htmlparser would need
 -- the whole document up front, and the stat is one element in the head.
-function WorkUpdate.cachedChapters(path)
+function WorkUpdate.cachedChapters(path, bytes)
     if not path then return nil end
+    local limit = tonumber(bytes)
+    if not limit or limit < 1 then limit = PREFACE_BYTES end
     local file = io.open(path, "rb")
     if not file then return nil end
-    local head = file:read(PREFACE_BYTES) or ""
+    local head = file:read(limit) or ""
     file:close()
 
     -- AO3 pairs a label (<dt class="chapters">Chapters:</dt>) with the value
@@ -70,6 +72,38 @@ function WorkUpdate.cachedChapters(path)
         if current then return current, total end
     end
     return nil
+end
+
+-- AO3's chapter menu (`/works/<id>/navigate`) is the cheap view of a work: the
+-- chapter list and nothing else, so one small request answers "is there a new
+-- chapter?" without pulling the work's text, images or comment thread. AO3
+-- renders the list as `ol.chapter.index` with one `li` per posted chapter; the
+-- chapter links are the fallback if that wrapper ever changes. Returns nil for
+-- a page that is not a chapter list (a login redirect, a challenge, a 404), so
+-- the caller can tell "no count" from "no chapters".
+function WorkUpdate.parseChapterIndex(html)
+    if type(html) ~= "string" or html == "" then return nil end
+
+    local list = html:match(
+        "<ol[^>]-class=[\"'][^\"']*chapter[^\"']*[\"'][^>]*>(.-)</ol>")
+    local count = 0
+    if list then
+        for _ in list:gmatch("<li[%s>]") do count = count + 1 end
+    end
+
+    if count == 0 then
+        local seen, unique = {}, 0
+        for id in html:gmatch("href=[\"']/works/%d+/chapters/(%d+)") do
+            if not seen[id] then
+                seen[id] = true
+                unique = unique + 1
+            end
+        end
+        count = unique
+    end
+
+    if count == 0 then return nil end
+    return count
 end
 
 -- `value` may be a { current, total } table, a chapter string ("3/7"), or
@@ -111,7 +145,9 @@ function WorkUpdate.compare(old, new)
     }
 end
 
-local function chapterPair(current, total)
+-- "3/7", "3/?" for a work whose total is not set. Shared by the details row
+-- and the updates screen so both say the same thing.
+function WorkUpdate.chapterPair(current, total)
     return T(_("%1/%2"), current, total or "?")
 end
 
@@ -135,15 +171,15 @@ function WorkUpdate.message(result)
         and result.old_current == result.old_total
     if result.complete and not was_complete then
         return T(_("The work is now complete · %1"),
-            chapterPair(result.new_current, result.new_total))
+            WorkUpdate.chapterPair(result.new_current, result.new_total))
     end
     if result.added > 0 then
         return T(_("%1 new chapters · %2 → %3"), result.added,
-            chapterPair(result.old_current, result.old_total),
-            chapterPair(result.new_current, result.new_total))
+            WorkUpdate.chapterPair(result.old_current, result.old_total),
+            WorkUpdate.chapterPair(result.new_current, result.new_total))
     end
     return T(_("Up to date · %1"),
-        chapterPair(result.new_current, result.new_total))
+        WorkUpdate.chapterPair(result.new_current, result.new_total))
 end
 
 -- A work that can still grow chapters. An unknown total ("3/?") is the

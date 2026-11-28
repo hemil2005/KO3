@@ -23,7 +23,9 @@ data source: pages are fetched, parsed, and rebuilt as a native KOReader
 - Pin fandoms to a **Favourites** shelf on the landing page by holding their
   row in the index; **Continue reading** reopens the saved work you read last
 - Series membership on a work page: "Part 2 of …" opens the series' works
-- Check saved works in progress for new chapters without re-downloading them
+- A quiet daily check of saved works in progress: its bell beside the landing
+  gear lists works with chapters the copy on disk lacks, and nothing is
+  re-downloaded until you confirm
 - Filter the Downloads list locally by title or work number; no request is made
 - No images
 - No comments, no work posting, no third-party service
@@ -62,7 +64,8 @@ details captured from a live work.
 | ![Favourite fandoms on the landing page](screenshots/70-home-favourites.png) | ![Work details: new chapters and series membership](screenshots/71-work-series-update.png) |
 | ![Check for updates on a saved WIP](screenshots/72-downloads-check.png) | ![Continue reading under the Library shelf](screenshots/66-home-continue.png) |
 | ![All favourites as a native list](screenshots/69-favourite-fandoms-list.png) | ![Subscriptions from AO3's definition list](screenshots/73-subscriptions-list.png) |
-| ![A work opened from a list grows its Series group](screenshots/74-series-from-listing.png) | |
+| ![A work opened from a list grows its Series group](screenshots/74-series-from-listing.png) | ![The bell beside the gear, wearing its dot](screenshots/75-home-bell.png) |
+| ![Updates: works with chapters the copy lacks](screenshots/76-updates.png) | ![Downloads rows carrying the gap](screenshots/77-downloads-badges.png) |
 | ![Back from a work returns to the listing's page](screenshots/42-listing-page-restored.png) | ![Every fandom containing "cyber" in a letter](screenshots/43-fandom-search.png) |
 | ![The older, simpler work card](screenshots/44-legacy-work-list.png) | ![Author search lists the accounts a partial name matches](screenshots/45-author-search.png) |
 | ![Sign in on the landing page](screenshots/24-home-signed-out.png) | ![Account on the landing page](screenshots/25-home-signed-in.png) |
@@ -239,6 +242,16 @@ too: **Search for a tag…** sits under each tag dimension, work tags go to
 a search row at the top opens a small input box and narrows the list by title
 or work number as you type. Clearing it — or emptying the box — restores every
 saved work. It never makes a request, and the storage-folder row stays put.
+
+A quiet check watches the saved works that can still grow. It asks AO3 for the
+chapter menu — `/works/<id>/navigate`, a kilobyte or so of chapter titles, not
+the work — one work at a time, at most once a day per work, and remembers the
+answer in `settings/ao3_prefs.lua`. When it finds a chapter the copy on disk
+lacks, the **bell** beside the gear on the landing page takes its filled dot,
+the Downloads row says "#51358966 · 2 new", and **Updates** lists the work as
+"2 new · 3/7 → 5/7". Nothing downloads until that row is confirmed. The list
+also names a work AO3 no longer serves, and its first row, **Check saved works
+now**, runs the same light check over every saved WIP on demand.
 
 Tap a result to drill in; tap a work for its details. The work screen leads
 with the title, author and fandom, then **Read** (the solid bar, which
@@ -490,6 +503,9 @@ Reading:
   GET https://download.archiveofourown.org/downloads/<work_id>/work.html
     -> AO3's own HTML download, saved and opened by crengine
 
+Saved-work watch (silent; one work per tick, at most once a day per work):
+  GET /works/<id>/navigate                    chapter list only, not the work
+
 Bug reports (only on tap, after consent):
   POST https://ko3-reports.ko3-reports.workers.dev/report
     -> relay files a GitHub issue with a fine-grained token
@@ -607,6 +623,12 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   opened from a listing paints immediately and then grows its **Series** group
   from one page read; the capture shows both series in place
   (`screenshots/74`). The demo stubs only the transport.
+- The quiet watch's screens render from local facts, with no AO3 request: the
+  landing page with the bell's filled dot beside the gear
+  (`screenshots/75`), **Updates** listing two works that grew ("2 new ·
+  3/7 → 5/7") and one AO3 no longer serves (`screenshots/76`), and the
+  Downloads rows carrying "#51358966 · 2 new" (`screenshots/77`). The demo
+  seeds saved prefaces and the check entries the watcher would have written.
 - Opening a work downloaded 467 KB `work.html` and rendered it in crengine
   (1/427 pages), with the file saved under `koreader/ao3/`.
 - Works opened from AO3 return to the plugin from the Back key, the reader
@@ -660,7 +682,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 512 tests passing across parser, navigation,
+- The offline `busted` suite: 535 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
@@ -695,7 +717,12 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   `span.series` fallback), the details rows and the guarded open. The saved-work
   update tests cover the chapter parser, the bounded preface read, the
   comparison and its messages, the one-request Downloads check, and the
-  zero-request details row. The update-check tests cover the once-a-day policy,
+  zero-request details row. The watch tests cover the chapter menu parser and
+  its link fallback, the daily interval, WIP-only planning, the budget and
+  oldest-first order, pruning a deleted file's entry, the badge recomputed from
+  the saved preface, the 404 "gone" answer, stopping at a refusal, the manual
+  run over every WIP, the bell's dot and the Updates rows. The update-check
+  tests cover the once-a-day policy,
   the 15-minute offline retry, prompt gating on the top window, and the Update
   / Remind later / Dismiss / Changelog actions. The autocomplete tests cover the
   per-type request URL and its encoding, the JSON name list truncated to ten,

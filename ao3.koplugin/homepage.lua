@@ -54,13 +54,14 @@ local function icon(o, name, size)
     if ok and widget then return widget end
 end
 
--- The settings control: a quiet gear at the far right of the masthead line.
--- It is a tap area rather than a button, because a second outlined control
--- beside the solid Search bar would compete with it.
-function HomePage.settingsButton(o)
+-- A masthead control: one quiet icon in a 44px tap target, aligned with the
+-- name. The settings gear and the notifications bell share this shape so they
+-- read as one pair at the right edge. A build without SVG gets a short word
+-- instead of a missing-icon glyph, so the action stays reachable.
+local function mastheadButton(o, icon_name, label, callback)
     local size = Screen:scaleBySize(44)
     local mark_size = Screen:scaleBySize(24)
-    local mark = icon(o, "settings", mark_size)
+    local mark = icon(o, icon_name, mark_size)
     local line = HorizontalGroup:new{ align = "center" }
     if mark then
         line[#line + 1] = HorizontalSpan:new{
@@ -68,9 +69,8 @@ function HomePage.settingsButton(o)
         }
         line[#line + 1] = mark
     else
-        -- A build without SVG still needs a way into Settings.
         line[#line + 1] = TextWidget:new{
-            text = _("Settings"),
+            text = label,
             face = Font:getFace("smallinfofont", HomePage.hint_size(o) - 2),
             fgcolor = Uikit.SECONDARY,
             max_width = size,
@@ -79,14 +79,32 @@ function HomePage.settingsButton(o)
     local group = VerticalGroup:new{ align = "left" }
     group[#group + 1] = VerticalSpan:new{ width = Size.span.vertical_default }
     group[#group + 1] = line
-    return Uikit.tapArea(group, size, size, o.on_settings)
+    return Uikit.tapArea(group, size, size, callback)
 end
 
--- Logo lockup: mark on the left, name and one honest subtitle beside it, and
--- the settings gear at the right edge of the same line.
+-- The settings control: a quiet gear at the far right of the masthead line.
+-- It is a tap area rather than a button, because a second outlined control
+-- beside the solid Search bar would compete with it.
+function HomePage.settingsButton(o)
+    return mastheadButton(o, "settings", _("Settings"), o.on_settings)
+end
+
+-- The notifications control: a bell beside the gear. It wears the filled-dot
+-- icon while the quiet check has found chapters the saved copy does not have,
+-- so the landing page says there is something new without a popup.
+function HomePage.bellButton(o)
+    return mastheadButton(o, o.updates_unread and "bell-dot" or "bell",
+        _("Updates"), o.on_updates)
+end
+
+-- Logo lockup: mark on the left, name and one honest subtitle beside it, then
+-- the bell and the settings gear at the right edge of the same line.
 function HomePage.hero(o)
     local gap = Size.padding.large
-    local gear_w = o.on_settings and Screen:scaleBySize(44) or 0
+    local control = Screen:scaleBySize(44)
+    local bell_w = o.on_updates and control or 0
+    local gear_w = o.on_settings and control or 0
+    local controls = bell_w + gear_w
     local text_width = o.width
     local logo_used = 0
     local row = HorizontalGroup:new{ align = "top" }
@@ -107,8 +125,8 @@ function HomePage.hero(o)
             text_width = math.max(1, text_width - logo_used)
         end
     end
-    if gear_w > 0 then
-        text_width = math.max(1, text_width - gear_w - gap)
+    if controls > 0 then
+        text_width = math.max(1, text_width - controls - gap)
     end
 
     local text = VerticalGroup:new{ align = "left" }
@@ -127,12 +145,17 @@ function HomePage.hero(o)
     }
     row[#row + 1] = text
 
-    if gear_w > 0 then
+    if controls > 0 then
         local used = logo_used + text:getSize().w
         row[#row + 1] = HorizontalSpan:new{
-            width = math.max(gap, o.width - used - gear_w),
+            width = math.max(gap, o.width - used - controls),
         }
-        row[#row + 1] = HomePage.settingsButton(o)
+        if bell_w > 0 then
+            row[#row + 1] = HomePage.bellButton(o)
+        end
+        if gear_w > 0 then
+            row[#row + 1] = HomePage.settingsButton(o)
+        end
     end
 
     local group = VerticalGroup:new{ align = "left" }

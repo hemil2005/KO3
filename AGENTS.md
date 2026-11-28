@@ -25,6 +25,14 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   Modern/Legacy. Both choices live in `settings/ao3_prefs.lua`, separate from
   the AO3 session, so Log out keeps them. Flipping the card design restyles
   work rows already on the back stack; never refetch a page to redraw it.
+- A bell sits beside that gear. It wears the filled-dot icon only while the
+  quiet saved-work check has found chapters the saved copy lacks and the
+  reader has not opened the list since; opening **Updates** marks them seen.
+  The screen opens with **Check saved works now** (refresh icon) and then one
+  row per found work, "2 new · 3/7 → 5/7", which asks before downloading, plus
+  "No longer on AO3" for a work that 404s. Nothing on this screen fetches a
+  work page. Downloads rows carry the same gap in their right column
+  ("#51358966 · 2 new") so the shelf shows it without opening the bell.
 - Card detail ink is `Uikit.CARD_DETAIL` (0x44), one tier darker than
   `Uikit.SECONDARY`, for the byline, fandom, ships, tags, summary and stats
   labels: the 0x66/0x88 greys wash out on e-ink under a bold black title.
@@ -140,6 +148,16 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   before calling the existing validated refresh. Never download without the
   confirmation, never poll, and never show the row for a finished save or a
   one-shot (they keep **Refresh from AO3**).
+- The quiet watch never asks for a work page. One work per timer tick, at most
+  once a day per work, 12 works per run, 4 s apart, WIPs only, stopping at the
+  first refusal: `GET /works/<id>/navigate` is AO3's own chapter menu, a few
+  hundred bytes per chapter, and its `ol.chapter.index` count is compared with
+  the saved preface. A 404 marks the work "gone" instead of asking again; a
+  failed run records nothing, so the next open retries. State is
+  `work_checks` in `settings/ao3_prefs.lua` (`{ ts, chapters, gone }`), pruned
+  when a saved file disappears. Opening the bell's screen marks results seen;
+  refreshing the work clears its row and badge by recomputation, with no extra
+  bookkeeping. The timer arms in `showHome` and dies in `onMenuClosed`.
 
 ## Account
 
@@ -214,7 +232,9 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
 ## Network
 
 - Do not send requests to AO3 unless the user asks. No probing, no retries
-  after a 429, no crawling.
+  after a 429, no crawling. The saved-work watch is the one standing exception:
+  the reader asked for it by saving works, it asks only about those works, and
+  its limits are in **Downloaded works**.
 - AO3 only filters people search on `people_search[query|name|collection_id|fandom]`.
   Any other key is dropped and the page renders *every* pseud alphabetically, so
   a wrong parameter looks like a fuzzy search that matched nothing; verify

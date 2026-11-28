@@ -435,6 +435,7 @@ local SearchHistory = dofile((MAIN_SOURCE:gsub("main%.lua$", "searchhistory.lua"
 local Uikit = dofile((MAIN_SOURCE:gsub("main%.lua$", "uikit.lua")))
 local Updater = dofile((MAIN_SOURCE:gsub("main%.lua$", "updater.lua")))
 local WorkUpdate = dofile((MAIN_SOURCE:gsub("main%.lua$", "workupdate.lua")))
+local WorkWatch = dofile((MAIN_SOURCE:gsub("main%.lua$", "workwatch.lua")))
 BugReport = dofile((MAIN_SOURCE:gsub("main%.lua$", "bugreport.lua")))
 Ao3.BugReport = BugReport
 Ao3.Updater = Updater
@@ -5016,15 +5017,25 @@ function Ao3:listDownloads()
     return items
 end
 
+-- True while a check has found a chapter the saved copy lacks and the reader
+-- has not opened the list since. Drives the bell's dot only.
+function Ao3:updatesUnread(prefs)
+    prefs = prefs or self:updatePrefs()
+    return WorkWatch.unread(prefs, self:listDownloads(),
+        prefs.updates_seen_ts)
+end
+
 -- The plugin menu can be the last window left: opening a work closes
 -- KOReader's file manager (ReaderUI broadcasts ShowingReader), while the menu
 -- stays beneath the reader. Closing the menu then leaves no window, and
 -- UIManager quits. Put the file manager back so the X always lands in
 -- KOReader.
 function Ao3:onMenuClosed()
-    -- The plugin is leaving the screen, so its background timer leaves too:
-    -- no manifest request runs again until the reader opens it.
+    -- The plugin is leaving the screen, so its background timers leave too:
+    -- neither the release check nor the saved-work check runs until the reader
+    -- opens it again.
     self:disarmUpdateCheck()
+    self:disarmWorkWatch()
     -- Drop the closed widget tree so nothing is retained on a memory-tight
     -- device.
     FandomPages.clearCache()
@@ -5220,8 +5231,9 @@ end
 
 function Ao3:showHome()
     -- Opening the plugin (and returning to its landing page) resumes the
-    -- silent check; closing the menu cancels it.
+    -- silent checks; closing the menu cancels them.
     self:startUpdateChecks()
+    self:startWorkWatch()
     if self.menu then
         self.menu.item_table_stack = {}
         self.menu.ao3_title_stack = {}
@@ -5287,6 +5299,9 @@ function Ao3:homeRows()
         signed_in = self.session ~= nil,
         account_name = self.session and self.session.username or nil,
         favourites = self:ensurePrefs().favourites,
+        -- The bell beside the gear opens the update list; its dot appears only
+        -- after a quiet check found something the reader has not seen.
+        updates_unread = self:updatesUnread(),
         -- The last work opened from the reader, when its saved copy is still
         -- there. The row goes under Downloads and Open work, not in a group of
         -- its own: it belongs to the shelf the work was read from.
@@ -5296,6 +5311,7 @@ function Ao3:homeRows()
         } or nil,
         on_account = function() self:showAccount() end,
         on_settings = function() self:showSettings() end,
+        on_updates = function() self:showUpdates(false) end,
         on_search = function() self:searchDialog() end,
         on_favourite = function(entry)
             self:loadListing(BASE_URL .. entry.url, entry.name)
@@ -5991,10 +6007,18 @@ function Ao3:showDownloads(replace, query)
         }
     end
 
-    for _, item in ipairs(visible) do
+    local prefs = self:updatePrefs()
+    for position, item in ipairs(visible) do
+        -- A quiet check's answer rides on the row, so the shelf says which
+        -- saved works moved without opening the bell first.
+        local added = WorkWatch.added(prefs, item)
+        local badge = item.id and ("#" .. item.id) or nil
+        if badge and added > 0 then
+            badge = badge .. " · " .. T(_("%1 new"), added)
+        end
         rows[#rows + 1] = {
             text = item.title,
-            mandatory = item.id and ("#" .. item.id) or nil,
+            mandatory = badge,
             action = function()
                 self:openWorkReader(item.path, item.title)
             end,
@@ -6030,6 +6054,147 @@ function Ao3:showDownloads(replace, query)
     else
         self:pushRows(title, rows)
     end
+end
+
+-- ---------------------------------------------------------------------------
+-- Updates (the bell)
+-- ---------------------------------------------------------------------------
+
+-- The bell's screen: saved works whose checked chapter count is ahead of the
+-- copy on disk, plus works AO3 no longer serves, and the manual run. Opening
+-- it counts as seeing what is there, so the dot clears; nothing downloads
+-- until the reader confirms a row, and the dialog reuses the same sentence the
+-- per-work check shows.
+function Ao3:showUpdates(replace)
+    local prefs = self:updatePrefs()
+    local items = self:listDownloads()
+    local found = WorkWatch.updates(prefs, items)
+
+    prefs.updates_seen_ts = os.time()
+    self:savePrefs()
+
+    local rows = {
+        {
+            text = _("Check saved works now"),
+            mandatory = T(_("%1 saved"), #items),
+            ao3_icon = "refresh",
+            action = function() self:checkAllSavedWorks() end,
+            role = "updates_check",
+        },
+    }
+
+    if #found == 0 then
+        rows[#rows + 1] = {
+            text = _("No new chapters."),
+            role = "updates_empty",
+        }
+    end
+
+    for position, entry in ipairs(found) do
+        local item = entry.item
+        if entry.gone then
+            rows[#rows + 1] = {
+                text = item.title,
+                mandatory = _("No longer on AO3"),
+                action = function() self:downloadItemActions(item) end,
+                role = "update_gone",
+            }
+        else
+            -- The saved total is the best one known; the quiet check only
+            -- learns the count, not whether the author has set a new end.
+            local result = WorkUpdate.compare(
+                { current = entry.current, total = entry.total },
+                { current = entry.live, total = entry.total })
+            rows[#rows + 1] = {
+                text = item.title,
+                mandatory = T(_("%1 new · %2 → %3"), entry.added,
+                    WorkUpdate.chapterPair(entry.current, entry.total),
+                    WorkUpdate.chapterPair(entry.live, entry.total)),
+                action = function()
+                    UIManager:show(updateCheckDialog(
+                        WorkUpdate.message(result), function()
+                            self:readWork(item.id, item.title, true)
+                        end))
+                end,
+                hold_action = function()
+                    self:downloadItemActions(item)
+                end,
+                role = "update_item",
+            }
+        end
+    end
+
+    if replace then
+        self:replaceRows(_("Updates"), rows)
+    else
+        self:pushRows(_("Updates"), rows)
+    end
+end
+
+-- The manual run behind the bell: every saved work in progress, one chapter
+-- menu request each. No daily budget because the reader asked, but still one
+-- request per work, spaced by the network layer's own throttle, and it stops
+-- at the first refusal instead of retrying.
+function Ao3:checkAllSavedWorks()
+    local prefs = self:updatePrefs()
+    local items = self:listDownloads()
+    local queue = WorkWatch.plan(items, prefs, os.time(), {
+        force = true,
+        budget = #items,
+    })
+    if #queue == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("No saved works in progress to check."),
+            timeout = 3,
+        })
+        return
+    end
+
+    NetworkMgr:runWhenOnline(function()
+        local Trapper = require("ui/trapper")
+        local checked, failure = 0, nil
+        Trapper:wrap(function()
+            for i, item in ipairs(queue) do
+                Trapper:info(T(_("Checking saved works… (%1/%2)"), i, #queue))
+                local ok, body, err, code = pcall(self.httpRequest, self,
+                    Account.workUrl(item.id) .. "/navigate",
+                    { retry_on_403 = false }, 12)
+                if not ok then
+                    body, err, code = nil, tostring(body), nil
+                end
+                if body then
+                    local count = WorkUpdate.parseChapterIndex(body)
+                    if count then
+                        WorkWatch.record(prefs, item.id, count, os.time())
+                    end
+                elseif code == 404 then
+                    WorkWatch.record(prefs, item.id, nil, os.time(), true)
+                else
+                    failure = err
+                    break
+                end
+                checked = checked + 1
+            end
+            Trapper:reset()
+        end)
+        NetworkMgr:afterWifiAction()
+        self:savePrefs()
+
+        if failure and checked == 0 then
+            UIManager:show(InfoMessage:new{
+                text = T(_("Could not check for updates:\n%1"), failure),
+            })
+            return
+        end
+        if failure then
+            BugReport.log("watch", "manual check stopped: " .. tostring(failure))
+        end
+        -- Rebuild the list in place when it is still the open screen. Any
+        -- other screen keeps its position and picks the rows up on next open.
+        if self.menu and self.menu.ao3_title == _("Updates") then
+            self:showUpdates(true)
+        end
+    end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -6516,6 +6681,118 @@ function Ao3:backgroundUpdateCheck()
             T("installed %1, v%2 waiting", current, manifest.version))
     end
     self:armUpdateCheck(Updater.CHECK_INTERVAL)
+end
+
+-- The saved-work watch is a second, separate timer: it asks AO3 about one
+-- saved work at a time through the chapter menu, never draws, and stops at the
+-- first refusal. `watchStep` is the body; the arm/disarm pair mirrors the
+-- release check so closing the plugin stops all of its traffic.
+local watch_armed_plugin
+local function watchTick()
+    local plugin = watch_armed_plugin
+    if not plugin then return end
+    plugin:watchStep()
+end
+Ao3.watchTick = watchTick
+
+-- Replace any pending tick rather than adding to it. `delay` is seconds.
+function Ao3:armWorkWatch(delay)
+    self:disarmWorkWatch()
+    watch_armed_plugin = self
+    self.watch_timer_armed = true
+    if type(UIManager.scheduleIn) == "function" then
+        UIManager:scheduleIn(math.max(0, tonumber(delay) or 0), watchTick)
+    end
+end
+
+function Ao3:disarmWorkWatch()
+    self.watch_timer_armed = false
+    self.watch_queue = nil
+    if watch_armed_plugin == self then watch_armed_plugin = nil end
+    if type(UIManager.unschedule) == "function" then
+        UIManager:unschedule(watchTick)
+    end
+end
+
+-- Called when the plugin opens. A shelf with no saved works has nothing to
+-- ask about, so it arms no timer at all.
+function Ao3:startWorkWatch()
+    if self.watch_timer_armed then return end
+    if #self:listDownloads() == 0 then return end
+    self:armWorkWatch(WorkWatch.DELAY)
+end
+
+-- One quiet check per tick. The body is silent: no dialog, no Trapper, no
+-- retry. Spacing the ticks keeps a shelf from becoming a burst, and the daily
+-- interval is enforced per work by WorkWatch.plan. A blocked or offline
+-- request ends the run; the next plugin open starts it again.
+function Ao3:watchStep()
+    self.watch_timer_armed = false
+    local prefs = self:updatePrefs()
+    local queue = self.watch_queue
+    if not queue then
+        queue = WorkWatch.plan(self:listDownloads(), prefs, os.time())
+        self.watch_queue = queue
+        if #queue == 0 then
+            -- Planning also forgets entries for files that are gone.
+            self:savePrefs()
+            self.watch_queue = nil
+            return
+        end
+    end
+    if not NetworkMgr:isConnected() then
+        self.watch_queue = nil
+        return
+    end
+
+    local item = table.remove(queue, 1)
+    local ok, body, err, code = pcall(self.httpRequest, self,
+        Account.workUrl(item.id) .. "/navigate",
+        { retry_on_403 = false }, 12)
+    if not ok then
+        body, err, code = nil, tostring(body), nil
+    end
+    if body then
+        local count = WorkUpdate.parseChapterIndex(body)
+        if count then
+            WorkWatch.record(prefs, item.id, count, os.time())
+        end
+    elseif code == 404 then
+        -- The saved copy is still readable, but AO3 no longer serves the work.
+        WorkWatch.record(prefs, item.id, nil, os.time(), true)
+    else
+        BugReport.log("watch", "quiet check stopped: " .. tostring(err))
+        self.watch_queue = nil
+        self:savePrefs()
+        self:afterWorkWatch()
+        return
+    end
+    self:savePrefs()
+
+    if #queue > 0 then
+        self:armWorkWatch(WorkWatch.SPACING)
+    else
+        self.watch_queue = nil
+        self:afterWorkWatch()
+    end
+end
+
+-- Repaint only the screens that show check results. The landing page keeps
+-- the reader's page and just swaps in the bell's new icon; Downloads and the
+-- Updates list are rebuilt in place so a badge appears as soon as it is found.
+function Ao3:afterWorkWatch()
+    local menu = self.menu
+    if not menu then return end
+    local title = menu.ao3_title or ""
+    if title == _("Updates") then
+        self:showUpdates(true)
+    elseif #title >= #_("Downloads")
+            and title:sub(1, #_("Downloads")) == _("Downloads") then
+        self:showDownloads(true)
+    elseif title == "" and menu.item_table and menu.item_table.ao3_home then
+        menu:switchItemTable("", self:homeRows(),
+            menu.item_table.current or 1)
+    end
 end
 
 -- True only while the plugin menu is the top window. The reader (or any

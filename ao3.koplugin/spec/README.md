@@ -105,6 +105,12 @@ The tests are offline:
   no series, so one work-page read fills it and repaints in place, offline
   stays quiet, the answer is remembered, and a signed-in reader borrows the
   action-state page instead of making a second request.
+- `ao3_workwatch_spec.lua` covers the quiet saved-work watch: AO3's chapter
+  menu (`ol.chapter.index`, the link fallback, a login page), the per-work
+  daily interval, WIP-only planning, the budget and oldest-first order, pruning
+  entries for deleted files, the badge count recomputed from the saved
+  preface, the 404 "gone" answer, stopping at a refusal, the manual run over
+  every WIP, the bell's dot and the Updates screen's rows.
 - `ao3_workupdate_spec.lua` covers saved-work update checks: the chapter
   parser (`3/7`, `3/?`, a bare number), the bounded preface read, the
   comparison and its messages, the WIP rule (unknown total or fewer chapters

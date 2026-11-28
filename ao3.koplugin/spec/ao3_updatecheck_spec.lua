@@ -440,6 +440,11 @@ describe("AO3 background update checks", function()
         UIManager._window_stack = { { widget = {} } }
         plugin:onMenuClosed()
         assert.is_false(plugin.update_timer_armed)
-        assert.are.equal(Ao3.updateTick, cancelled[#cancelled])
+        -- Both background timers leave with the menu.
+        local cancelled_update = false
+        for _, action in ipairs(cancelled) do
+            if action == Ao3.updateTick then cancelled_update = true end
+        end
+        assert.is_true(cancelled_update)
     end)
 end)

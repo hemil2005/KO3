@@ -2,11 +2,12 @@
 Reader preferences that belong to the app, not to a session.
 
 They live in their own settings file so Log out (which deletes
-`settings/ao3.lua`) cannot take the reader's display choices with it. Four
+`settings/ao3.lua`) cannot take the reader's display choices with it. Five
 kinds of choice are stored here: how the app looks (booleans, plus the one
 card-design enum), the fandoms the reader pinned to the landing page
-(`favourites`), the saved work they opened last, and how often the app may ask
-about updates (timestamps and a dismissed version). None of them identifies
+(`favourites`), the saved work they opened last, how often the app may ask
+about updates (timestamps and a dismissed version), and what the quiet update
+check has seen for each saved work (`work_checks`). None of them identifies
 the reader; that stays in the session file.
 ]]
 
@@ -27,6 +28,11 @@ local Preferences = {}
 -- `last_read_path` and `last_read_title` are the saved copy the reader opened
 -- most recently. They are a reading fact, not a session, so logging out keeps
 -- the Continue reading row on the landing page.
+--
+-- `work_checks` is the quiet update check's memory: one entry per saved work
+-- id, `{ ts = last check, chapters = live count, gone = true }`. It is a local
+-- fact about files on the device, so it survives Log out too, and
+-- `updates_seen_ts` is when the reader last opened the notifications list.
 local DEFAULTS = {
     tags_expanded = false,
     card_style = "modern",
@@ -39,6 +45,8 @@ local DEFAULTS = {
     dismissed_version = "",
     last_read_path = "",
     last_read_title = "",
+    work_checks = {},
+    updates_seen_ts = 0,
 }
 
 local CARD_STYLES = {
@@ -50,6 +58,10 @@ local CARD_STYLES = {
 -- tile; keeping twelve means the full list still fits a couple of pages.
 local FAVOURITES_MAX = 12
 Preferences.MAX_FAVOURITES = FAVOURITES_MAX
+
+-- Enough for a shelf far larger than a Kindle keeps; the oldest entry is
+-- dropped first, and an entry dies with its saved file anyway.
+local MAX_WORK_CHECKS = 500
 
 local function trim(value)
     return (value:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -111,6 +123,43 @@ function Preferences.timestamp(value)
     return math.floor(number)
 end
 
+-- One rule for the quiet update check's memory, shared by load, save and the
+-- notifications screen: a key is a work id, a value is a timestamp plus either
+-- the live chapter count or the "AO3 no longer serves it" flag. Anything else
+-- is dropped, so a hand-edited file cannot crash a check or invent a badge.
+-- Entries are capped to the most recent ones so the file stays small.
+function Preferences.workChecks(value)
+    local checks = {}
+    if type(value) ~= "table" then return checks end
+    local list = {}
+    for id, entry in pairs(value) do
+        local key = favouriteString(id)
+        if key and key:match("^%d+$") and type(entry) == "table" then
+            local ts = Preferences.timestamp(entry.ts)
+            local gone = entry.gone == true
+            local chapters = math.floor(tonumber(entry.chapters) or 0)
+            if ts > 0 and (gone or chapters > 0) then
+                list[#list + 1] = {
+                    id = key,
+                    ts = ts,
+                    chapters = gone and nil or chapters,
+                    gone = gone,
+                }
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.ts > b.ts end)
+    for i = 1, math.min(#list, MAX_WORK_CHECKS) do
+        local entry = list[i]
+        checks[entry.id] = {
+            ts = entry.ts,
+            chapters = entry.chapters,
+            gone = entry.gone,
+        }
+    end
+    return checks
+end
+
 function Preferences.path()
     local ok, dir = pcall(function() return DataStorage:getSettingsDir() end)
     if not ok or not dir then
@@ -154,6 +203,9 @@ function Preferences.load(path)
     if type(last_title) == "string" then
         prefs.last_read_title = last_title
     end
+    prefs.work_checks = Preferences.workChecks(settings:readSetting("work_checks"))
+    prefs.updates_seen_ts = Preferences.timestamp(
+        settings:readSetting("updates_seen_ts"))
     return prefs
 end
 
@@ -180,6 +232,10 @@ function Preferences.save(prefs, path)
     settings:saveSetting("last_read_title",
         type(prefs and prefs.last_read_title) == "string"
             and prefs.last_read_title or "")
+    settings:saveSetting("work_checks",
+        Preferences.workChecks(prefs and prefs.work_checks))
+    settings:saveSetting("updates_seen_ts",
+        Preferences.timestamp(prefs and prefs.updates_seen_ts))
     settings:flush()
     return true
 end

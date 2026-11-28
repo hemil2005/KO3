@@ -939,13 +939,17 @@ describe("AO3 browser", function()
             local ok, err = pcall(function()
                 local menu = open_home()
 
-                -- The gear sits in the masthead row, at the right edge.
+                -- The masthead ends with two controls: the bell, then the
+                -- gear at the right edge.
+                local controls = {}
                 local gear
                 local function walk(widget)
-                    if widget.onTap then gear = gear or widget end
+                    if widget.onTap then controls[#controls + 1] = widget end
                     for _, child in ipairs(widget) do walk(child) end
                 end
                 walk(menu.item_group[1])
+                assert.are.equal(2, #controls)
+                gear = controls[#controls]
                 assert.is_truthy(gear)
 
                 gear.onTap()
