@@ -639,6 +639,16 @@ describe("AO3 browser", function()
             assert.is_truthy(loaded.addToMainMenu)
             disable_plugins()
         end)
+
+        it("keeps the name the App Store reads instead of fullname", function()
+            -- KOReader displays `fullname` and ignores `name`; the KOReader
+            -- App Store reads only `name` and falls back to the directory
+            -- name. Without it the store calls the plugin "ao3" (the folder
+            -- is ao3.koplugin) and refuses to overwrite it with "KO3".
+            local meta = dofile("plugins/ao3.koplugin/_meta.lua")
+            assert.are.equal("KO3", meta.name)
+            assert.are.equal("KO3", meta.fullname)
+        end)
     end)
 
     describe("embedded fandom data", function()

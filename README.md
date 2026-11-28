@@ -88,7 +88,9 @@ embedded browser, no rendered website.
 
 That is the only manual install. Later versions arrive through **Update KO3**
 inside the plugin, with a SHA-256 check and a **Restore previous version**
-escape hatch. The full folder layout is in
+escape hatch. KO3 is also listed in the KOReader App Store
+(**Tools → App Store → Plugins**), which installs the latest release and
+tracks updates there. The full folder layout is in
 [Development](docs/DEVELOPMENT.md#repository-layout).
 
 ## Limits

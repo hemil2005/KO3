@@ -238,6 +238,18 @@ Working rules for agents changing KO3 (an AO3 browser for KOReader).
   tracker before the log is attached, and the saved bundle is the fallback
   when neither the relay nor a maintainer token is reachable.
 
+## App Store
+
+- Listing is discovery, not submission: the KOReader App Store searches the
+  GitHub topic `koreader-plugin` (plus repositories named `*.koplugin`), so
+  keep the topic, the root `README.md` and a versioned, non-prerelease release
+  whose zip roots at `ao3.koplugin/`.
+- `_meta.lua` keeps `name = "KO3"` even though KOReader ignores it and logs it
+  as deprecated. The store names an installed plugin from `_meta.name` and
+  falls back to the folder, so without it `ao3.koplugin` becomes "ao3" in the
+  installed list; its overwrite guard then compares "ao3" with the archive's
+  "KO3" and refuses updates. Keep `name` in step with `fullname`.
+
 ## Updates
 
 - Releases come from `.github/workflows/release.yml`: a versioned zip plus a

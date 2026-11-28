@@ -259,6 +259,13 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   prompt appears only when the plugin menu is the top window (never over the
   reader), and Update, Remind later, Dismiss and Changelog each keep their own
   state. Captured in `screenshots/48`–`49`.
+- The KOReader App Store: discovery is GitHub's `koreader-plugin` topic — the
+  search API returns KO3 for the store's own query — plus the release asset
+  and root README. The store names an installed plugin from `_meta.name`,
+  never `fullname`, and reuses that name as its overwrite guard, so with only
+  `fullname` it called the plugin "ao3" (the folder) and would refuse to
+  update it with "KO3". `_meta.lua` therefore carries `name = "KO3"` beside
+  `fullname`; KOReader ignores the field and logs it as deprecated.
 - Bug reports: query stripping, consent-gated log inclusion, report bundle
   writing, relay submission and token handling; the four screens render in
   the emulator (`screenshots/31`–`33`, `36`). The relay was tested live end
@@ -274,7 +281,7 @@ Tested in the KOReader emulator with a native HTTP client (no browser):
   downgrade, a stalled transfer resumed with a Range request, the retry budget,
   and the codeload source archive installing a real 3.7 MB tree on the
   emulator when the asset CDN is unreachable.
-- The offline `busted` suite: 551 tests passing across parser, navigation,
+- The offline `busted` suite: 552 tests passing across parser, navigation,
   bounded-index, rendered-card interaction (including the symbol grid, the tag
   fold and its tap path), reader preferences, old-build compatibility,
   author-page, work-page, account-screen, home-page, reader-hook, updater,
