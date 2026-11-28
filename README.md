@@ -20,7 +20,7 @@ embedded browser, no rendered website.
 
 <p align="center"><sub>Home → works → filters → details → updates. Captured from KOReader's 600 × 800 emulator.</sub></p>
 
-<p align="center"><strong><a href="https://github.com/hemil2005/KO3/releases/latest">Download the latest release →</a></strong></p>
+<p align="center"><strong><a href="https://github.com/hemil2005/KO3/releases/latest">Download the latest release →</a></strong> · <a href="https://hemil2005.github.io/ko3-site/">Website</a></p>
 
 <p align="center"><sub>Unofficial. Not affiliated with or endorsed by the OTW.</sub></p>
 
