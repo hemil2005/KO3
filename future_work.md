@@ -5,7 +5,7 @@ Planned improvements and feature ideas for KO3, aligned with the native-widget, 
 ## Improvements to Existing Features
 
 ### Reader "Work details" from the reader
-- **Problem:** Finishing a work leaves the reader with **Back to AO3**, which returns to the listing or Downloads it was opened from, not that work's **Work details**. The landing page's **Continue reading** row reopens the copy, but leaving kudos, a bookmark or a subscription still takes a trip through the listing.
+- **Problem:** Finishing a work leaves the reader with **Back to KO3**, which returns to the listing or Downloads it was opened from, not that work's **Work details**. The landing page's **Continue reading** row reopens the copy, but leaving kudos, a bookmark or a subscription still takes a trip through the listing.
 - **Idea:** Record the work ID alongside the active reader path and add **Work details** to the reader menu and end-of-document dialog, jumping straight to `openWorkDetails(id)`.
 
 ### Settings cache info

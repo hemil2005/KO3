@@ -4935,7 +4935,7 @@ function Ao3:installReaderHooks(reader)
             name = "ao3_back_to_browser",
             addToMainMenu = function(widget, menu_items)
                 menu_items.ao3_back_to_browser = {
-                    text = _("Back to AO3"),
+                    text = _("Back to KO3"),
                     sorting_hint = "navi",
                     callback = function()
                         if reader.menu and reader.menu.onCloseReaderMenu then
@@ -4962,7 +4962,7 @@ function Ao3:installReaderHooks(reader)
                     and not dialog.ao3_back_added then
                 dialog.ao3_back_added = true
                 dialog.buttons[#dialog.buttons + 1] = {{
-                    text = _("Back to AO3"),
+                    text = _("Back to KO3"),
                     callback = function()
                         UIManager:close(dialog)
                         backToPlugin()
